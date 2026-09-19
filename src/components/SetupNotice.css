@@ -1,0 +1,33 @@
+.setup-notice {
+  display: flex;
+  justify-content: center;
+  padding: 80px 20px;
+}
+
+.setup-notice-box {
+  max-width: 520px;
+  text-align: center;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+}
+
+.setup-notice-box h2 {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+.setup-notice-box p {
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+  line-height: 1.7;
+}
+
+.setup-notice-box code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12.5px;
+}

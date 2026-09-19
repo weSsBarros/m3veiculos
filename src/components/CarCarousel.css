@@ -1,0 +1,48 @@
+.carousel-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.carousel-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.carousel-controls button:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.car-carousel-track {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.car-carousel-track::-webkit-scrollbar {
+  display: none;
+}
+
+.car-carousel-item {
+  flex: 0 0 auto;
+  width: 280px;
+  scroll-snap-align: start;
+}
+
+@media (max-width: 600px) {
+  .car-carousel-item {
+    width: 240px;
+  }
+}

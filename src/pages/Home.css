@@ -1,0 +1,27 @@
+.home-empty {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.trust-strip {
+  background: var(--color-bg-alt);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  padding: 20px 0;
+}
+
+.trust-strip-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--color-primary);
+  text-align: center;
+}
+
+.trust-strip-inner p {
+  font-weight: 700;
+  font-size: 14px;
+}

@@ -1,0 +1,45 @@
+.topbar {
+  background: var(--color-black);
+  color: #fff;
+  overflow: hidden;
+  white-space: nowrap;
+  height: 38px;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-track {
+  display: inline-flex;
+  align-items: center;
+  animation: topbar-scroll 22s linear infinite;
+}
+
+.topbar-item {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0 28px;
+  position: relative;
+}
+
+.topbar-item::after {
+  content: '•';
+  position: absolute;
+  right: -3px;
+  color: var(--color-primary-vivid);
+}
+
+@keyframes topbar-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-track {
+    animation: none;
+  }
+}
