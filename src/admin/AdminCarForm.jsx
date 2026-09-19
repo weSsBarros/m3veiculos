@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, Trash2 } from 'lucide-react'
+import { ChevronLeft, Trash2, Receipt } from 'lucide-react'
 import { fetchCarById, createCar, updateCar, deleteCar } from '../lib/carsApi.js'
 import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS } from '../utils/carFormat.js'
 import ImageUploader from './ImageUploader.jsx'
@@ -27,6 +27,8 @@ const EMPTY_CAR = {
   description: '',
   images: [],
   featured: false,
+  purchasePrice: '',
+  purchaseDate: '',
 }
 
 export default function AdminCarForm() {
@@ -69,6 +71,8 @@ export default function AdminCarForm() {
       doors: Number(car.doors),
       price: Number(car.price),
       originalPrice: car.originalPrice ? Number(car.originalPrice) : null,
+      purchasePrice: car.purchasePrice ? Number(car.purchasePrice) : null,
+      purchaseDate: car.purchaseDate || null,
       highlights: highlightsText.split('\n').map((h) => h.trim()).filter(Boolean),
     }
 
@@ -108,9 +112,14 @@ export default function AdminCarForm() {
       <div className="admin-page-head">
         <h1>{isEditing ? 'Editar carro' : 'Novo carro'}</h1>
         {isEditing && (
-          <button type="button" className="btn btn-outline admin-delete-btn" onClick={handleDelete} disabled={saving}>
-            <Trash2 size={15} /> Excluir
-          </button>
+          <div className="admin-row-actions">
+            <Link to={`/admin/carros/${id}/gastos`} className="btn btn-outline">
+              <Receipt size={15} /> Ver gastos
+            </Link>
+            <button type="button" className="btn btn-outline admin-delete-btn" onClick={handleDelete} disabled={saving}>
+              <Trash2 size={15} /> Excluir
+            </button>
+          </div>
         )}
       </div>
 
@@ -226,6 +235,29 @@ export default function AdminCarForm() {
             />
             Destaque na home (aparece em "Carros em destaque")
           </label>
+        </section>
+
+        <section className="admin-form-section">
+          <h2>Custo de aquisição</h2>
+          <p className="admin-form-hint">
+            Usado para calcular o custo total e a margem do carro (junto com os gastos cadastrados em "Ver gastos"). Não aparece no site público.
+          </p>
+          <div className="admin-form-grid">
+            <label>
+              Preço de compra (R$)
+              <input
+                type="number"
+                min="0"
+                value={car.purchasePrice || ''}
+                onChange={(e) => update('purchasePrice', e.target.value)}
+                placeholder="Quanto a loja pagou pelo carro"
+              />
+            </label>
+            <label>
+              Data da compra
+              <input type="date" value={car.purchaseDate || ''} onChange={(e) => update('purchaseDate', e.target.value)} />
+            </label>
+          </div>
         </section>
 
         <section className="admin-form-section">

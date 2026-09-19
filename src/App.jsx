@@ -16,6 +16,8 @@ import AdminGuard from './admin/AdminGuard.jsx'
 import AdminLayout from './admin/AdminLayout.jsx'
 import AdminCarList from './admin/AdminCarList.jsx'
 import AdminCarForm from './admin/AdminCarForm.jsx'
+import AdminCarExpenses from './admin/AdminCarExpenses.jsx'
+import AdminDashboard from './admin/AdminDashboard.jsx'
 
 function ScrollToTop() {
   const { pathname } = useLocation()
@@ -62,8 +64,10 @@ export default function App() {
           }
         >
           <Route index element={<AdminCarList />} />
+          <Route path="financeiro" element={<AdminDashboard />} />
           <Route path="carros/novo" element={<AdminCarForm />} />
           <Route path="carros/:id" element={<AdminCarForm />} />
+          <Route path="carros/:id/gastos" element={<AdminCarExpenses />} />
         </Route>
       </Routes>
     </AuthProvider>

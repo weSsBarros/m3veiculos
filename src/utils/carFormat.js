@@ -16,6 +16,21 @@ export const FUELS = ['Flex', 'Gasolina', 'Diesel', 'Híbrido', 'Elétrico', 'GN
 
 export const CONDITIONS = ['Único dono', 'Segundo dono', 'Terceiro dono ou mais']
 
+export const EXPENSE_CATEGORIES = [
+  { slug: 'mecanica', label: 'Mecânica/Manutenção' },
+  { slug: 'eletrica', label: 'Elétrica' },
+  { slug: 'funilaria', label: 'Funilaria/Pintura' },
+  { slug: 'pneus', label: 'Pneus/Suspensão' },
+  { slug: 'combustivel', label: 'Combustível' },
+  { slug: 'documentacao', label: 'Documentação' },
+  { slug: 'higienizacao', label: 'Higienização/Estética' },
+  { slug: 'outros', label: 'Outros' },
+]
+
+export function expenseCategoryLabel(slug) {
+  return EXPENSE_CATEGORIES.find((c) => c.slug === slug)?.label || slug
+}
+
 export function formatCurrency(value) {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 }

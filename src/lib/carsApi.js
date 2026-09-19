@@ -1,6 +1,13 @@
 import { supabase } from './supabaseClient.js'
 import { slugify } from '../utils/carFormat.js'
 
+// Colunas visíveis para o site público (chave "anon"). "purchase_price" e
+// "purchase_date" (custo de aquisição) ficam de fora — são bloqueadas a nível
+// de coluna no banco (ver supabase/schema.sql), então um `select('*')` aqui
+// causaria erro de permissão. Mantenha esta lista em sincronia com o schema.
+const PUBLIC_COLUMNS =
+  'id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images, featured, created_at, updated_at'
+
 function fromRow(row) {
   return {
     id: row.id,
@@ -25,6 +32,8 @@ function fromRow(row) {
     description: row.description || '',
     images: row.images || [],
     featured: row.featured || false,
+    purchasePrice: row.purchase_price ?? null,
+    purchaseDate: row.purchase_date ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -53,6 +62,8 @@ function toRow(car) {
     description: car.description || '',
     images: car.images || [],
     featured: car.featured || false,
+    purchase_price: car.purchasePrice || null,
+    purchase_date: car.purchaseDate || null,
   }
 }
 
@@ -68,7 +79,7 @@ export async function fetchAvailableCars() {
   requireSupabase()
   const { data, error } = await supabase
     .from('cars')
-    .select('*')
+    .select(PUBLIC_COLUMNS)
     .eq('status', 'disponivel')
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -77,7 +88,7 @@ export async function fetchAvailableCars() {
 
 export async function fetchCarBySlug(slug) {
   requireSupabase()
-  const { data, error } = await supabase.from('cars').select('*').eq('slug', slug).maybeSingle()
+  const { data, error } = await supabase.from('cars').select(PUBLIC_COLUMNS).eq('slug', slug).maybeSingle()
   if (error) throw error
   return data ? fromRow(data) : null
 }
@@ -86,7 +97,7 @@ export async function fetchSimilarCars(car, count = 4) {
   requireSupabase()
   const { data, error } = await supabase
     .from('cars')
-    .select('*')
+    .select(PUBLIC_COLUMNS)
     .eq('status', 'disponivel')
     .eq('category', car.category)
     .neq('id', car.id)
@@ -96,7 +107,7 @@ export async function fetchSimilarCars(car, count = 4) {
 
   const fallback = await supabase
     .from('cars')
-    .select('*')
+    .select(PUBLIC_COLUMNS)
     .eq('status', 'disponivel')
     .neq('id', car.id)
     .limit(count)
