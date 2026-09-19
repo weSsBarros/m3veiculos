@@ -2,8 +2,8 @@
   position: sticky;
   top: 0;
   z-index: 40;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+  background: var(--color-black);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .header-inner {
@@ -39,7 +39,7 @@
 .logo-text {
   font-size: 20px;
   font-weight: 500;
-  color: var(--color-text);
+  color: #fff;
 }
 
 .logo-text strong {
@@ -57,12 +57,12 @@
 }
 
 .nav-desktop > a {
-  color: var(--color-text);
+  color: #fff;
   padding: 6px 0;
 }
 
 .nav-desktop > a:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-vivid);
 }
 
 .nav-dropdown {
@@ -77,13 +77,13 @@
   border: none;
   font: inherit;
   font-weight: 600;
-  color: var(--color-text);
+  color: #fff;
   padding: 6px 0;
 }
 
 .nav-dropdown:hover .nav-dropdown-trigger,
 .nav-dropdown:focus-within .nav-dropdown-trigger {
-  color: var(--color-primary);
+  color: var(--color-primary-vivid);
 }
 
 .nav-dropdown-panel {
@@ -165,19 +165,19 @@
   gap: 6px;
   font-size: 13.5px;
   font-weight: 700;
-  color: var(--color-text);
+  color: #fff;
   white-space: nowrap;
 }
 
 .header-phone:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-vivid);
 }
 
 .header-burger {
   display: none;
   background: none;
   border: none;
-  color: var(--color-text);
+  color: #fff;
   align-items: center;
   justify-content: center;
   padding: 4px;
@@ -217,7 +217,7 @@
     flex-direction: column;
     gap: 4px;
     padding: 14px 20px 24px;
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
     font-weight: 600;
   }
 
@@ -229,7 +229,8 @@
 
   .nav-mobile > a {
     padding: 10px 4px;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
   }
 
   .nav-mobile-label {
@@ -237,7 +238,7 @@
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--color-text-muted);
+    color: rgba(255, 255, 255, 0.55);
     font-weight: 700;
   }
 

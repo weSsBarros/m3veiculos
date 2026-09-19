@@ -29,8 +29,8 @@ export default function Hero() {
 
         <div className="hero-media">
           <img
-            src="/loja/fachada.webp"
-            alt="Fachada da M&3 Veículos"
+            src="/loja/cartao.jpeg"
+            alt="M&3 Veículos"
           />
         </div>
       </div>
