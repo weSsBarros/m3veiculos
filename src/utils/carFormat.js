@@ -1,8 +1,8 @@
 export const CATEGORIES = [
-  { slug: 'suv', label: 'SUV', image: 'https://images.unsplash.com/photo-1658988297153-e173ba9c490d?auto=format&fit=crop&w=800&q=80' },
-  { slug: 'sedan', label: 'Sedan', image: 'https://images.unsplash.com/photo-1774854158646-589f7c712bdc?auto=format&fit=crop&w=800&q=80' },
-  { slug: 'hatch', label: 'Hatch', image: 'https://images.unsplash.com/photo-1605270396307-d00ba5cda1d0?auto=format&fit=crop&w=800&q=80' },
-  { slug: 'picape', label: 'Picape', image: 'https://images.unsplash.com/photo-1598043249911-1122b7faa4f3?auto=format&fit=crop&w=800&q=80' },
+  { slug: 'suv', label: 'SUV', image: '/categorias/suv.webp' },
+  { slug: 'sedan', label: 'Sedan', image: '/categorias/sedan.webp' },
+  { slug: 'hatch', label: 'Hatch', image: '/categorias/hatch.webp' },
+  { slug: 'picape', label: 'Picape', image: '/categorias/picape.webp' },
 ]
 
 export const BRANDS = [
