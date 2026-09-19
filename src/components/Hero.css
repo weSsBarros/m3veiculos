@@ -1,6 +1,6 @@
 .hero {
-  background: linear-gradient(180deg, var(--color-bg-alt) 0%, var(--color-bg) 100%);
-  padding: 48px 0 20px;
+  background: var(--color-black);
+  padding: 56px 0 64px;
 }
 
 .hero-inner {
@@ -16,6 +16,7 @@
   line-height: 1.1;
   letter-spacing: -0.02em;
   margin-bottom: 22px;
+  color: #fff;
 }
 
 .hero-bullets {
@@ -31,7 +32,7 @@
   gap: 10px;
   font-size: 15px;
   font-weight: 600;
-  color: var(--color-text);
+  color: #fff;
 }
 
 .hero-bullets li svg {
@@ -44,6 +45,16 @@
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 26px;
+}
+
+.hero-actions .btn-outline {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.hero-actions .btn-outline:hover {
+  border-color: var(--color-primary-vivid);
+  color: var(--color-primary-vivid);
 }
 
 .hero-perks {
@@ -73,7 +84,8 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   aspect-ratio: 4 / 3;
-  box-shadow: var(--shadow-card-hover);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .hero-media img {
