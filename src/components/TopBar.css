@@ -33,7 +33,7 @@
 .topbar-track {
   display: inline-flex;
   align-items: center;
-  animation: topbar-scroll 30s linear infinite;
+  animation: topbar-scroll 180s linear infinite;
 }
 
 .topbar-item {

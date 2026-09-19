@@ -7,8 +7,10 @@ const MESSAGES = [
   'Consignação, compra e venda',
 ]
 
+const BLOCK = Array(6).fill(MESSAGES).flat()
+
 export default function TopBar() {
-  const items = [...MESSAGES, ...MESSAGES]
+  const items = [...BLOCK, ...BLOCK]
   return (
     <div className="topbar">
       <div className="topbar-track">
