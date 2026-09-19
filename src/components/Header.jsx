@@ -23,7 +23,7 @@ export default function Header() {
             <img src="/logo.jpg" alt="M&3 Veículos" />
           </span>
           <span className="logo-text">
-            M&3 <strong>Veículos</strong>
+            <strong>Veículos</strong>
           </span>
         </Link>
 

@@ -20,8 +20,31 @@
 }
 
 .promo-content {
+  position: relative;
   padding: 20px 40px 20px 0;
   color: #fff;
+  overflow: hidden;
+}
+
+.promo-content::before {
+  content: '';
+  position: absolute;
+  right: -30px;
+  bottom: -30px;
+  width: 260px;
+  height: 260px;
+  background-image: url('/logo.jpg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.promo-content > * {
+  position: relative;
+  z-index: 1;
 }
 
 .promo-content .eyebrow {

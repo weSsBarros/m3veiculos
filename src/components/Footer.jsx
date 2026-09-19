@@ -41,7 +41,7 @@ export default function Footer() {
               <img src="/logo.jpg" alt="M&3 Veículos" />
             </span>
             <span className="logo-text">
-              M&3 <strong>Veículos</strong>
+              <strong>Veículos</strong>
             </span>
           </div>
           <p>Veículos novos e seminovos com procedência garantida. Financiamento, consignação, compra, venda e troca.</p>

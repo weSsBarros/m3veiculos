@@ -22,9 +22,9 @@
 
 .logo-mark {
   display: inline-flex;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
   overflow: hidden;
   flex-shrink: 0;
   background: #000;
@@ -37,7 +37,7 @@
 }
 
 .logo-text {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 500;
   color: var(--color-text);
 }
@@ -200,6 +200,16 @@
 
   .header-inner {
     height: 64px;
+  }
+
+  .logo-mark {
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+  }
+
+  .logo-text {
+    font-size: 17px;
   }
 
   .nav-mobile {
