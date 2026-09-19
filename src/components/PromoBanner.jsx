@@ -8,8 +8,8 @@ export default function PromoBanner() {
       <div className="container promo-banner">
         <div className="promo-media">
           <img
-            src="https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&w=1100&q=80"
-            alt="Mecânico revisando um carro"
+            src="/loja/revisao.png"
+            alt="Carros em revisão na oficina"
             loading="lazy"
           />
         </div>
