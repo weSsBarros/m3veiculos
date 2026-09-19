@@ -27,6 +27,10 @@
   margin-bottom: 48px;
 }
 
+.car-detail-grid > * {
+  min-width: 0;
+}
+
 .car-gallery-main {
   position: relative;
   aspect-ratio: 4 / 3;
@@ -52,6 +56,9 @@
   display: flex;
   gap: 12px;
   margin-top: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
 .car-gallery-thumbs button {
