@@ -90,6 +90,9 @@
   .hero-content h1 {
     font-size: 32px;
   }
+  .hero-break {
+    display: none;
+  }
   .hero-media {
     order: -1;
   }

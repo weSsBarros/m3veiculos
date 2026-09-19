@@ -9,7 +9,7 @@ export default function Hero() {
         <div className="hero-content">
           <h1>
             Encontre o carro novo ou
-            <br /> seminovo certo pra você.
+            <br className="hero-break" /> seminovo certo pra você.
           </h1>
           <ul className="hero-bullets">
             <li><CheckCircle2 size={18} /> Novos e seminovos com procedência garantida</li>
