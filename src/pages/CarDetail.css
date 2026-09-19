@@ -161,10 +161,21 @@
   flex-shrink: 0;
 }
 
+.car-cta-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
 .car-cta {
   font-size: 15.5px;
   padding: 15px 20px;
-  margin-bottom: 14px;
+}
+
+.car-cta-secondary {
+  font-size: 14px;
+  padding: 12px 20px;
 }
 
 .car-trade-badge {

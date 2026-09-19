@@ -21,7 +21,9 @@ O site busca os carros de um banco de dados Supabase — sem isso, tanto o site 
    ```
    VITE_SUPABASE_URL=https://SEU-PROJETO.supabase.co
    VITE_SUPABASE_ANON_KEY=sua-chave-anon-public
+   VITE_SITE_URL=https://dominio-onde-o-site-esta-publicado.com
    ```
+   O `VITE_SITE_URL` é usado nos links de WhatsApp (para montar a URL completa do anúncio) e na geração dos previews por carro (passo abaixo). Sem domínio próprio ainda, use a URL temporária da hospedagem.
 5. **Crie o usuário admin**: no painel do Supabase, vá em *Authentication → Users → Add user → Create new user*, informe o e-mail e senha que o cliente vai usar para entrar em `/admin`. Marque a opção para já confirmar o e-mail automaticamente (ou desative a confirmação por e-mail em *Authentication → Settings*).
 6. Rode `npm install && npm run dev` e acesse `/admin` para logar.
 
@@ -52,7 +54,8 @@ npm run dev
 - `src/utils/carFormat.js` — formatação de preço/parcelas e listas fixas (categorias, marcas, câmbios, combustíveis).
 - `src/components/` — componentes do site público (header, footer, cards, carrossel, FAQ etc.).
 - `src/pages/` — páginas públicas: Home, Estoque (com filtros), Detalhe do carro, Sobre e Contato.
-- `src/utils/whatsapp.js` — número de WhatsApp e helpers para montar os links de contato.
+- `src/utils/whatsapp.js` — número de WhatsApp e helpers para montar os links de contato (mensagem já vem com dados do carro e link do anúncio).
+- `scripts/prerender-og.mjs` — roda automaticamente depois do `npm run build` (`postbuild`). Busca os carros disponíveis no Supabase e gera uma página estática por carro (`dist/carro/<slug>/index.html`) com título, descrição e imagem específicos — é isso que faz o link do carro aparecer com foto/preço quando colado no WhatsApp, Instagram etc. Se o `.env` não tiver `VITE_SUPABASE_*`/`VITE_SITE_URL` preenchidos, o script pula essa etapa sem quebrar o build.
 
 ## Antes de publicar
 
@@ -60,3 +63,4 @@ npm run dev
 - Preencha o endereço da loja e o CNPJ real em `src/components/Footer.jsx` e `src/pages/Contact.jsx` (estão marcados com `[...]`).
 - Confirme o e-mail de contato (`contato@m3veiculos.com.br`) e os números de WhatsApp em `src/utils/whatsapp.js`, `src/components/Header.jsx`, `src/components/Footer.jsx` e `src/pages/Contact.jsx`.
 - Crie o(s) usuário(s) do painel admin no Supabase Auth com o e-mail real do cliente (e peça para ele trocar a senha depois, em *Authentication → Users*).
+- Quando o domínio definitivo estiver no ar, atualize `VITE_SITE_URL` no `.env` e gere um novo build — os links de WhatsApp e os previews por carro usam esse valor.

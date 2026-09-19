@@ -1,3 +1,5 @@
+import { formatCurrency, estimateInstallment } from './carFormat.js'
+
 export const WHATSAPP_NUMBER = '5598981893675'
 
 export function whatsappLink(message) {
@@ -5,8 +7,32 @@ export function whatsappLink(message) {
   return `https://wa.me/${WHATSAPP_NUMBER}?text=${text}`
 }
 
+export function carPageUrl(car) {
+  const base = import.meta.env.VITE_SITE_URL || window.location.origin
+  return `${base}/carro/${car.slug}`
+}
+
 export function whatsappLinkForCar(car) {
-  return whatsappLink(
-    `Olá! Tenho interesse no ${car.brand} ${car.model} ${car.version} (${car.year}) que vi no site da M&3 Veículos.`
-  )
+  const message = [
+    'Olá! Tenho interesse neste carro que vi no site da M&3 Veículos:',
+    '',
+    `${car.brand} ${car.model} ${car.version} (${car.modelYear})`,
+    `Preço: ${formatCurrency(car.price)}`,
+    `${car.km.toLocaleString('pt-BR')} km · ${car.transmission} · ${car.color}`,
+    '',
+    carPageUrl(car),
+  ].join('\n')
+  return whatsappLink(message)
+}
+
+export function whatsappLinkForFinancing(car) {
+  const message = [
+    'Olá! Quero simular o financiamento deste carro:',
+    '',
+    `${car.brand} ${car.model} ${car.version} (${car.modelYear})`,
+    `Preço: ${formatCurrency(car.price)} — ou em até 48x de ${estimateInstallment(car.price)}`,
+    '',
+    carPageUrl(car),
+  ].join('\n')
+  return whatsappLink(message)
 }

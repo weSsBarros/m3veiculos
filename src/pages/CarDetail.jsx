@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ShieldCheck, Wrench, FileCheck2, UserCheck, ChevronRight, MessageCircle, Repeat } from 'lucide-react'
+import { ShieldCheck, Wrench, FileCheck2, UserCheck, ChevronRight, MessageCircle, Repeat, Wallet } from 'lucide-react'
 import { fetchCarBySlug, fetchSimilarCars } from '../lib/carsApi.js'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
 import { formatCurrency, estimateInstallment, discountPercent } from '../utils/carFormat.js'
-import { whatsappLinkForCar } from '../utils/whatsapp.js'
+import { whatsappLinkForCar, whatsappLinkForFinancing } from '../utils/whatsapp.js'
 import CarCarousel from '../components/CarCarousel.jsx'
 import SetupNotice from '../components/SetupNotice.jsx'
 import './CarDetail.css'
@@ -52,6 +52,14 @@ export default function CarDetail() {
       cancelled = true
     }
   }, [slug])
+
+  useEffect(() => {
+    if (!car) return
+    document.title = `${car.brand} ${car.model} ${car.version} — ${formatCurrency(car.price)} | M&3 Veículos`
+    return () => {
+      document.title = 'M&3 Veículos | Novos e seminovos'
+    }
+  }, [car])
 
   if (!isSupabaseConfigured) return <SetupNotice />
 
@@ -159,14 +167,24 @@ export default function CarDetail() {
             {isSold ? (
               <Link to="/estoque" className="btn btn-dark btn-block car-cta">Ver carros disponíveis</Link>
             ) : (
-              <a
-                href={whatsappLinkForCar(car)}
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-whatsapp btn-block car-cta"
-              >
-                <MessageCircle size={19} /> Falar no WhatsApp sobre este carro
-              </a>
+              <div className="car-cta-group">
+                <a
+                  href={whatsappLinkForCar(car)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-whatsapp btn-block car-cta"
+                >
+                  <MessageCircle size={19} /> Falar no WhatsApp sobre este carro
+                </a>
+                <a
+                  href={whatsappLinkForFinancing(car)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-outline btn-block car-cta-secondary"
+                >
+                  <Wallet size={17} /> Simular financiamento
+                </a>
+              </div>
             )}
 
             {!isSold && (
