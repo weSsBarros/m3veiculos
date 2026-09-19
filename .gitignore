@@ -13,6 +13,8 @@ dist-ssr
 *.local
 .env
 .env.*
+m3veiculos-build/
+m3veiculos-build.zip
 
 # Editor directories and files
 .vscode/*
