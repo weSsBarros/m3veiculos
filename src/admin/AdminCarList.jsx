@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Trash2, RefreshCcw } from 'lucide-react'
-import { fetchAllCarsAdmin, updateCarStatus, deleteCar } from '../lib/carsApi.js'
+import { Pencil, Trash2, RefreshCcw, Star } from 'lucide-react'
+import { fetchAllCarsAdmin, updateCarStatus, updateCarFeatured, deleteCar } from '../lib/carsApi.js'
 import { formatCurrency } from '../utils/carFormat.js'
 import './admin.css'
 
@@ -36,6 +36,18 @@ export default function AdminCarList() {
       setCars((prev) => prev.map((c) => (c.id === car.id ? { ...c, status: nextStatus } : c)))
     } catch (err) {
       alert('Não foi possível atualizar o status: ' + err.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function toggleFeatured(car) {
+    setBusyId(car.id)
+    try {
+      await updateCarFeatured(car.id, !car.featured)
+      setCars((prev) => prev.map((c) => (c.id === car.id ? { ...c, featured: !c.featured } : c)))
+    } catch (err) {
+      alert('Não foi possível atualizar o destaque: ' + err.message)
     } finally {
       setBusyId(null)
     }
@@ -116,6 +128,16 @@ export default function AdminCarList() {
                   </td>
                   <td>
                     <div className="admin-row-actions">
+                      <button
+                        type="button"
+                        className={`admin-icon-btn ${car.featured ? 'is-featured' : ''}`}
+                        aria-label={car.featured ? 'Remover destaque' : 'Marcar como destaque'}
+                        title={car.featured ? 'Remover destaque' : 'Marcar como destaque'}
+                        onClick={() => toggleFeatured(car)}
+                        disabled={busyId === car.id}
+                      >
+                        <Star size={16} fill={car.featured ? 'currentColor' : 'none'} />
+                      </button>
                       <Link to={`/admin/carros/${car.id}`} className="admin-icon-btn" aria-label="Editar">
                         <Pencil size={16} />
                       </Link>

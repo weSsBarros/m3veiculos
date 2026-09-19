@@ -26,13 +26,17 @@ create table if not exists public.cars (
   highlights text[] not null default '{}',
   description text not null default '',
   images jsonb not null default '[]',
+  featured boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+alter table public.cars add column if not exists featured boolean not null default false;
+
 create index if not exists cars_status_idx on public.cars (status);
 create index if not exists cars_category_idx on public.cars (category);
 create index if not exists cars_brand_idx on public.cars (brand);
+create index if not exists cars_featured_idx on public.cars (featured);
 create index if not exists cars_slug_idx on public.cars (slug);
 
 -- mantém updated_at em dia automaticamente

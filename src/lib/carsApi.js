@@ -24,6 +24,7 @@ function fromRow(row) {
     highlights: row.highlights || [],
     description: row.description || '',
     images: row.images || [],
+    featured: row.featured || false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -51,6 +52,7 @@ function toRow(car) {
     highlights: car.highlights || [],
     description: car.description || '',
     images: car.images || [],
+    featured: car.featured || false,
   }
 }
 
@@ -155,6 +157,13 @@ export async function updateCar(id, car) {
 export async function updateCarStatus(id, status) {
   requireSupabase()
   const { data, error } = await supabase.from('cars').update({ status }).eq('id', id).select().single()
+  if (error) throw error
+  return fromRow(data)
+}
+
+export async function updateCarFeatured(id, featured) {
+  requireSupabase()
+  const { data, error } = await supabase.from('cars').update({ featured }).eq('id', id).select().single()
   if (error) throw error
   return fromRow(data)
 }

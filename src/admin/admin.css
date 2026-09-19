@@ -370,6 +370,12 @@
   color: var(--color-danger);
 }
 
+.admin-icon-btn.is-featured {
+  border-color: #f5a623;
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.1);
+}
+
 /* Form */
 
 .admin-back-link {
@@ -450,6 +456,21 @@
 .admin-form select:focus,
 .admin-form textarea:focus {
   border-color: var(--color-primary);
+}
+
+.admin-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  margin-top: 16px;
+  cursor: pointer;
+}
+
+.admin-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
 }
 
 .admin-form-actions {

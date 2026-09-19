@@ -26,6 +26,7 @@ const EMPTY_CAR = {
   highlights: [],
   description: '',
   images: [],
+  featured: false,
 }
 
 export default function AdminCarForm() {
@@ -216,6 +217,15 @@ export default function AdminCarForm() {
               </select>
             </label>
           </div>
+
+          <label className="admin-checkbox">
+            <input
+              type="checkbox"
+              checked={car.featured}
+              onChange={(e) => update('featured', e.target.checked)}
+            />
+            Destaque na home (aparece em "Carros em destaque")
+          </label>
         </section>
 
         <section className="admin-form-section">

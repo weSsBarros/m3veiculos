@@ -14,7 +14,7 @@ export default function Home() {
 
   if (error === 'not-configured') return <SetupNotice />
 
-  const destaques = cars.filter((c) => c.originalPrice).slice(0, 8)
+  const destaques = cars.filter((c) => c.featured).slice(0, 8)
   const novidades = [...cars].slice(0, 8)
 
   return (
