@@ -74,8 +74,8 @@ export default function Footer() {
 
         <div className="footer-col">
           <h4>Precisa de atendimento?</h4>
-          <p className="footer-hours">Seg. a sex. — 09h às 18h</p>
-          <p className="footer-hours">Sáb. — 09h às 12h</p>
+          <p className="footer-hours">Seg. a sex. — 08h às 18h</p>
+          <p className="footer-hours">Sáb. — 08h às 14h</p>
           <p><strong>WhatsApp:</strong> (98) 98189-3675</p>
           <p><strong>WhatsApp:</strong> (98) 98888-6144</p>
           <p><strong>E-mail:</strong> contato@m3veiculos.com.br</p>

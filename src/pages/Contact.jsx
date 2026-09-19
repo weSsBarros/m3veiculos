@@ -52,8 +52,8 @@ export default function Contact() {
               <Clock size={20} />
               <div>
                 <strong>Horário</strong>
-                <p>Segunda a sexta, 9h às 18h</p>
-                <p>Sábado, 9h às 12h</p>
+                <p>Segunda a sexta, 8h às 18h</p>
+                <p>Sábado, 8h às 14h</p>
               </div>
             </div>
           </div>

@@ -38,7 +38,7 @@ export default function FAQ() {
         <div className="faq-head">
           <span className="eyebrow">Dúvidas frequentes</span>
           <h2>Tem alguma dúvida?</h2>
-          <p>Nossa equipe de atendimento está disponível de segunda a sexta, das 9h às 18h, e aos sábados, das 9h às 12h.</p>
+          <p>Nossa equipe de atendimento está disponível de segunda a sexta, das 8h às 18h, e aos sábados, das 8h às 14h.</p>
         </div>
 
         <div className="faq-list">
