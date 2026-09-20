@@ -39,6 +39,10 @@
 html, body {
   margin: 0;
   padding: 0;
+  /* Trava de segurança: nunca deixa a página rolar para os lados, mesmo se
+     algum elemento específico acabar passando da largura da tela. */
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body {

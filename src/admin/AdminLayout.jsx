@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { LayoutGrid, Plus, LogOut, ExternalLink, Wallet } from 'lucide-react'
+import { LayoutGrid, Plus, LogOut, ExternalLink, Wallet, FileText, History } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import './admin.css'
 
@@ -25,6 +25,12 @@ export default function AdminLayout() {
           </NavLink>
           <NavLink to="/admin/financeiro" className={({ isActive }) => (isActive ? 'is-active' : '')}>
             <Wallet size={16} /> Financeiro
+          </NavLink>
+          <NavLink to="/admin/historico" className={({ isActive }) => (isActive ? 'is-active' : '')}>
+            <History size={16} /> Histórico
+          </NavLink>
+          <NavLink to="/admin/contratos" className={({ isActive }) => (isActive ? 'is-active' : '')}>
+            <FileText size={16} /> Contratos
           </NavLink>
         </nav>
 

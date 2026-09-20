@@ -16,6 +16,16 @@ export const FUELS = ['Flex', 'Gasolina', 'Diesel', 'Híbrido', 'Elétrico', 'GN
 
 export const CONDITIONS = ['Único dono', 'Segundo dono', 'Terceiro dono ou mais']
 
+export const CAR_STATUSES = [
+  { value: 'disponivel', label: 'Disponível' },
+  { value: 'manutencao', label: 'Em manutenção' },
+  { value: 'vendido', label: 'Vendido' },
+]
+
+export function carStatusLabel(status) {
+  return CAR_STATUSES.find((s) => s.value === status)?.label || status
+}
+
 export const EXPENSE_CATEGORIES = [
   { slug: 'mecanica', label: 'Mecânica/Manutenção' },
   { slug: 'eletrica', label: 'Elétrica' },

@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw } from 'lucide-react'
+import { RefreshCcw, Download } from 'lucide-react'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
-import { expenseCategoryLabel, formatCurrency } from '../utils/carFormat.js'
+import { expenseCategoryLabel, formatCurrency, carStatusLabel } from '../utils/carFormat.js'
+import { downloadCsv } from '../utils/exportCsv.js'
 import './admin.css'
+
+const ALL_CARS_VALUE = 'todos'
 
 export default function AdminDashboard() {
   const [cars, setCars] = useState([])
   const [expenses, setExpenses] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [exportCarId, setExportCarId] = useState(ALL_CARS_VALUE)
 
   async function load() {
     setLoading(true)
@@ -60,6 +64,31 @@ export default function AdminDashboard() {
     return Object.entries(map).sort((a, b) => b[1] - a[1])
   }, [expenses])
 
+  const carsById = useMemo(() => {
+    const map = {}
+    for (const c of cars) map[c.id] = c
+    return map
+  }, [cars])
+
+  function handleExportExpenses() {
+    const filtered = exportCarId === ALL_CARS_VALUE ? expenses : expenses.filter((e) => e.carId === exportCarId)
+    if (filtered.length === 0) {
+      alert('Nenhum gasto para exportar.')
+      return
+    }
+    const columns = [
+      { label: 'Carro', value: (e) => { const c = carsById[e.carId]; return c ? `${c.brand} ${c.model}` : '—' } },
+      { label: 'Data', value: (e) => e.expenseDate },
+      { label: 'Categoria', value: (e) => expenseCategoryLabel(e.category) },
+      { label: 'Descrição', value: (e) => e.description },
+      { label: 'Valor (R$)', value: (e) => e.amount },
+    ]
+    const filename = exportCarId === ALL_CARS_VALUE
+      ? 'gastos-todos-os-carros.csv'
+      : `gastos-${(carsById[exportCarId]?.brand || '')}-${(carsById[exportCarId]?.model || '')}`.toLowerCase().replace(/\s+/g, '-') + '.csv'
+    downloadCsv(filename, columns, filtered)
+  }
+
   if (loading) return <p className="admin-muted">Carregando…</p>
 
   return (
@@ -69,9 +98,25 @@ export default function AdminDashboard() {
           <h1>Financeiro</h1>
           <p>Visão consolidada de custo e margem do estoque</p>
         </div>
-        <button type="button" className="btn btn-outline" onClick={load}>
-          <RefreshCcw size={15} /> Atualizar
-        </button>
+        <div className="admin-row-actions">
+          <select
+            className="admin-export-select"
+            value={exportCarId}
+            onChange={(e) => setExportCarId(e.target.value)}
+            aria-label="Carro para exportar"
+          >
+            <option value={ALL_CARS_VALUE}>Todos os carros</option>
+            {cars.map((c) => (
+              <option key={c.id} value={c.id}>{c.brand} {c.model}</option>
+            ))}
+          </select>
+          <button type="button" className="btn btn-outline" onClick={handleExportExpenses}>
+            <Download size={15} /> Exportar gastos (CSV)
+          </button>
+          <button type="button" className="btn btn-outline" onClick={load}>
+            <RefreshCcw size={15} /> Atualizar
+          </button>
+        </div>
       </div>
 
       {error && <p className="admin-error">{error}</p>}
@@ -132,7 +177,7 @@ export default function AdminDashboard() {
                       <strong>{car.brand} {car.model}</strong>
                       <span className="admin-table-sub">{car.version}</span>
                     </td>
-                    <td>{car.status === 'disponivel' ? 'Disponível' : 'Vendido'}</td>
+                    <td>{carStatusLabel(car.status)}</td>
                     <td>{formatCurrency(totalCost)}</td>
                     <td>{formatCurrency(car.price)}</td>
                     <td className={margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
@@ -155,8 +200,8 @@ export default function AdminDashboard() {
                     <strong>{car.brand} {car.model}</strong>
                     <span className="admin-table-sub">{car.version}</span>
                   </div>
-                  <span className={`admin-status-toggle ${car.status === 'disponivel' ? 'is-available' : 'is-sold'}`}>
-                    {car.status === 'disponivel' ? 'Disponível' : 'Vendido'}
+                  <span className={`admin-status-toggle status-${car.status}`}>
+                    {carStatusLabel(car.status)}
                   </span>
                 </div>
 

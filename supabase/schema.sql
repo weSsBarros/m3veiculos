@@ -204,3 +204,107 @@ create policy "Authenticated can delete expense attachments"
 on storage.objects for delete
 to authenticated
 using (bucket_id = 'expense-attachments');
+
+-- 6) Ocultar carro do site sem marcar como vendido (reservado, em negociação etc.) -
+-- Diferente de "vendido", um carro oculto some do site mas continua no estoque.
+
+alter table public.cars add column if not exists hidden boolean not null default false;
+create index if not exists cars_hidden_idx on public.cars (hidden);
+
+-- Data em que o carro foi marcado como "vendido" (preenchida automaticamente pelo
+-- painel admin) — alimenta a aba Histórico.
+alter table public.cars add column if not exists sold_at timestamptz;
+
+-- Identificação do veículo (placa, chassi, Renavam), usada para preencher o
+-- contrato de venda automaticamente.
+alter table public.cars add column if not exists plate text;
+alter table public.cars add column if not exists chassis text;
+alter table public.cars add column if not exists renavam text;
+
+-- Documentos anexados ao carro (CRLV, laudo cautelar, nota fiscal etc.) — mesmo
+-- padrão de car_expenses.attachments, guardado como jsonb de {path, name, type}.
+alter table public.cars add column if not exists documents jsonb not null default '[]';
+
+-- 7) Storage: bucket PRIVADO para documentos dos carros ----------------------
+-- Igual ao "expense-attachments": só o painel admin (authenticated) acessa,
+-- nunca fica público.
+
+insert into storage.buckets (id, name, public)
+values ('car-documents', 'car-documents', false)
+on conflict (id) do nothing;
+
+drop policy if exists "Authenticated can view car documents" on storage.objects;
+create policy "Authenticated can view car documents"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'car-documents');
+
+drop policy if exists "Authenticated can upload car documents" on storage.objects;
+create policy "Authenticated can upload car documents"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'car-documents');
+
+drop policy if exists "Authenticated can delete car documents" on storage.objects;
+create policy "Authenticated can delete car documents"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'car-documents');
+
+-- 8) Contratos de venda gerados pelo painel -----------------------------------
+-- Guarda um "retrato" (snapshot) dos dados da empresa, do comprador e do veículo
+-- no momento em que o contrato foi gerado — assim, editar ou apagar o carro depois
+-- não altera contratos já emitidos. Só acessível pelo painel admin.
+
+create table if not exists public.contracts (
+  id uuid primary key default gen_random_uuid(),
+  car_id uuid references public.cars(id) on delete set null,
+  company_name text not null,
+  company_document text not null,
+  company_address text not null default '',
+  company_phone text not null default '',
+  company_email text not null default '',
+  buyer_name text not null,
+  buyer_document text not null,
+  buyer_rg text not null default '',
+  buyer_address text not null default '',
+  buyer_phone text not null default '',
+  buyer_email text not null default '',
+  vehicle_snapshot jsonb not null default '{}',
+  sale_price integer not null,
+  payment_method text not null default '',
+  payment_details text not null default '',
+  sale_date date not null default current_date,
+  sale_city text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists contracts_car_id_idx on public.contracts (car_id);
+
+alter table public.contracts enable row level security;
+
+drop policy if exists "Authenticated can read contracts" on public.contracts;
+create policy "Authenticated can read contracts"
+on public.contracts for select
+to authenticated
+using (true);
+
+drop policy if exists "Authenticated can insert contracts" on public.contracts;
+create policy "Authenticated can insert contracts"
+on public.contracts for insert
+to authenticated
+with check (true);
+
+drop policy if exists "Authenticated can delete contracts" on public.contracts;
+create policy "Authenticated can delete contracts"
+on public.contracts for delete
+to authenticated
+using (true);
+
+-- 9) Status "em manutenção" — carro fora de venda mas ainda não vendido -----
+-- (retirado de circulação pra reparo/preparação antes de ir pro estoque disponível)
+
+alter table public.cars drop constraint if exists cars_status_check;
+alter table public.cars add constraint cars_status_check
+  check (status in ('disponivel', 'manutencao', 'vendido'));

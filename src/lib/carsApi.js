@@ -31,9 +31,15 @@ function fromRow(row) {
     highlights: row.highlights || [],
     description: row.description || '',
     images: row.images || [],
-    featured: row.featured || false,
     purchasePrice: row.purchase_price ?? null,
     purchaseDate: row.purchase_date ?? null,
+    featured: row.featured || false,
+    hidden: row.hidden || false,
+    soldAt: row.sold_at ?? null,
+    plate: row.plate || '',
+    chassis: row.chassis || '',
+    renavam: row.renavam || '',
+    documents: row.documents || [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -58,12 +64,18 @@ function toRow(car) {
     original_price: car.originalPrice || null,
     badge: car.badge,
     status: car.status,
+    sold_at: car.soldAt || null,
     highlights: car.highlights || [],
     description: car.description || '',
     images: car.images || [],
-    featured: car.featured || false,
     purchase_price: car.purchasePrice || null,
     purchase_date: car.purchaseDate || null,
+    featured: car.featured || false,
+    hidden: car.hidden || false,
+    plate: car.plate || null,
+    chassis: car.chassis || null,
+    renavam: car.renavam || null,
+    documents: car.documents || [],
   }
 }
 
@@ -81,6 +93,7 @@ export async function fetchAvailableCars() {
     .from('cars')
     .select(PUBLIC_COLUMNS)
     .eq('status', 'disponivel')
+    .eq('hidden', false)
     .order('created_at', { ascending: false })
   if (error) throw error
   return data.map(fromRow)
@@ -88,7 +101,13 @@ export async function fetchAvailableCars() {
 
 export async function fetchCarBySlug(slug) {
   requireSupabase()
-  const { data, error } = await supabase.from('cars').select(PUBLIC_COLUMNS).eq('slug', slug).maybeSingle()
+  const { data, error } = await supabase
+    .from('cars')
+    .select(PUBLIC_COLUMNS)
+    .eq('slug', slug)
+    .eq('hidden', false)
+    .neq('status', 'manutencao')
+    .maybeSingle()
   if (error) throw error
   return data ? fromRow(data) : null
 }
@@ -99,6 +118,7 @@ export async function fetchSimilarCars(car, count = 4) {
     .from('cars')
     .select(PUBLIC_COLUMNS)
     .eq('status', 'disponivel')
+    .eq('hidden', false)
     .eq('category', car.category)
     .neq('id', car.id)
     .limit(count)
@@ -109,6 +129,7 @@ export async function fetchSimilarCars(car, count = 4) {
     .from('cars')
     .select(PUBLIC_COLUMNS)
     .eq('status', 'disponivel')
+    .eq('hidden', false)
     .neq('id', car.id)
     .limit(count)
   if (fallback.error) throw fallback.error
@@ -167,7 +188,8 @@ export async function updateCar(id, car) {
 
 export async function updateCarStatus(id, status) {
   requireSupabase()
-  const { data, error } = await supabase.from('cars').update({ status }).eq('id', id).select().single()
+  const soldAt = status === 'vendido' ? new Date().toISOString() : null
+  const { data, error } = await supabase.from('cars').update({ status, sold_at: soldAt }).eq('id', id).select().single()
   if (error) throw error
   return fromRow(data)
 }
@@ -175,6 +197,13 @@ export async function updateCarStatus(id, status) {
 export async function updateCarFeatured(id, featured) {
   requireSupabase()
   const { data, error } = await supabase.from('cars').update({ featured }).eq('id', id).select().single()
+  if (error) throw error
+  return fromRow(data)
+}
+
+export async function updateCarHidden(id, hidden) {
+  requireSupabase()
+  const { data, error } = await supabase.from('cars').update({ hidden }).eq('id', id).select().single()
   if (error) throw error
   return fromRow(data)
 }
@@ -207,4 +236,32 @@ export async function deleteCarImage(url) {
   if (idx === -1) return
   const path = url.slice(idx + marker.length)
   await supabase.storage.from('car-photos').remove([path])
+}
+
+// -- Documentos do carro (Supabase Storage, bucket PRIVADO "car-documents") --
+// Igual aos anexos de gastos: guardamos só o "path" no banco (coluna
+// cars.documents) e geramos um link assinado temporário na hora de abrir.
+
+export async function uploadCarDocument(carId, file) {
+  requireSupabase()
+  const ext = file.name.split('.').pop()
+  const path = `${carId}/${crypto.randomUUID()}.${ext}`
+  const { error } = await supabase.storage.from('car-documents').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+  })
+  if (error) throw error
+  return { path, name: file.name, type: file.type }
+}
+
+export async function deleteCarDocument(path) {
+  requireSupabase()
+  await supabase.storage.from('car-documents').remove([path])
+}
+
+export async function getCarDocumentSignedUrl(path) {
+  requireSupabase()
+  const { data, error } = await supabase.storage.from('car-documents').createSignedUrl(path, 120)
+  if (error) throw error
+  return data.signedUrl
 }

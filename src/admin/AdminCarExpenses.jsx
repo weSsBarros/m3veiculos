@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ChevronLeft, Pencil, Trash2, Paperclip } from 'lucide-react'
+import { ChevronLeft, Pencil, Trash2, Paperclip, Download } from 'lucide-react'
 import { fetchCarById } from '../lib/carsApi.js'
 import {
   fetchExpensesByCar,
@@ -11,7 +11,15 @@ import {
 } from '../lib/expensesApi.js'
 import { EXPENSE_CATEGORIES, expenseCategoryLabel, formatCurrency } from '../utils/carFormat.js'
 import ExpenseAttachmentUploader from './ExpenseAttachmentUploader.jsx'
+import { downloadCsv } from '../utils/exportCsv.js'
 import './admin.css'
+
+const EXPENSE_CSV_COLUMNS = [
+  { label: 'Data', value: (e) => e.expenseDate },
+  { label: 'Categoria', value: (e) => expenseCategoryLabel(e.category) },
+  { label: 'Descrição', value: (e) => e.description },
+  { label: 'Valor (R$)', value: (e) => e.amount },
+]
 
 function emptyExpense() {
   return {
@@ -134,6 +142,11 @@ export default function AdminCarExpenses() {
     }
   }
 
+  function handleExportCsv() {
+    const filename = `gastos-${car.brand}-${car.model}`.toLowerCase().replace(/\s+/g, '-') + '.csv'
+    downloadCsv(filename, EXPENSE_CSV_COLUMNS, expenses)
+  }
+
   if (loading) return <p className="admin-muted">Carregando…</p>
   if (!car) return <p className="admin-error">Carro não encontrado.</p>
 
@@ -148,7 +161,12 @@ export default function AdminCarExpenses() {
           <h1>Gastos — {car.brand} {car.model}</h1>
           <p>{car.version} · {car.modelYear}</p>
         </div>
-        <Link to={`/admin/carros/${id}`} className="btn btn-outline">Editar dados do carro</Link>
+        <div className="admin-row-actions">
+          <button type="button" className="btn btn-outline" onClick={handleExportCsv} disabled={expenses.length === 0}>
+            <Download size={15} /> Exportar CSV
+          </button>
+          <Link to={`/admin/carros/${id}`} className="btn btn-outline">Editar dados do carro</Link>
+        </div>
       </div>
 
       {error && <p className="admin-error">{error}</p>}

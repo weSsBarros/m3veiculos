@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, Trash2, Receipt } from 'lucide-react'
 import { fetchCarById, createCar, updateCar, deleteCar } from '../lib/carsApi.js'
-import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS } from '../utils/carFormat.js'
+import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS, CAR_STATUSES } from '../utils/carFormat.js'
 import ImageUploader from './ImageUploader.jsx'
+import CarDocumentUploader from './CarDocumentUploader.jsx'
 import './admin.css'
 
 const EMPTY_CAR = {
@@ -23,12 +24,18 @@ const EMPTY_CAR = {
   originalPrice: '',
   badge: 'Disponível',
   status: 'disponivel',
+  soldAt: null,
   highlights: [],
   description: '',
   images: [],
-  featured: false,
   purchasePrice: '',
   purchaseDate: '',
+  featured: false,
+  hidden: false,
+  plate: '',
+  chassis: '',
+  renavam: '',
+  documents: [],
 }
 
 export default function AdminCarForm() {
@@ -37,6 +44,7 @@ export default function AdminCarForm() {
   const navigate = useNavigate()
 
   const [car, setCar] = useState(EMPTY_CAR)
+  const [originalStatus, setOriginalStatus] = useState(null)
   const [highlightsText, setHighlightsText] = useState('')
   const [loading, setLoading] = useState(isEditing)
   const [saving, setSaving] = useState(false)
@@ -47,6 +55,7 @@ export default function AdminCarForm() {
     fetchCarById(id).then((found) => {
       if (found) {
         setCar(found)
+        setOriginalStatus(found.status)
         setHighlightsText(found.highlights.join('\n'))
       } else {
         setError('Carro não encontrado.')
@@ -64,6 +73,13 @@ export default function AdminCarForm() {
     setSaving(true)
     setError('')
 
+    let soldAt = car.soldAt || null
+    if (car.status === 'vendido' && originalStatus !== 'vendido') {
+      soldAt = new Date().toISOString()
+    } else if (car.status !== 'vendido') {
+      soldAt = null
+    }
+
     const payload = {
       ...car,
       year: Number(car.year),
@@ -73,6 +89,7 @@ export default function AdminCarForm() {
       originalPrice: car.originalPrice ? Number(car.originalPrice) : null,
       purchasePrice: car.purchasePrice ? Number(car.purchasePrice) : null,
       purchaseDate: car.purchaseDate || null,
+      soldAt,
       highlights: highlightsText.split('\n').map((h) => h.trim()).filter(Boolean),
     }
 
@@ -204,6 +221,27 @@ export default function AdminCarForm() {
         </section>
 
         <section className="admin-form-section">
+          <h2>Identificação do veículo</h2>
+          <p className="admin-form-hint">
+            Usados para preencher o contrato de venda automaticamente. Não aparecem no site público.
+          </p>
+          <div className="admin-form-grid">
+            <label>
+              Placa
+              <input value={car.plate} onChange={(e) => update('plate', e.target.value)} placeholder="Ex: ABC1D23" />
+            </label>
+            <label>
+              Chassi
+              <input value={car.chassis} onChange={(e) => update('chassis', e.target.value)} />
+            </label>
+            <label>
+              Renavam
+              <input value={car.renavam} onChange={(e) => update('renavam', e.target.value)} />
+            </label>
+          </div>
+        </section>
+
+        <section className="admin-form-section">
           <h2>Preço e status</h2>
           <div className="admin-form-grid">
             <label>
@@ -221,8 +259,7 @@ export default function AdminCarForm() {
             <label>
               Status
               <select required value={car.status} onChange={(e) => update('status', e.target.value)}>
-                <option value="disponivel">Disponível</option>
-                <option value="vendido">Vendido</option>
+                {CAR_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
             </label>
           </div>
@@ -234,6 +271,15 @@ export default function AdminCarForm() {
               onChange={(e) => update('featured', e.target.checked)}
             />
             Destaque na home (aparece em "Carros em destaque")
+          </label>
+
+          <label className="admin-checkbox">
+            <input
+              type="checkbox"
+              checked={car.hidden}
+              onChange={(e) => update('hidden', e.target.checked)}
+            />
+            Ocultar do site (some das listagens e da página do carro, sem marcar como vendido)
           </label>
         </section>
 
@@ -270,6 +316,14 @@ export default function AdminCarForm() {
             placeholder={'Revisado na concessionária\nÚnico dono\nIPVA pago'}
           />
         </section>
+
+        {isEditing && (
+          <section className="admin-form-section">
+            <h2>Documentos do carro</h2>
+            <p className="admin-form-hint">CRLV, laudo cautelar, nota fiscal etc. Ficam visíveis só para o painel admin.</p>
+            <CarDocumentUploader carId={id} documents={car.documents} onChange={(documents) => update('documents', documents)} />
+          </section>
+        )}
 
         <section className="admin-form-section">
           <h2>Descrição</h2>

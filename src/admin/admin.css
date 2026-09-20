@@ -1,3 +1,13 @@
+/* Trava geral: <select>/<input>/<textarea> nativos podem se esticar pro
+   tamanho do conteúdo (ex: opção mais longa) e furar o container — nunca
+   deixa passar da largura disponível, em nenhuma tela do admin. */
+.admin-shell select,
+.admin-shell input,
+.admin-shell textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 .admin-boot {
   display: flex;
   align-items: center;
@@ -333,13 +343,54 @@
   cursor: pointer;
 }
 
-.admin-status-toggle.is-available {
+.admin-status-toggle.is-available,
+.admin-status-toggle.status-disponivel {
   background: rgba(28, 155, 86, 0.12);
   color: var(--color-success);
 }
 
-.admin-status-toggle.is-sold {
+.admin-status-toggle.status-manutencao {
+  background: rgba(245, 166, 35, 0.16);
+  color: #b3720a;
+}
+
+.admin-status-toggle.is-sold,
+.admin-status-toggle.status-vendido {
   background: rgba(10, 14, 23, 0.08);
+  color: var(--color-text-muted);
+}
+
+.admin-status-select {
+  appearance: none;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 6px 26px 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 11px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+
+.admin-status-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-status-select.status-disponivel {
+  background-color: rgba(28, 155, 86, 0.12);
+  color: var(--color-success);
+}
+
+.admin-status-select.status-manutencao {
+  background-color: rgba(245, 166, 35, 0.16);
+  color: #b3720a;
+}
+
+.admin-status-select.status-vendido {
+  background-color: rgba(10, 14, 23, 0.08);
   color: var(--color-text-muted);
 }
 
@@ -370,7 +421,8 @@
   color: var(--color-danger);
 }
 
-.admin-icon-btn.is-featured {
+.admin-icon-btn.is-featured,
+.admin-card-actions .is-featured {
   border-color: #f5a623;
   color: #f5a623;
   background: rgba(245, 166, 35, 0.1);
@@ -441,6 +493,8 @@
 .admin-form input,
 .admin-form select,
 .admin-form textarea {
+  width: 100%;
+  max-width: 100%;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
@@ -491,6 +545,11 @@
   .admin-nav {
     order: 3;
     width: 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .admin-topbar-actions {
+    flex-wrap: wrap;
   }
 }
 
@@ -855,6 +914,7 @@
 
 .admin-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid var(--color-border);
@@ -862,29 +922,27 @@
 
 .admin-card-actions a,
 .admin-card-actions button {
-  flex: 1;
+  flex: 1 1 calc(33.333% - 6px);
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 9px;
+  padding: 9px 6px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: #fff;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-card-actions .admin-icon-btn-danger {
   color: var(--color-danger);
   border-color: rgba(224, 57, 44, 0.3);
-}
-
-.admin-card-actions .is-featured {
-  color: #f5a623;
-  border-color: #f5a623;
-  background: rgba(245, 166, 35, 0.1);
 }
 
 @media (max-width: 680px) {
@@ -893,5 +951,163 @@
   }
   .admin-card-list {
     display: flex;
+  }
+}
+
+/* Grupos disponíveis/vendidos, ocultar, exportação, contratos */
+
+.admin-car-group {
+  margin-bottom: 32px;
+}
+
+.admin-search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.admin-search-input {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  background: #fff;
+  color: var(--color-text-muted);
+}
+
+.admin-search-input input {
+  border: none;
+  outline: none;
+  flex: 1;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--color-text);
+  background: transparent;
+}
+
+.admin-search-bar select {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--color-text);
+  background: #fff;
+}
+
+.admin-hidden-badge {
+  display: inline-block;
+  margin-top: 4px;
+  background: rgba(10, 14, 23, 0.08);
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  width: fit-content;
+}
+
+tr.is-hidden-row,
+.admin-card.is-hidden-row {
+  opacity: 0.6;
+}
+
+.admin-icon-btn.is-hidden-toggle,
+.admin-card-actions .is-hidden-toggle {
+  border-color: var(--color-text-muted);
+  color: var(--color-text-muted);
+  background: var(--color-bg-alt);
+}
+
+.admin-export-select {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: #fff;
+}
+
+.history-period-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+
+.history-period-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.history-period-bar select,
+.history-period-bar input {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--color-text);
+  background: #fff;
+}
+
+.history-period-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-primary);
+  padding-bottom: 9px;
+}
+
+.contract-preview {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.contract-preview h3 {
+  font-size: 14px;
+  font-weight: 800;
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.contract-preview p {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--color-text);
+  margin-bottom: 10px;
+  white-space: pre-line;
+}
+
+@media (max-width: 680px) {
+  .admin-page-head {
+    flex-wrap: wrap;
+  }
+  .admin-page-head .admin-row-actions {
+    flex-wrap: wrap;
+  }
+  /* Tabela de contratos não tem versão em card — mantém visível com scroll horizontal */
+  .contract-history-table {
+    display: block !important;
   }
 }
