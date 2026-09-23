@@ -9,7 +9,7 @@ import {
   deleteExpense,
   getAttachmentSignedUrl,
 } from '../lib/expensesApi.js'
-import { EXPENSE_CATEGORIES, expenseCategoryLabel, formatCurrency } from '../utils/carFormat.js'
+import { EXPENSE_CATEGORIES, expenseCategoryLabel, formatCurrency, parseLocaleNumber } from '../utils/carFormat.js'
 import ExpenseAttachmentUploader from './ExpenseAttachmentUploader.jsx'
 import { downloadCsv } from '../utils/exportCsv.js'
 import './admin.css'
@@ -102,7 +102,7 @@ export default function AdminCarExpenses() {
       carId: id,
       category: form.category,
       description: form.description,
-      amount: Number(form.amount),
+      amount: Math.round(parseLocaleNumber(form.amount) || 0),
       expenseDate: form.expenseDate,
       attachments: form.attachments,
     }
@@ -213,7 +213,14 @@ export default function AdminCarExpenses() {
           </label>
           <label>
             Valor (R$)
-            <input type="number" min="0" required value={form.amount} onChange={(e) => update('amount', e.target.value)} />
+            <input
+              type="text"
+              inputMode="decimal"
+              required
+              value={form.amount}
+              onChange={(e) => update('amount', e.target.value)}
+              placeholder="Ex: 1.250"
+            />
           </label>
           <label>
             Data

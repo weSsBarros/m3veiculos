@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, Trash2, Receipt } from 'lucide-react'
 import { fetchCarById, createCar, updateCar, deleteCar } from '../lib/carsApi.js'
-import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS, CAR_STATUSES } from '../utils/carFormat.js'
+import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS, CAR_STATUSES, parseLocaleNumber } from '../utils/carFormat.js'
 import ImageUploader from './ImageUploader.jsx'
 import CarDocumentUploader from './CarDocumentUploader.jsx'
 import './admin.css'
@@ -83,11 +83,11 @@ export default function AdminCarForm() {
     const payload = {
       ...car,
       year: Number(car.year),
-      km: Number(car.km),
+      km: Math.round(parseLocaleNumber(car.km) || 0),
       doors: Number(car.doors),
-      price: Number(car.price),
-      originalPrice: car.originalPrice ? Number(car.originalPrice) : null,
-      purchasePrice: car.purchasePrice ? Number(car.purchasePrice) : null,
+      price: Math.round(parseLocaleNumber(car.price) || 0),
+      originalPrice: car.originalPrice ? Math.round(parseLocaleNumber(car.originalPrice) || 0) : null,
+      purchasePrice: car.purchasePrice ? Math.round(parseLocaleNumber(car.purchasePrice) || 0) : null,
       purchaseDate: car.purchaseDate || null,
       soldAt,
       highlights: highlightsText.split('\n').map((h) => h.trim()).filter(Boolean),
@@ -188,7 +188,14 @@ export default function AdminCarForm() {
             </label>
             <label>
               Quilometragem
-              <input type="number" min="0" required value={car.km} onChange={(e) => update('km', e.target.value)} />
+              <input
+                type="text"
+                inputMode="decimal"
+                required
+                value={car.km}
+                onChange={(e) => update('km', e.target.value)}
+                placeholder="Ex: 45.000"
+              />
             </label>
             <label>
               Câmbio
@@ -246,11 +253,24 @@ export default function AdminCarForm() {
           <div className="admin-form-grid">
             <label>
               Preço de venda (R$)
-              <input type="number" min="0" required value={car.price} onChange={(e) => update('price', e.target.value)} />
+              <input
+                type="text"
+                inputMode="decimal"
+                required
+                value={car.price}
+                onChange={(e) => update('price', e.target.value)}
+                placeholder="Ex: 45.900"
+              />
             </label>
             <label>
               Preço "de" — opcional, mostra desconto
-              <input type="number" min="0" value={car.originalPrice || ''} onChange={(e) => update('originalPrice', e.target.value)} />
+              <input
+                type="text"
+                inputMode="decimal"
+                value={car.originalPrice || ''}
+                onChange={(e) => update('originalPrice', e.target.value)}
+                placeholder="Ex: 49.900"
+              />
             </label>
             <label>
               Selo/badge do anúncio
@@ -292,11 +312,11 @@ export default function AdminCarForm() {
             <label>
               Preço de compra (R$)
               <input
-                type="number"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 value={car.purchasePrice || ''}
                 onChange={(e) => update('purchasePrice', e.target.value)}
-                placeholder="Quanto a loja pagou pelo carro"
+                placeholder="Ex: 32.500"
               />
             </label>
             <label>

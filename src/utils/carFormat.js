@@ -45,6 +45,36 @@ export function formatCurrency(value) {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 }
 
+// Converte um número digitado em formato brasileiro (ex: "45.000", "35.900,50", "1.234.567")
+// para um Number de verdade. Aceita "." como separador de milhar e "," como decimal,
+// e também números "crus" (sem separador) digitados normalmente.
+export function parseLocaleNumber(value) {
+  if (value === null || value === undefined || value === '') return ''
+  if (typeof value === 'number') return value
+
+  let cleaned = String(value).trim().replace(/[^\d.,-]/g, '')
+  if (!cleaned) return ''
+
+  const hasComma = cleaned.includes(',')
+  const hasDot = cleaned.includes('.')
+
+  if (hasComma && hasDot) {
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.')
+  } else if (hasComma) {
+    cleaned = cleaned.replace(',', '.')
+  } else if (hasDot) {
+    const parts = cleaned.split('.')
+    const lastPart = parts[parts.length - 1]
+    // "45.000" (milhar) vira 45000 — "35.9" (decimal) continua 35.9
+    if (parts.length > 2 || lastPart.length === 3) {
+      cleaned = cleaned.replace(/\./g, '')
+    }
+  }
+
+  const num = parseFloat(cleaned)
+  return Number.isNaN(num) ? '' : num
+}
+
 export function estimateInstallment(price, months = 48) {
   const value = (price * 1.22) / months
   return formatCurrency(Math.round(value))

@@ -4,9 +4,10 @@ import { ShieldCheck, Wrench, FileCheck2, UserCheck, ChevronRight, MessageCircle
 import { fetchCarBySlug, fetchSimilarCars } from '../lib/carsApi.js'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
 import { formatCurrency, estimateInstallment, discountPercent } from '../utils/carFormat.js'
-import { whatsappLinkForCar, whatsappLinkForFinancing } from '../utils/whatsapp.js'
+import { whatsappLinkForCar } from '../utils/whatsapp.js'
 import CarCarousel from '../components/CarCarousel.jsx'
 import SetupNotice from '../components/SetupNotice.jsx'
+import FinancingModal from '../components/FinancingModal.jsx'
 import './CarDetail.css'
 
 const HIGHLIGHT_ICONS = {
@@ -28,6 +29,7 @@ export default function CarDetail() {
   const [loading, setLoading] = useState(true)
   const [activeImage, setActiveImage] = useState(0)
   const [specsOpen, setSpecsOpen] = useState(false)
+  const [financingOpen, setFinancingOpen] = useState(false)
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -182,14 +184,13 @@ export default function CarDetail() {
                 >
                   <MessageCircle size={19} /> Falar no WhatsApp sobre este carro
                 </a>
-                <a
-                  href={whatsappLinkForFinancing(car)}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() => setFinancingOpen(true)}
                   className="btn btn-outline btn-block car-cta-secondary"
                 >
                   <Wallet size={17} /> Simular financiamento
-                </a>
+                </button>
               </div>
             )}
 
@@ -229,6 +230,8 @@ export default function CarDetail() {
       {similar.length > 0 && (
         <CarCarousel eyebrow="Você também pode gostar" title="Carros parecidos" cars={similar} viewAllLink="/estoque" />
       )}
+
+      {financingOpen && <FinancingModal car={car} onClose={() => setFinancingOpen(false)} />}
     </div>
   )
 }

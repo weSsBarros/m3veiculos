@@ -1,0 +1,104 @@
+.financing-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 20, 30, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
+}
+
+.financing-modal {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+}
+
+.financing-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: var(--color-bg-alt);
+  border: none;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text);
+}
+
+.financing-modal h2 {
+  font-size: 20px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  padding-right: 30px;
+}
+
+.financing-modal-subtitle {
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin-bottom: 22px;
+}
+
+.financing-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.financing-modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.financing-modal-form input {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  outline: none;
+  background: var(--color-surface);
+}
+
+.financing-modal-form input:focus {
+  border-color: var(--color-primary);
+}
+
+.financing-modal-radio-group {
+  display: flex;
+  gap: 16px;
+  flex-direction: row;
+}
+
+.financing-modal-radio {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.financing-modal-radio input {
+  width: auto;
+}
+
+.financing-modal-form button[type='submit'] {
+  margin-top: 8px;
+}

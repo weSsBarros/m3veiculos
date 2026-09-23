@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { RefreshCcw, FileDown, FileText } from 'lucide-react'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchContractsAdmin, createContract } from '../lib/contractsApi.js'
-import { formatCurrency, carStatusLabel } from '../utils/carFormat.js'
+import { formatCurrency, carStatusLabel, parseLocaleNumber } from '../utils/carFormat.js'
 import { buildContractTitle, buildContractParagraphs, buildContractSignatures } from '../utils/contractTemplate.js'
 import { generateContractPdf } from '../utils/contractPdf.js'
 import { generateContractDocx } from '../utils/contractDocx.js'
@@ -100,7 +100,7 @@ export default function AdminContracts() {
       company,
       buyer,
       vehicle,
-      sale: { ...sale, price: Number(sale.price) || 0 },
+      sale: { ...sale, price: Math.round(parseLocaleNumber(sale.price) || 0) },
     }),
     [company, buyer, vehicle, sale]
   )
@@ -113,7 +113,7 @@ export default function AdminContracts() {
     if (!company.name || !company.document) return 'Preencha nome e CNPJ/CPF da empresa vendedora.'
     if (!buyer.name || !buyer.document) return 'Preencha nome e CPF do comprador.'
     if (!vehicle.brand || !vehicle.model) return 'Selecione ou preencha o veículo.'
-    if (!sale.price || Number(sale.price) <= 0) return 'Informe o preço de venda.'
+    if (!sale.price || (parseLocaleNumber(sale.price) || 0) <= 0) return 'Informe o preço de venda.'
     if (!sale.city) return 'Informe a cidade para o contrato.'
     return ''
   }
@@ -133,7 +133,7 @@ export default function AdminContracts() {
         company,
         buyer,
         vehicle,
-        salePrice: Number(sale.price),
+        salePrice: Math.round(parseLocaleNumber(sale.price) || 0),
         paymentMethod: sale.paymentMethod,
         paymentDetails: sale.paymentDetails,
         saleDate: sale.date,
@@ -298,7 +298,7 @@ export default function AdminContracts() {
             </label>
             <label>
               Km
-              <input type="number" min="0" value={vehicle.km} onChange={(e) => updateVehicle('km', e.target.value)} />
+              <input type="text" inputMode="decimal" value={vehicle.km} onChange={(e) => updateVehicle('km', e.target.value)} placeholder="Ex: 45.000" />
             </label>
             <label>
               Placa
@@ -320,7 +320,7 @@ export default function AdminContracts() {
           <div className="admin-form-grid">
             <label>
               Preço de venda (R$)
-              <input type="number" min="0" value={sale.price} onChange={(e) => updateSale('price', e.target.value)} required />
+              <input type="text" inputMode="decimal" value={sale.price} onChange={(e) => updateSale('price', e.target.value)} required placeholder="Ex: 45.900" />
             </label>
             <label>
               Forma de pagamento

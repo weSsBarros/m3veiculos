@@ -25,14 +25,34 @@ export function whatsappLinkForCar(car) {
   return whatsappLink(message)
 }
 
-export function whatsappLinkForFinancing(car) {
-  const message = [
+function formatBirthDate(isoDate) {
+  if (!isoDate) return '—'
+  return new Date(`${isoDate}T00:00:00`).toLocaleDateString('pt-BR')
+}
+
+export function whatsappLinkForFinancing(car, buyer = {}) {
+  const lines = [
     'Olá! Quero simular o financiamento deste carro:',
     '',
     `${car.brand} ${car.model} ${car.version} (${car.modelYear})`,
     `Preço: ${formatCurrency(car.price)} — ou em até 48x de ${estimateInstallment(car.price)}`,
     '',
     carPageUrl(car),
-  ].join('\n')
-  return whatsappLink(message)
+  ]
+
+  if (buyer.fullName) {
+    lines.push(
+      '',
+      'Meus dados para a simulação:',
+      `Nome completo: ${buyer.fullName}`,
+      `Data de nascimento: ${formatBirthDate(buyer.birthDate)}`,
+      `E-mail: ${buyer.email || '—'}`,
+      `Número de contato: ${buyer.phone || '—'}`,
+      `Tem CNH: ${buyer.hasCnh || '—'}`,
+      `CPF: ${buyer.cpf || '—'}`,
+      `Valor de entrada: ${buyer.downPayment || '—'}`
+    )
+  }
+
+  return whatsappLink(lines.join('\n'))
 }
