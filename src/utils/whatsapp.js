@@ -25,11 +25,6 @@ export function whatsappLinkForCar(car) {
   return whatsappLink(message)
 }
 
-function formatBirthDate(isoDate) {
-  if (!isoDate) return '—'
-  return new Date(`${isoDate}T00:00:00`).toLocaleDateString('pt-BR')
-}
-
 export function whatsappLinkForFinancing(car, buyer = {}) {
   const lines = [
     'Olá! Quero simular o financiamento deste carro:',
@@ -45,7 +40,7 @@ export function whatsappLinkForFinancing(car, buyer = {}) {
       '',
       'Meus dados para a simulação:',
       `Nome completo: ${buyer.fullName}`,
-      `Data de nascimento: ${formatBirthDate(buyer.birthDate)}`,
+      `Data de nascimento: ${buyer.birthDate || '—'}`,
       `E-mail: ${buyer.email || '—'}`,
       `Número de contato: ${buyer.phone || '—'}`,
       `Tem CNH: ${buyer.hasCnh || '—'}`,

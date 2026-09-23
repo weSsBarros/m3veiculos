@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { whatsappLinkForFinancing } from '../utils/whatsapp.js'
+import { maskBirthDate } from '../utils/carFormat.js'
 import './FinancingModal.css'
 
 const EMPTY_FORM = {
@@ -45,7 +46,17 @@ export default function FinancingModal({ car, onClose }) {
           </label>
           <label>
             Data de nascimento
-            <input type="date" required value={form.birthDate} onChange={(e) => update('birthDate', e.target.value)} />
+            <input
+              type="text"
+              inputMode="numeric"
+              required
+              pattern="\d{2}/\d{2}/\d{4}"
+              title="Use o formato DD/MM/AAAA"
+              maxLength={10}
+              placeholder="DD/MM/AAAA"
+              value={form.birthDate}
+              onChange={(e) => update('birthDate', maskBirthDate(e.target.value))}
+            />
           </label>
           <label>
             E-mail

@@ -75,6 +75,19 @@ export function parseLocaleNumber(value) {
   return Number.isNaN(num) ? '' : num
 }
 
+// Aplica a máscara DD/MM/AAAA enquanto o usuário digita, sem depender do
+// seletor nativo de data (que em alguns navegadores mostra mm/dd/aaaa).
+export function maskBirthDate(value) {
+  const digits = String(value).replace(/\D/g, '').slice(0, 8)
+  const day = digits.slice(0, 2)
+  const month = digits.slice(2, 4)
+  const year = digits.slice(4, 8)
+  let result = day
+  if (month) result += '/' + month
+  if (year) result += '/' + year
+  return result
+}
+
 export function estimateInstallment(price, months = 48) {
   const value = (price * 1.22) / months
   return formatCurrency(Math.round(value))
