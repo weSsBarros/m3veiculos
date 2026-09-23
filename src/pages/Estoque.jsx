@@ -129,6 +129,10 @@ export default function Estoque() {
           <div className="stock-empty">
             <p>Carregando estoque…</p>
           </div>
+        ) : error ? (
+          <div className="stock-empty">
+            <p>Não foi possível carregar os carros agora. Tente recarregar a página em instantes.</p>
+          </div>
         ) : filtered.length > 0 ? (
           <div className="stock-grid">
             {filtered.map((car) => (

@@ -21,6 +21,7 @@ export function CarsProvider({ children }) {
       const data = await fetchAvailableCars()
       setCars(data)
     } catch (err) {
+      console.error('Falha ao carregar os carros do estoque:', err)
       setError(err.message || 'Erro ao carregar os carros.')
     } finally {
       setLoading(false)

@@ -21,7 +21,13 @@ export default function Home() {
     <>
       <Hero />
 
-      {!loading && cars.length === 0 && (
+      {!loading && error && (
+        <div className="container home-empty">
+          <p>Não foi possível carregar os carros agora. Tente recarregar a página em instantes.</p>
+        </div>
+      )}
+
+      {!loading && !error && cars.length === 0 && (
         <div className="container home-empty">
           <p>Nenhum carro disponível no estoque no momento.</p>
         </div>

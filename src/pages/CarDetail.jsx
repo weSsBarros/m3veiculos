@@ -38,15 +38,21 @@ export default function CarDetail() {
     setLoading(true)
     setActiveImage(0)
 
-    fetchCarBySlug(slug).then(async (found) => {
-      if (cancelled) return
-      setCar(found)
-      if (found) {
-        const similarCars = await fetchSimilarCars(found)
-        if (!cancelled) setSimilar(similarCars)
-      }
-      setLoading(false)
-    })
+    fetchCarBySlug(slug)
+      .then(async (found) => {
+        if (cancelled) return
+        setCar(found)
+        if (found) {
+          const similarCars = await fetchSimilarCars(found)
+          if (!cancelled) setSimilar(similarCars)
+        }
+      })
+      .catch((err) => {
+        console.error('Falha ao carregar o carro:', err)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
 
     return () => {
       cancelled = true

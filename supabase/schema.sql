@@ -92,11 +92,15 @@ using (true);
 -- são o custo de aquisição do carro — informação sensível que não pode vazar para o site público
 -- (a chave "anon" é pública, então isso precisa ser bloqueado a nível de coluna, não só de linha).
 -- Só o papel "authenticated" (login do /admin) pode ler essas duas colunas.
+-- "hidden" também precisa estar aqui: mesmo não sendo exibida ao público, o site
+-- usa ela num filtro (where hidden = false) nas buscas públicas — e o Postgres
+-- exige permissão de leitura da coluna pra usá-la em filtro, não só pra exibir.
+-- Sem isso, a busca pública inteira falha (nenhum carro aparece no site).
 revoke select on public.cars from anon;
 grant select (
   id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
   category, condition, price, original_price, badge, status, highlights, description, images,
-  featured, created_at, updated_at
+  featured, hidden, created_at, updated_at
 ) on public.cars to anon;
 
 -- 3) Storage: bucket público para as fotos dos carros ------------------------
