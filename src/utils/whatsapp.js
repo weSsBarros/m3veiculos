@@ -17,7 +17,7 @@ export function whatsappLinkForCar(car) {
     'Olá! Tenho interesse neste carro que vi no site da M&3 Veículos:',
     '',
     `${car.brand} ${car.model} ${car.version} (${car.modelYear})`,
-    `Preço: ${formatCurrency(car.price)}`,
+    `Preço: ${car.price != null ? formatCurrency(car.price) : 'Consulte o valor'}`,
     `${car.km.toLocaleString('pt-BR')} km · ${car.transmission} · ${car.color}`,
     '',
     carPageUrl(car),

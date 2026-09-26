@@ -3,10 +3,14 @@
 
 function escapeCell(value) {
   const text = value === null || value === undefined ? '' : String(value)
-  if (/[";\n]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`
+  // Evita injeção de fórmula: um valor começando com =, +, -, @ ou tab é
+  // interpretado como fórmula pelo Excel/Sheets ao abrir o CSV. Prefixa com
+  // aspas simples (o Excel trata como texto e não exibe o prefixo).
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
+  if (/[";\n]/.test(safe)) {
+    return `"${safe.replace(/"/g, '""')}"`
   }
-  return text
+  return safe
 }
 
 export function downloadCsv(filename, columns, rows) {

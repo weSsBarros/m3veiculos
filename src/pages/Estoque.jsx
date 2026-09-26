@@ -3,17 +3,15 @@ import { useSearchParams } from 'react-router-dom'
 import { SlidersHorizontal, X } from 'lucide-react'
 import CarCard from '../components/CarCard.jsx'
 import SetupNotice from '../components/SetupNotice.jsx'
-import { CATEGORIES, BRANDS } from '../utils/carFormat.js'
+import { CATEGORIES, BRANDS, parseIntBR } from '../utils/carFormat.js'
 import { useCars } from '../context/CarsContext.jsx'
 import './Estoque.css'
 
-const PRICE_RANGES = [
-  { label: 'Qualquer preço', min: 0, max: Infinity },
-  { label: 'Até R$ 80.000', min: 0, max: 80000 },
-  { label: 'R$ 80.000 a R$ 120.000', min: 80000, max: 120000 },
-  { label: 'R$ 120.000 a R$ 160.000', min: 120000, max: 160000 },
-  { label: 'Acima de R$ 160.000', min: 160000, max: Infinity },
-]
+// Campo de preço livre: só dígitos, exibidos com separador de milhar
+function formatPriceInput(raw) {
+  const digits = String(raw).replace(/\D/g, '').slice(0, 9)
+  return digits ? Number(digits).toLocaleString('pt-BR') : ''
+}
 
 const SORTS = [
   { label: 'Mais recentes', value: 'recentes' },
@@ -25,7 +23,8 @@ const SORTS = [
 export default function Estoque() {
   const { cars, loading, error } = useCars()
   const [params, setParams] = useSearchParams()
-  const [priceIndex, setPriceIndex] = useState(0)
+  const [priceMin, setPriceMin] = useState('')
+  const [priceMax, setPriceMax] = useState('')
   const [sort, setSort] = useState('recentes')
 
   const categoria = params.get('categoria') || ''
@@ -41,17 +40,27 @@ export default function Estoque() {
 
   function clearFilters() {
     setParams({})
-    setPriceIndex(0)
+    setPriceMin('')
+    setPriceMax('')
     setSort('recentes')
   }
 
-  const range = PRICE_RANGES[priceIndex]
+  const minValue = parseIntBR(priceMin)
+  const maxValue = parseIntBR(priceMax)
+  const priceFilterActive = minValue != null || maxValue != null
 
   const filtered = useMemo(() => {
     let list = cars.filter((c) => {
       if (categoria && c.category !== categoria) return false
       if (marca && c.brand !== marca) return false
-      if (c.price < range.min || c.price > range.max) return false
+      if (c.price == null) {
+        // Carro "consulte o valor" só entra sem filtro de preço — não dá pra
+        // saber se ele cabe no intervalo digitado.
+        if (priceFilterActive) return false
+      } else {
+        if (minValue != null && c.price < minValue) return false
+        if (maxValue != null && c.price > maxValue) return false
+      }
       if (busca) {
         const term = busca.toLowerCase()
         const haystack = `${c.brand} ${c.model} ${c.version}`.toLowerCase()
@@ -60,14 +69,14 @@ export default function Estoque() {
       return true
     })
 
-    if (sort === 'menor-preco') list = [...list].sort((a, b) => a.price - b.price)
-    if (sort === 'maior-preco') list = [...list].sort((a, b) => b.price - a.price)
+    if (sort === 'menor-preco') list = [...list].sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity))
+    if (sort === 'maior-preco') list = [...list].sort((a, b) => (b.price ?? -Infinity) - (a.price ?? -Infinity))
     if (sort === 'menor-km') list = [...list].sort((a, b) => a.km - b.km)
 
     return list
-  }, [cars, categoria, marca, busca, range, sort])
+  }, [cars, categoria, marca, busca, minValue, maxValue, priceFilterActive, sort])
 
-  const hasFilters = categoria || marca || busca || priceIndex !== 0
+  const hasFilters = categoria || marca || busca || priceFilterActive
 
   if (error === 'not-configured') return <SetupNotice />
 
@@ -102,12 +111,25 @@ export default function Estoque() {
             </select>
           </div>
 
-          <div className="stock-filter">
-            <select value={priceIndex} onChange={(e) => setPriceIndex(Number(e.target.value))}>
-              {PRICE_RANGES.map((r, i) => (
-                <option key={r.label} value={i}>{r.label}</option>
-              ))}
-            </select>
+          <div className="stock-filter stock-filter-price">
+            <span>Preço de R$</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={priceMin}
+              onChange={(e) => setPriceMin(formatPriceInput(e.target.value))}
+              placeholder="mínimo"
+              aria-label="Preço mínimo"
+            />
+            <span>até R$</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={priceMax}
+              onChange={(e) => setPriceMax(formatPriceInput(e.target.value))}
+              placeholder="máximo"
+              aria-label="Preço máximo"
+            />
           </div>
 
           <div className="stock-filter">

@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js'
+import { supabase, COMPANY_ID } from './supabaseClient.js'
 
 function fromRow(row) {
   return {
@@ -9,6 +9,7 @@ function fromRow(row) {
     amount: row.amount,
     expenseDate: row.expense_date,
     attachments: row.attachments || [],
+    supplierId: row.supplier_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -17,11 +18,13 @@ function fromRow(row) {
 function toRow(expense) {
   return {
     car_id: expense.carId,
+    company_id: COMPANY_ID,
     category: expense.category,
     description: expense.description || '',
     amount: expense.amount,
     expense_date: expense.expenseDate,
     attachments: expense.attachments || [],
+    supplier_id: expense.supplierId || null,
   }
 }
 
@@ -39,6 +42,7 @@ export async function fetchExpensesByCar(carId) {
     .from('car_expenses')
     .select('*')
     .eq('car_id', carId)
+    .eq('company_id', COMPANY_ID)
     .order('expense_date', { ascending: false })
   if (error) throw error
   return data.map(fromRow)
@@ -49,6 +53,7 @@ export async function fetchAllExpensesAdmin() {
   const { data, error } = await supabase
     .from('car_expenses')
     .select('*')
+    .eq('company_id', COMPANY_ID)
     .order('expense_date', { ascending: false })
   if (error) throw error
   return data.map(fromRow)
@@ -61,16 +66,23 @@ export async function createExpense(expense) {
   return fromRow(data)
 }
 
+// Gerente: lança o gasto sem ler de volta (ele não tem acesso de leitura aos gastos)
+export async function launchExpense(expense) {
+  requireSupabase()
+  const { error } = await supabase.from('car_expenses').insert(toRow(expense))
+  if (error) throw error
+}
+
 export async function updateExpense(id, expense) {
   requireSupabase()
-  const { data, error } = await supabase.from('car_expenses').update(toRow(expense)).eq('id', id).select().single()
+  const { data, error } = await supabase.from('car_expenses').update(toRow(expense)).eq('id', id).eq('company_id', COMPANY_ID).select().single()
   if (error) throw error
   return fromRow(data)
 }
 
 export async function deleteExpense(id) {
   requireSupabase()
-  const { error } = await supabase.from('car_expenses').delete().eq('id', id)
+  const { error } = await supabase.from('car_expenses').delete().eq('id', id).eq('company_id', COMPANY_ID)
   if (error) throw error
 }
 
@@ -82,7 +94,7 @@ export async function deleteExpense(id) {
 export async function uploadExpenseAttachment(carId, file) {
   requireSupabase()
   const ext = file.name.split('.').pop()
-  const path = `${carId}/${crypto.randomUUID()}.${ext}`
+  const path = `${COMPANY_ID}/${carId}/${crypto.randomUUID()}.${ext}`
   const { error } = await supabase.storage.from('expense-attachments').upload(path, file, {
     cacheControl: '3600',
     upsert: false,

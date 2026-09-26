@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react'
-import { X, Upload, Paperclip } from 'lucide-react'
+import { X, Upload, Paperclip, Clock } from 'lucide-react'
 import { uploadCarDocument, deleteCarDocument, getCarDocumentSignedUrl } from '../lib/carsApi.js'
 
-export default function CarDocumentUploader({ carId, documents, onChange }) {
+// Com carId (carro já salvo), o arquivo sobe na hora. Sem carId (carro novo),
+// os arquivos ficam em "pendingFiles" e o formulário envia logo após cadastrar.
+export default function CarDocumentUploader({ carId, documents, onChange, pendingFiles = [], onPendingChange }) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const inputRef = useRef(null)
@@ -10,6 +12,11 @@ export default function CarDocumentUploader({ carId, documents, onChange }) {
   async function handleFiles(e) {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
+    if (!carId) {
+      onPendingChange?.([...pendingFiles, ...files])
+      if (inputRef.current) inputRef.current.value = ''
+      return
+    }
     setUploading(true)
     setError('')
     try {
@@ -30,6 +37,10 @@ export default function CarDocumentUploader({ carId, documents, onChange }) {
   async function handleRemove(doc) {
     onChange(documents.filter((d) => d.path !== doc.path))
     deleteCarDocument(doc.path).catch(() => {})
+  }
+
+  function handleRemovePending(index) {
+    onPendingChange?.(pendingFiles.filter((_, i) => i !== index))
   }
 
   async function handleOpen(doc) {
@@ -58,6 +69,20 @@ export default function CarDocumentUploader({ carId, documents, onChange }) {
         </ul>
       )}
 
+      {pendingFiles.length > 0 && (
+        <ul className="attachment-uploader-list">
+          {pendingFiles.map((file, index) => (
+            <li key={`${file.name}-${index}`}>
+              <Clock size={13} />
+              <span>{file.name}</span>
+              <button type="button" onClick={() => handleRemovePending(index)} aria-label="Remover documento">
+                <X size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <label className="attachment-uploader-drop">
         <Upload size={16} />
         <span>{uploading ? 'Enviando…' : 'Clique para anexar CRLV, laudo, nota fiscal etc. (pode selecionar vários)'}</span>
@@ -67,11 +92,15 @@ export default function CarDocumentUploader({ carId, documents, onChange }) {
           accept="image/*,application/pdf"
           multiple
           onChange={handleFiles}
-          disabled={uploading || !carId}
+          disabled={uploading}
           hidden
         />
       </label>
-      {!carId && <p className="admin-form-hint">Salve o carro primeiro para poder anexar documentos.</p>}
+      {!carId && pendingFiles.length > 0 && (
+        <p className="admin-form-hint">
+          {pendingFiles.length === 1 ? 'O documento é enviado' : 'Os documentos são enviados'} ao clicar em "Cadastrar carro".
+        </p>
+      )}
 
       {error && <p className="admin-error">{error}</p>}
     </div>

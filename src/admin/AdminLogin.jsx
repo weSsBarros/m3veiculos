@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext.jsx'
+import { useAuth, WRONG_COMPANY_MESSAGE } from '../context/AuthContext.jsx'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
 import SetupNotice from '../components/SetupNotice.jsx'
 import './admin.css'
@@ -24,7 +24,7 @@ export default function AdminLogin() {
       await signIn(email, password)
       navigate('/admin')
     } catch (err) {
-      setError('E-mail ou senha inválidos.')
+      setError(err.message === WRONG_COMPANY_MESSAGE ? err.message : 'E-mail ou senha inválidos.')
     } finally {
       setSubmitting(false)
     }

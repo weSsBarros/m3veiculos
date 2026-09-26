@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js'
+import { supabase, publicSupabase, COMPANY_ID } from './supabaseClient.js'
 import { slugify } from '../utils/carFormat.js'
 
 // Colunas visíveis para o site público (chave "anon"). "purchase_price" e
@@ -40,13 +40,25 @@ function fromRow(row) {
     chassis: row.chassis || '',
     renavam: row.renavam || '',
     documents: row.documents || [],
+    customerId: row.customer_id || null,
+    stockAlertDays: row.stock_alert_days ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
+// O admin lê e grava a tabela "cars" direto. O gerente usa a view
+// "staff_cars", que não tem o custo de aquisição (purchase_price e
+// purchase_date) — ele informa o custo só ao cadastrar, via setCarPurchase.
+// O AuthContext define o papel assim que o login é carregado.
+let staffTable = 'cars'
+
+export function setCarsAccess(role) {
+  staffTable = role === 'admin' ? 'cars' : 'staff_cars'
+}
+
 function toRow(car) {
-  return {
+  const row = {
     slug: car.slug,
     brand: car.brand,
     model: car.model,
@@ -76,7 +88,14 @@ function toRow(car) {
     chassis: car.chassis || null,
     renavam: car.renavam || null,
     documents: car.documents || [],
+    customer_id: car.customerId || null,
+    stock_alert_days: car.stockAlertDays || null,
   }
+  if (staffTable !== 'cars') {
+    delete row.purchase_price
+    delete row.purchase_date
+  }
+  return row
 }
 
 function requireSupabase() {
@@ -89,10 +108,11 @@ function requireSupabase() {
 
 export async function fetchAvailableCars() {
   requireSupabase()
-  const { data, error } = await supabase
+  const { data, error } = await publicSupabase
     .from('cars')
     .select(PUBLIC_COLUMNS)
-    .eq('status', 'disponivel')
+    .eq('company_id', COMPANY_ID)
+    .in('status', ['disponivel', 'manutencao'])
     .eq('hidden', false)
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -101,12 +121,12 @@ export async function fetchAvailableCars() {
 
 export async function fetchCarBySlug(slug) {
   requireSupabase()
-  const { data, error } = await supabase
+  const { data, error } = await publicSupabase
     .from('cars')
     .select(PUBLIC_COLUMNS)
+    .eq('company_id', COMPANY_ID)
     .eq('slug', slug)
     .eq('hidden', false)
-    .neq('status', 'manutencao')
     .maybeSingle()
   if (error) throw error
   return data ? fromRow(data) : null
@@ -114,9 +134,10 @@ export async function fetchCarBySlug(slug) {
 
 export async function fetchSimilarCars(car, count = 4) {
   requireSupabase()
-  const { data, error } = await supabase
+  const { data, error } = await publicSupabase
     .from('cars')
     .select(PUBLIC_COLUMNS)
+    .eq('company_id', COMPANY_ID)
     .eq('status', 'disponivel')
     .eq('hidden', false)
     .eq('category', car.category)
@@ -125,9 +146,10 @@ export async function fetchSimilarCars(car, count = 4) {
   if (error) throw error
   if (data.length > 0) return data.map(fromRow)
 
-  const fallback = await supabase
+  const fallback = await publicSupabase
     .from('cars')
     .select(PUBLIC_COLUMNS)
+    .eq('company_id', COMPANY_ID)
     .eq('status', 'disponivel')
     .eq('hidden', false)
     .neq('id', car.id)
@@ -140,14 +162,30 @@ export async function fetchSimilarCars(car, count = 4) {
 
 export async function fetchAllCarsAdmin() {
   requireSupabase()
-  const { data, error } = await supabase.from('cars').select('*').order('created_at', { ascending: false })
+  const { data, error } = await supabase
+    .from(staffTable)
+    .select('*')
+    .eq('company_id', COMPANY_ID)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data.map(fromRow)
+}
+
+// Estoque do vendedor: view "seller_cars" (sem custo de compra nem documentos).
+export async function fetchSellerCars() {
+  requireSupabase()
+  const { data, error } = await supabase
+    .from('seller_cars')
+    .select('*')
+    .eq('company_id', COMPANY_ID)
+    .order('created_at', { ascending: false })
   if (error) throw error
   return data.map(fromRow)
 }
 
 export async function fetchCarById(id) {
   requireSupabase()
-  const { data, error } = await supabase.from('cars').select('*').eq('id', id).maybeSingle()
+  const { data, error } = await supabase.from(staffTable).select('*').eq('id', id).eq('company_id', COMPANY_ID).maybeSingle()
   if (error) throw error
   return data ? fromRow(data) : null
 }
@@ -157,7 +195,7 @@ async function uniqueSlug(base, ignoreId) {
   let attempt = 0
   while (true) {
     const candidate = attempt === 0 ? slug : `${slug}-${attempt}`
-    let query = supabase.from('cars').select('id').eq('slug', candidate)
+    let query = supabase.from(staffTable).select('id').eq('company_id', COMPANY_ID).eq('slug', candidate)
     if (ignoreId) query = query.neq('id', ignoreId)
     const { data, error } = await query.maybeSingle()
     if (error) throw error
@@ -171,46 +209,80 @@ export async function createCar(car) {
   const baseSlug = `${car.brand}-${car.model}-${car.version}-${car.year}`
   const slug = await uniqueSlug(baseSlug)
   const { data, error } = await supabase
-    .from('cars')
-    .insert({ ...toRow(car), slug })
+    .from(staffTable)
+    .insert({ ...toRow(car), slug, company_id: COMPANY_ID })
     .select()
     .single()
   if (error) throw error
+  // Gerente: o custo de aquisição vai pela função do banco (a view não tem essas colunas)
+  if (staffTable !== 'cars' && (car.purchasePrice || car.purchaseDate)) {
+    await setCarPurchase(data.id, car.purchasePrice, car.purchaseDate)
+  }
   return fromRow(data)
 }
 
 export async function updateCar(id, car) {
   requireSupabase()
-  const { data, error } = await supabase.from('cars').update(toRow(car)).eq('id', id).select().single()
+  const { data, error } = await supabase.from(staffTable).update(toRow(car)).eq('id', id).eq('company_id', COMPANY_ID).select().single()
   if (error) throw error
   return fromRow(data)
 }
 
-export async function updateCarStatus(id, status) {
-  requireSupabase()
-  const soldAt = status === 'vendido' ? new Date().toISOString() : null
-  const { data, error } = await supabase.from('cars').update({ status, sold_at: soldAt }).eq('id', id).select().single()
+async function patchCar(id, patch) {
+  const { data, error } = await supabase.from(staffTable).update(patch).eq('id', id).eq('company_id', COMPANY_ID).select().single()
   if (error) throw error
   return fromRow(data)
+}
+
+// Opções: hidden (boolean), saleDate (yyyy-mm-dd, informada na janela de
+// venda), customerId (cliente comprador; null tira o vínculo).
+export async function updateCarStatus(id, status, { hidden, saleDate, customerId } = {}) {
+  requireSupabase()
+  let soldAt = null
+  if (status === 'vendido') {
+    soldAt = saleDate ? new Date(`${saleDate}T12:00:00`).toISOString() : new Date().toISOString()
+  }
+  const patch = { status, sold_at: soldAt }
+  if (hidden !== undefined) patch.hidden = hidden
+  if (customerId !== undefined) patch.customer_id = customerId || null
+  return patchCar(id, patch)
+}
+
+export async function updateCarCustomer(id, customerId) {
+  requireSupabase()
+  return patchCar(id, { customer_id: customerId || null })
+}
+
+export async function updateCarDocuments(id, documents) {
+  requireSupabase()
+  return patchCar(id, { documents })
 }
 
 export async function updateCarFeatured(id, featured) {
   requireSupabase()
-  const { data, error } = await supabase.from('cars').update({ featured }).eq('id', id).select().single()
-  if (error) throw error
-  return fromRow(data)
+  return patchCar(id, { featured })
 }
 
 export async function updateCarHidden(id, hidden) {
   requireSupabase()
-  const { data, error } = await supabase.from('cars').update({ hidden }).eq('id', id).select().single()
+  return patchCar(id, { hidden })
+}
+
+// Custo de aquisição. O admin pode sempre; o gerente só quando ainda está em
+// branco (a regra fica no banco, na função set_car_purchase).
+export async function setCarPurchase(id, purchasePrice, purchaseDate) {
+  requireSupabase()
+  const { error } = await supabase.rpc('set_car_purchase', {
+    p_car_id: id,
+    p_price: purchasePrice || null,
+    p_date: purchaseDate || null,
+  })
   if (error) throw error
-  return fromRow(data)
 }
 
 export async function deleteCar(id) {
   requireSupabase()
-  const { error } = await supabase.from('cars').delete().eq('id', id)
+  const { error } = await supabase.from('cars').delete().eq('id', id).eq('company_id', COMPANY_ID)
   if (error) throw error
 }
 
@@ -219,7 +291,7 @@ export async function deleteCar(id) {
 export async function uploadCarImage(file) {
   requireSupabase()
   const ext = file.name.split('.').pop()
-  const path = `${crypto.randomUUID()}.${ext}`
+  const path = `${COMPANY_ID}/${crypto.randomUUID()}.${ext}`
   const { error } = await supabase.storage.from('car-photos').upload(path, file, {
     cacheControl: '3600',
     upsert: false,
@@ -245,7 +317,7 @@ export async function deleteCarImage(url) {
 export async function uploadCarDocument(carId, file) {
   requireSupabase()
   const ext = file.name.split('.').pop()
-  const path = `${carId}/${crypto.randomUUID()}.${ext}`
+  const path = `${COMPANY_ID}/${carId}/${crypto.randomUUID()}.${ext}`
   const { error } = await supabase.storage.from('car-documents').upload(path, file, {
     cacheControl: '3600',
     upsert: false,

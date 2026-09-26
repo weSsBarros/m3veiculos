@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { ShieldCheck, Wrench, FileCheck2, UserCheck, ChevronRight, MessageCircle, Repeat, Wallet } from 'lucide-react'
 import { fetchCarBySlug, fetchSimilarCars } from '../lib/carsApi.js'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
+import { trackCarView } from '../lib/statsApi.js'
+import { useAuth } from '../context/AuthContext.jsx'
 import { formatCurrency, estimateInstallment, discountPercent } from '../utils/carFormat.js'
 import { whatsappLinkForCar } from '../utils/whatsapp.js'
 import CarCarousel from '../components/CarCarousel.jsx'
@@ -29,7 +31,8 @@ export default function CarDetail() {
   const [loading, setLoading] = useState(true)
   const [activeImage, setActiveImage] = useState(0)
   const [specsOpen, setSpecsOpen] = useState(false)
-  const [financingOpen, setFinancingOpen] = useState(false)
+  const [showFinancing, setShowFinancing] = useState(false)
+  const { user, loading: authLoading } = useAuth()
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -61,9 +64,16 @@ export default function CarDetail() {
     }
   }, [slug])
 
+  // Conta a visualização do carro (a equipe logada no painel não conta)
+  const carId = car?.id
+  useEffect(() => {
+    if (carId && !authLoading && !user) trackCarView(carId)
+  }, [carId, authLoading, user])
+
   useEffect(() => {
     if (!car) return
-    document.title = `${car.brand} ${car.model} ${car.version} — ${formatCurrency(car.price)} | M&3 Veículos`
+    const priceLabel = car.price != null ? formatCurrency(car.price) : 'Consulte o valor'
+    document.title = `${car.brand} ${car.model} ${car.version} — ${priceLabel} | M&3 Veículos`
     return () => {
       document.title = 'M&3 Veículos | Novos e seminovos'
     }
@@ -90,7 +100,8 @@ export default function CarDetail() {
   }
 
   const isSold = car.status === 'vendido'
-  const off = !isSold && discountPercent(car.price, car.originalPrice)
+  const hasPrice = car.price != null
+  const off = !isSold && hasPrice && discountPercent(car.price, car.originalPrice)
 
   const specs = [
     ['Marca', car.brand],
@@ -151,10 +162,16 @@ export default function CarDetail() {
             </p>
 
             <div className="car-price-block">
-              {car.originalPrice && <span className="price-old">De {formatCurrency(car.originalPrice)}</span>}
-              <span className="price-main">{formatCurrency(car.price)}</span>
-              {!isSold && (
-                <span className="price-installment">ou em até 48x de {estimateInstallment(car.price)} no financiamento</span>
+              {hasPrice ? (
+                <>
+                  {car.originalPrice && <span className="price-old">De {formatCurrency(car.originalPrice)}</span>}
+                  <span className="price-main">{formatCurrency(car.price)}</span>
+                  {!isSold && (
+                    <span className="price-installment">ou em até 48x de {estimateInstallment(car.price)} no financiamento</span>
+                  )}
+                </>
+              ) : (
+                <span className="price-main">Consulte o valor</span>
               )}
             </div>
 
@@ -184,13 +201,15 @@ export default function CarDetail() {
                 >
                   <MessageCircle size={19} /> Falar no WhatsApp sobre este carro
                 </a>
-                <button
-                  type="button"
-                  onClick={() => setFinancingOpen(true)}
-                  className="btn btn-outline btn-block car-cta-secondary"
-                >
-                  <Wallet size={17} /> Simular financiamento
-                </button>
+                {hasPrice && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFinancing(true)}
+                    className="btn btn-outline btn-block car-cta-secondary"
+                  >
+                    <Wallet size={17} /> Simular financiamento
+                  </button>
+                )}
               </div>
             )}
 
@@ -231,7 +250,7 @@ export default function CarDetail() {
         <CarCarousel eyebrow="Você também pode gostar" title="Carros parecidos" cars={similar} viewAllLink="/estoque" />
       )}
 
-      {financingOpen && <FinancingModal car={car} onClose={() => setFinancingOpen(false)} />}
+      {showFinancing && <FinancingModal car={car} onClose={() => setShowFinancing(false)} />}
     </div>
   )
 }

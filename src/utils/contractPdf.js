@@ -1,7 +1,7 @@
 // Import dinâmico: jspdf só é carregado quando o admin gera um PDF, pra não
 // engordar o bundle do site público.
 
-export async function generateContractPdf({ title, paragraphs, signatures, filename }) {
+export async function generateContractPdf({ title, paragraphs, signatures, filename, logo }) {
   const { jsPDF } = await import('jspdf')
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
 
@@ -18,6 +18,13 @@ export async function generateContractPdf({ title, paragraphs, signatures, filen
       doc.addPage()
       y = marginTop
     }
+  }
+
+  if (logo) {
+    const logoWidth = 30
+    const logoHeight = (logo.height / logo.width) * logoWidth
+    doc.addImage(logo.dataUrl, logo.format, pageWidth / 2 - logoWidth / 2, y, logoWidth, logoHeight)
+    y += logoHeight + 6
   }
 
   doc.setFont('helvetica', 'bold')

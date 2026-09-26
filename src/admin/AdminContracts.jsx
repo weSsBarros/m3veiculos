@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCcw, FileDown, FileText } from 'lucide-react'
-import { fetchAllCarsAdmin } from '../lib/carsApi.js'
+import { Link, useSearchParams } from 'react-router-dom'
+import { RefreshCcw, FileDown, FileText, Settings } from 'lucide-react'
+import { fetchAllCarsAdmin, fetchSellerCars } from '../lib/carsApi.js'
+import { useAuth } from '../context/AuthContext.jsx'
+import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchContractsAdmin, createContract } from '../lib/contractsApi.js'
-import { formatCurrency, carStatusLabel, parseLocaleNumber } from '../utils/carFormat.js'
+import { fetchAllContractTemplates, downloadContractTemplateFile } from '../lib/contractTemplatesApi.js'
+import { formatCurrency, carStatusLabel, parseIntBR, formatDateBR as formatDate } from '../utils/carFormat.js'
 import { buildContractTitle, buildContractParagraphs, buildContractSignatures } from '../utils/contractTemplate.js'
+import { buildReceiptTitle, buildReceiptParagraphs, buildReceiptSignatures } from '../utils/receiptTemplate.js'
+import { buildContractTemplateData } from '../utils/contractTemplateTags.js'
 import { generateContractPdf } from '../utils/contractPdf.js'
 import { generateContractDocx } from '../utils/contractDocx.js'
+import { fillContractTemplate } from '../utils/fillContractTemplate.js'
+import { loadContractLogo } from '../utils/contractLogo.js'
+import DateInputBR from '../components/DateInputBR.jsx'
 import './admin.css'
 
 const COMPANY_STORAGE_KEY = 'domveiculos_contract_company'
@@ -24,31 +33,46 @@ function loadStoredCompany() {
   }
 }
 
-function formatDate(isoDate) {
-  if (!isoDate) return '—'
-  return new Date(`${isoDate}T00:00:00`).toLocaleDateString('pt-BR')
-}
-
 export default function AdminContracts() {
+  const { isAdmin, isStaff } = useAuth()
+  const [searchParams] = useSearchParams()
+  const preselectCarId = searchParams.get('carro')
   const [cars, setCars] = useState([])
   const [contracts, setContracts] = useState([])
+  const [customers, setCustomers] = useState([])
+  const [templates, setTemplates] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [generating, setGenerating] = useState(false)
 
   const [selectedCarId, setSelectedCarId] = useState('')
+  const [selectedCustomerId, setSelectedCustomerId] = useState('')
+  const [selectedTemplateId, setSelectedTemplateId] = useState('')
+  const [documentType, setDocumentType] = useState('contrato')
   const [company, setCompany] = useState(loadStoredCompany)
   const [buyer, setBuyer] = useState(EMPTY_BUYER)
   const [vehicle, setVehicle] = useState(EMPTY_VEHICLE)
   const [sale, setSale] = useState(EMPTY_SALE)
+  const [logo, setLogo] = useState(null)
+
+  useEffect(() => {
+    loadContractLogo().then(setLogo)
+  }, [])
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const [carsData, contractsData] = await Promise.all([fetchAllCarsAdmin(), fetchContractsAdmin()])
+      const [carsData, contractsData, customersData, templatesData] = await Promise.all([
+        isStaff ? fetchAllCarsAdmin() : fetchSellerCars(),
+        fetchContractsAdmin(),
+        fetchAllCustomers(),
+        fetchAllContractTemplates(),
+      ])
       setCars(carsData)
       setContracts(contractsData)
+      setCustomers(customersData)
+      setTemplates(templatesData)
     } catch (err) {
       setError(err.message || 'Erro ao carregar os contratos.')
     } finally {
@@ -58,7 +82,15 @@ export default function AdminContracts() {
 
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Vindo do estoque do vendedor ("Gerar contrato"): já seleciona o carro
+  useEffect(() => {
+    if (!preselectCarId || selectedCarId || cars.length === 0) return
+    if (cars.some((c) => c.id === preselectCarId)) handleSelectCar(preselectCarId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cars, preselectCarId])
 
   function updateCompany(field, value) {
     setCompany((prev) => ({ ...prev, [field]: value }))
@@ -92,7 +124,22 @@ export default function AdminContracts() {
       chassis: car.chassis || '',
       renavam: car.renavam || '',
     })
-    setSale((prev) => ({ ...prev, price: car.price }))
+    setSale((prev) => ({ ...prev, price: car.price ?? '' }))
+    if (car.customerId) handleSelectCustomer(car.customerId)
+  }
+
+  function handleSelectCustomer(customerId) {
+    setSelectedCustomerId(customerId)
+    const customer = customers.find((c) => c.id === customerId)
+    if (!customer) return
+    setBuyer({
+      name: customer.name,
+      document: customer.document || '',
+      rg: customer.rg || '',
+      address: customer.address || '',
+      phone: customer.phone || '',
+      email: customer.email || '',
+    })
   }
 
   const contractData = useMemo(
@@ -100,22 +147,47 @@ export default function AdminContracts() {
       company,
       buyer,
       vehicle,
-      sale: { ...sale, price: Math.round(parseLocaleNumber(sale.price) || 0) },
+      sale: { ...sale, price: parseIntBR(sale.price) || 0 },
     }),
     [company, buyer, vehicle, sale]
   )
 
-  const paragraphs = useMemo(() => buildContractParagraphs(contractData), [contractData])
-  const title = buildContractTitle()
-  const signatures = useMemo(() => buildContractSignatures(contractData), [contractData])
+  const isReceipt = documentType === 'recibo'
+  const paragraphs = useMemo(
+    () => (isReceipt ? buildReceiptParagraphs(contractData) : buildContractParagraphs(contractData)),
+    [contractData, isReceipt]
+  )
+  const title = isReceipt ? buildReceiptTitle() : buildContractTitle()
+  const signatures = useMemo(
+    () => (isReceipt ? buildReceiptSignatures(contractData) : buildContractSignatures(contractData)),
+    [contractData, isReceipt]
+  )
 
   function validate() {
     if (!company.name || !company.document) return 'Preencha nome e CNPJ/CPF da empresa vendedora.'
     if (!buyer.name || !buyer.document) return 'Preencha nome e CPF do comprador.'
     if (!vehicle.brand || !vehicle.model) return 'Selecione ou preencha o veículo.'
-    if (!sale.price || (parseLocaleNumber(sale.price) || 0) <= 0) return 'Informe o preço de venda.'
+    if (!sale.price || Number(sale.price) <= 0) return 'Informe o preço de venda.'
     if (!sale.city) return 'Informe a cidade para o contrato.'
     return ''
+  }
+
+  async function saveContractRecord() {
+    localStorage.setItem(COMPANY_STORAGE_KEY, JSON.stringify(company))
+    const saved = await createContract({
+      carId: selectedCarId || null,
+      documentType,
+      company,
+      buyer,
+      vehicle,
+      salePrice: parseIntBR(sale.price),
+      paymentMethod: sale.paymentMethod,
+      paymentDetails: sale.paymentDetails,
+      saleDate: sale.date,
+      saleCity: sale.city,
+      notes: sale.notes,
+    })
+    setContracts((prev) => [saved, ...prev])
   }
 
   async function persistAndSave(fn, filename) {
@@ -126,21 +198,8 @@ export default function AdminContracts() {
     }
     setGenerating(true)
     try {
-      await fn({ title, paragraphs, signatures, filename })
-      localStorage.setItem(COMPANY_STORAGE_KEY, JSON.stringify(company))
-      const saved = await createContract({
-        carId: selectedCarId || null,
-        company,
-        buyer,
-        vehicle,
-        salePrice: Math.round(parseLocaleNumber(sale.price) || 0),
-        paymentMethod: sale.paymentMethod,
-        paymentDetails: sale.paymentDetails,
-        saleDate: sale.date,
-        saleCity: sale.city,
-        notes: sale.notes,
-      })
-      setContracts((prev) => [saved, ...prev])
+      await fn({ title, paragraphs, signatures, filename, logo })
+      await saveContractRecord()
     } catch (err) {
       alert('Não foi possível gerar o contrato: ' + err.message)
     } finally {
@@ -149,8 +208,8 @@ export default function AdminContracts() {
   }
 
   function contractFilename(ext) {
-    const buyerSlug = (buyer.name || 'contrato').toLowerCase().replace(/\s+/g, '-')
-    return `contrato-${buyerSlug}.${ext}`
+    const buyerSlug = (buyer.name || 'documento').toLowerCase().replace(/\s+/g, '-')
+    return `${isReceipt ? 'recibo' : 'contrato'}-${buyerSlug}.${ext}`
   }
 
   async function handleDownloadPdf() {
@@ -161,24 +220,47 @@ export default function AdminContracts() {
     await persistAndSave(generateContractDocx, contractFilename('docx'))
   }
 
+  async function handleDownloadCustomTemplate() {
+    const validationError = validate()
+    if (validationError) {
+      alert(validationError)
+      return
+    }
+    const template = templates.find((t) => t.id === selectedTemplateId)
+    if (!template) return
+    setGenerating(true)
+    try {
+      const arrayBuffer = await downloadContractTemplateFile(template.filePath)
+      const data = buildContractTemplateData(contractData)
+      await fillContractTemplate(arrayBuffer, data, contractFilename('docx'))
+      await saveContractRecord()
+    } catch (err) {
+      alert('Não foi possível gerar o contrato: ' + err.message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   async function redownload(contract, format) {
+    const contractIsReceipt = contract.documentType === 'recibo'
+    const saleData = {
+      price: contract.salePrice,
+      paymentMethod: contract.paymentMethod,
+      paymentDetails: contract.paymentDetails,
+      date: contract.saleDate,
+      city: contract.saleCity,
+      notes: contract.notes,
+    }
     const data = {
-      title,
-      paragraphs: buildContractParagraphs({
-        company: contract.company,
-        buyer: contract.buyer,
-        vehicle: contract.vehicle,
-        sale: {
-          price: contract.salePrice,
-          paymentMethod: contract.paymentMethod,
-          paymentDetails: contract.paymentDetails,
-          date: contract.saleDate,
-          city: contract.saleCity,
-          notes: contract.notes,
-        },
-      }),
-      signatures: buildContractSignatures({ company: contract.company, buyer: contract.buyer }),
-      filename: `contrato-${(contract.buyer.name || 'contrato').toLowerCase().replace(/\s+/g, '-')}.${format}`,
+      title: contractIsReceipt ? buildReceiptTitle() : buildContractTitle(),
+      paragraphs: contractIsReceipt
+        ? buildReceiptParagraphs({ company: contract.company, buyer: contract.buyer, vehicle: contract.vehicle, sale: saleData })
+        : buildContractParagraphs({ company: contract.company, buyer: contract.buyer, vehicle: contract.vehicle, sale: saleData }),
+      signatures: contractIsReceipt
+        ? buildReceiptSignatures({ company: contract.company, buyer: contract.buyer })
+        : buildContractSignatures({ company: contract.company, buyer: contract.buyer }),
+      filename: `${contractIsReceipt ? 'recibo' : 'contrato'}-${(contract.buyer.name || 'documento').toLowerCase().replace(/\s+/g, '-')}.${format}`,
+      logo,
     }
     if (format === 'pdf') await generateContractPdf(data)
     else await generateContractDocx(data)
@@ -189,7 +271,7 @@ export default function AdminContracts() {
       <div className="admin-page-head">
         <div>
           <h1>Contratos</h1>
-          <p>Gere o contrato de venda preenchido automaticamente a partir dos dados do carro</p>
+          <p>Gere o contrato de venda ou o recibo, preenchidos automaticamente a partir dos dados do carro</p>
         </div>
         <button type="button" className="btn btn-outline" onClick={load}>
           <RefreshCcw size={15} /> Atualizar
@@ -197,7 +279,9 @@ export default function AdminContracts() {
       </div>
 
       <p className="admin-form-hint">
-        Modelo padrão de contrato particular de compra e venda de veículo usado — não é assessoria jurídica.
+        {isReceipt
+          ? 'Recibo interno de venda — não é assessoria jurídica nem substitui a Nota Fiscal Eletrônica (NF-e).'
+          : 'Modelo padrão de contrato particular de compra e venda de veículo usado — não é assessoria jurídica.'}{' '}
         Vale revisar com um advogado ou contador antes de usar oficialmente.
       </p>
 
@@ -232,6 +316,17 @@ export default function AdminContracts() {
 
         <section className="admin-form-section">
           <h2>Comprador</h2>
+          <div className="admin-form-grid">
+            <label>
+              Cliente cadastrado
+              <select value={selectedCustomerId} onChange={(e) => handleSelectCustomer(e.target.value)}>
+                <option value="">Selecione para preencher automaticamente…</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           <div className="admin-form-grid">
             <label>
               Nome completo
@@ -298,7 +393,7 @@ export default function AdminContracts() {
             </label>
             <label>
               Km
-              <input type="text" inputMode="decimal" value={vehicle.km} onChange={(e) => updateVehicle('km', e.target.value)} placeholder="Ex: 45.000" />
+              <input inputMode="numeric" value={vehicle.km} onChange={(e) => updateVehicle('km', e.target.value)} />
             </label>
             <label>
               Placa
@@ -320,7 +415,7 @@ export default function AdminContracts() {
           <div className="admin-form-grid">
             <label>
               Preço de venda (R$)
-              <input type="text" inputMode="decimal" value={sale.price} onChange={(e) => updateSale('price', e.target.value)} required placeholder="Ex: 45.900" />
+              <input inputMode="numeric" value={sale.price} onChange={(e) => updateSale('price', e.target.value)} required />
             </label>
             <label>
               Forma de pagamento
@@ -334,7 +429,7 @@ export default function AdminContracts() {
             </label>
             <label>
               Data da venda
-              <input type="date" value={sale.date} onChange={(e) => updateSale('date', e.target.value)} />
+              <DateInputBR value={sale.date} onChange={(iso) => updateSale('date', iso)} />
             </label>
             <label>
               Cidade/UF (para o contrato)
@@ -352,26 +447,76 @@ export default function AdminContracts() {
         </section>
 
         <section className="admin-form-section">
-          <h2>Prévia do contrato</h2>
-          <div className="contract-preview">
-            <h3>{title}</h3>
-            {paragraphs.map((p, i) => (
-              <p key={i}>{p}</p>
-            ))}
+          <h2>Documento</h2>
+          <div className="admin-form-grid">
+            <label>
+              Tipo de documento
+              <select
+                value={documentType}
+                onChange={(e) => {
+                  setDocumentType(e.target.value)
+                  setSelectedTemplateId('')
+                }}
+              >
+                <option value="contrato">Contrato de compra e venda</option>
+                <option value="recibo">Recibo de venda</option>
+              </select>
+            </label>
+            {!isReceipt && (
+              <label>
+                Modelo do contrato
+                <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)}>
+                  <option value="">Modelo padrão do sistema</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
+          {isReceipt && (
+            <p className="admin-form-note">
+              Comprovante interno de venda, não substitui a Nota Fiscal Eletrônica (NF-e).
+            </p>
+          )}
+          {!isReceipt && isAdmin && (
+            <Link to="/admin/contratos/modelos" className="admin-back-link admin-form-note">
+              <Settings size={14} /> Gerenciar modelos de contrato
+            </Link>
+          )}
         </section>
 
+        {!selectedTemplateId && (
+          <section className="admin-form-section">
+            <h2>Prévia do {isReceipt ? 'recibo' : 'contrato'}</h2>
+            <div className="contract-preview">
+              <h3>{title}</h3>
+              {paragraphs.map((p, i) => (
+                <p key={i}>{p}</p>
+              ))}
+            </div>
+          </section>
+        )}
+
         <div className="admin-form-actions">
-          <button type="button" className="btn btn-outline" onClick={handleDownloadDocx} disabled={generating}>
-            <FileText size={15} /> Baixar Word
-          </button>
-          <button type="button" className="btn btn-primary" onClick={handleDownloadPdf} disabled={generating}>
-            <FileDown size={15} /> Baixar PDF
-          </button>
+          {selectedTemplateId ? (
+            <button type="button" className="btn btn-primary" onClick={handleDownloadCustomTemplate} disabled={generating}>
+              <FileText size={15} /> {generating ? 'Gerando…' : 'Baixar Word (modelo próprio)'}
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn btn-outline" onClick={handleDownloadDocx} disabled={generating}>
+                <FileText size={15} /> Baixar Word
+              </button>
+              <button type="button" className="btn btn-primary" onClick={handleDownloadPdf} disabled={generating}>
+                <FileDown size={15} /> Baixar PDF
+              </button>
+            </>
+          )}
         </div>
       </form>
 
-      <h2 className="admin-section-title">Contratos gerados</h2>
+      <h2 className="admin-section-title">{isStaff ? 'Contratos gerados' : 'Seus contratos gerados'}</h2>
       {loading ? (
         <p className="admin-muted">Carregando…</p>
       ) : contracts.length === 0 ? (
@@ -382,6 +527,7 @@ export default function AdminContracts() {
             <thead>
               <tr>
                 <th>Data</th>
+                <th>Tipo</th>
                 <th>Comprador</th>
                 <th>Veículo</th>
                 <th>Valor</th>
@@ -392,13 +538,18 @@ export default function AdminContracts() {
               {contracts.map((c) => (
                 <tr key={c.id}>
                   <td>{formatDate(c.saleDate)}</td>
+                  <td>{c.documentType === 'recibo' ? 'Recibo' : 'Contrato'}</td>
                   <td>{c.buyer.name}</td>
                   <td>{c.vehicle.brand} {c.vehicle.model}</td>
                   <td>{formatCurrency(c.salePrice)}</td>
                   <td>
                     <div className="admin-row-actions">
-                      <button type="button" className="btn btn-outline" onClick={() => redownload(c, 'pdf')}>PDF</button>
-                      <button type="button" className="btn btn-outline" onClick={() => redownload(c, 'docx')}>Word</button>
+                      <button type="button" className="admin-action-btn" onClick={() => redownload(c, 'pdf')}>
+                        <FileDown size={15} /> Baixar PDF
+                      </button>
+                      <button type="button" className="admin-action-btn" onClick={() => redownload(c, 'docx')}>
+                        <FileText size={15} /> Baixar Word
+                      </button>
                     </div>
                   </td>
                 </tr>

@@ -4,7 +4,11 @@ import { RefreshCcw } from 'lucide-react'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchContractsAdmin } from '../lib/contractsApi.js'
+import { fetchSales } from '../lib/salesApi.js'
+import { fetchSellers } from '../lib/sellersApi.js'
 import { formatCurrency } from '../utils/carFormat.js'
+import DateInputBR from '../components/DateInputBR.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import './admin.css'
 
 const PERIODS = [
@@ -80,9 +84,13 @@ function formatPeriodLabel(preset, start, end) {
 }
 
 export default function AdminHistory() {
+  // Gerente: sem custo, gastos, margem e lucro; valores de venda só se o admin liberou
+  const { canSeeCosts, canSeeSaleValues } = useAuth()
   const [cars, setCars] = useState([])
   const [expenses, setExpenses] = useState([])
   const [contractsCount, setContractsCount] = useState(0)
+  const [sales, setSales] = useState([])
+  const [sellers, setSellers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -94,14 +102,18 @@ export default function AdminHistory() {
     setLoading(true)
     setError('')
     try {
-      const [carsData, expensesData, contractsData] = await Promise.all([
+      const [carsData, expensesData, contractsData, salesData, sellersData] = await Promise.all([
         fetchAllCarsAdmin(),
-        fetchAllExpensesAdmin(),
+        canSeeCosts ? fetchAllExpensesAdmin() : Promise.resolve([]),
         fetchContractsAdmin(),
+        fetchSales(),
+        fetchSellers(),
       ])
       setCars(carsData)
       setExpenses(expensesData)
       setContractsCount(contractsData.length)
+      setSales(salesData)
+      setSellers(sellersData)
     } catch (err) {
       setError(err.message || 'Erro ao carregar o histórico.')
     } finally {
@@ -111,6 +123,7 @@ export default function AdminHistory() {
 
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const { start, end } = useMemo(() => getPeriodRange(preset, customStart, customEnd), [preset, customStart, customEnd])
@@ -124,23 +137,29 @@ export default function AdminHistory() {
 
   // Margem de cada carro usa o custo total (todos os gastos dele, sem filtro de
   // período) — é o lucro real daquela venda, não deve mudar conforme o filtro.
-  const allSoldCars = useMemo(
-    () =>
-      cars
-        .filter((c) => c.status === 'vendido')
-        .map((car) => {
-          const totalExpenses = expensesByCar[car.id] || 0
-          const totalCost = (car.purchasePrice || 0) + totalExpenses
-          const margin = car.purchasePrice ? car.price - totalCost : null
-          return { car, totalCost, margin }
-        })
-        .sort((a, b) => new Date(b.car.soldAt || 0) - new Date(a.car.soldAt || 0)),
-    [cars, expensesByCar]
-  )
+  // Valor e data da venda registrada (janela "Registrar venda"); carros
+  // vendidos antes desse registro existir usam o preço anunciado.
+  const allSoldCars = useMemo(() => {
+    const salesByCar = {}
+    for (const sale of sales) salesByCar[sale.carId] = sale
+    return cars
+      .filter((c) => c.status === 'vendido')
+      .map((car) => {
+        const sale = salesByCar[car.id] || null
+        const revenue = sale ? sale.salePrice : car.price
+        const soldDate = sale ? sale.saleDate : car.soldAt
+        const sellerName = sale?.sellerId ? sellers.find((sl) => sl.id === sale.sellerId)?.name || '—' : sale ? 'Venda direta' : '—'
+        const totalExpenses = expensesByCar[car.id] || 0
+        const totalCost = (car.purchasePrice || 0) + totalExpenses
+        const margin = car.purchasePrice && revenue != null ? revenue - totalCost : null
+        return { car, totalCost, margin, revenue, soldDate, sellerName }
+      })
+      .sort((a, b) => new Date(b.soldDate || 0) - new Date(a.soldDate || 0))
+  }, [cars, expensesByCar, sales, sellers])
 
   const periodActive = preset !== 'tudo'
   const soldCars = useMemo(
-    () => (periodActive ? allSoldCars.filter((r) => inRange(r.car.soldAt, start, end)) : allSoldCars),
+    () => (periodActive ? allSoldCars.filter((r) => inRange(r.soldDate, start, end)) : allSoldCars),
     [allSoldCars, periodActive, start, end]
   )
 
@@ -154,7 +173,8 @@ export default function AdminHistory() {
   const totalMaintenance = periodExpenses.reduce((sum, e) => sum + e.amount, 0)
   const totalProfit = soldCars.reduce((sum, r) => sum + (r.margin ?? 0), 0)
   const soldWithMargin = soldCars.filter((r) => r.margin !== null)
-  const avgTicket = soldCars.length ? soldCars.reduce((sum, r) => sum + r.car.price, 0) / soldCars.length : 0
+  const soldWithPrice = soldCars.filter((r) => r.revenue != null)
+  const avgTicket = soldWithPrice.length ? soldWithPrice.reduce((sum, r) => sum + r.revenue, 0) / soldWithPrice.length : 0
 
   if (loading) return <p className="admin-muted">Carregando…</p>
 
@@ -163,7 +183,7 @@ export default function AdminHistory() {
       <div className="admin-page-head">
         <div>
           <h1>Histórico</h1>
-          <p>Resumo de tudo que já foi vendido e gasto</p>
+          <p>{canSeeCosts ? 'Resumo de tudo que já foi vendido e gasto' : 'Resumo de tudo que já foi vendido'}</p>
         </div>
         <button type="button" className="btn btn-outline" onClick={load}>
           <RefreshCcw size={15} /> Atualizar
@@ -185,11 +205,11 @@ export default function AdminHistory() {
           <>
             <label>
               De
-              <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+              <DateInputBR value={customStart} onChange={setCustomStart} />
             </label>
             <label>
               Até
-              <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+              <DateInputBR value={customEnd} onChange={setCustomEnd} />
             </label>
           </>
         )}
@@ -201,21 +221,27 @@ export default function AdminHistory() {
           <span>Carros vendidos</span>
           <strong>{soldCars.length}</strong>
         </div>
-        <div className="expense-summary-card">
-          <span>Gasto em manutenção {periodActive ? 'no período' : '(todos os carros)'}</span>
-          <strong>{formatCurrency(totalMaintenance)}</strong>
-        </div>
-        <div className={`expense-summary-card ${totalProfit < 0 ? 'is-negative' : 'is-positive'}`}>
-          <span>Lucro {periodActive ? 'no período' : 'total'} (carros vendidos)</span>
-          <strong>{formatCurrency(totalProfit)}</strong>
-        </div>
-        <div className="expense-summary-card">
-          <span>Ticket médio de venda</span>
-          <strong>{soldCars.length ? formatCurrency(Math.round(avgTicket)) : '—'}</strong>
-        </div>
+        {canSeeCosts && (
+          <div className="expense-summary-card">
+            <span>Gasto em manutenção {periodActive ? 'no período' : '(todos os carros)'}</span>
+            <strong>{formatCurrency(totalMaintenance)}</strong>
+          </div>
+        )}
+        {canSeeCosts && (
+          <div className={`expense-summary-card ${totalProfit < 0 ? 'is-negative' : 'is-positive'}`}>
+            <span>Lucro {periodActive ? 'no período' : 'total'} (carros vendidos)</span>
+            <strong>{formatCurrency(totalProfit)}</strong>
+          </div>
+        )}
+        {canSeeSaleValues && (
+          <div className="expense-summary-card">
+            <span>Ticket médio de venda</span>
+            <strong>{soldWithPrice.length ? formatCurrency(Math.round(avgTicket)) : '—'}</strong>
+          </div>
+        )}
       </div>
 
-      {soldCars.length !== soldWithMargin.length && (
+      {canSeeCosts && soldCars.length !== soldWithMargin.length && (
         <p className="admin-form-hint">
           O lucro considera só os {soldWithMargin.length} de {soldCars.length} carros vendidos com "Preço de compra" preenchido. A margem de cada carro usa o custo total dele (não só os gastos do período selecionado).
         </p>
@@ -236,24 +262,28 @@ export default function AdminHistory() {
                 <tr>
                   <th>Carro</th>
                   <th>Vendido em</th>
-                  <th>Custo total</th>
-                  <th>Preço de venda</th>
-                  <th>Margem</th>
+                  <th>Vendedor</th>
+                  {canSeeCosts && <th>Custo total</th>}
+                  {canSeeSaleValues && <th>Valor da venda</th>}
+                  {canSeeCosts && <th>Margem</th>}
                 </tr>
               </thead>
               <tbody>
-                {soldCars.map(({ car, totalCost, margin }) => (
+                {soldCars.map(({ car, totalCost, margin, revenue, soldDate, sellerName }) => (
                   <tr key={car.id}>
                     <td>
                       <strong>{car.brand} {car.model}</strong>
                       <span className="admin-table-sub">{car.version}</span>
                     </td>
-                    <td>{formatDate(car.soldAt)}</td>
-                    <td>{car.purchasePrice ? formatCurrency(totalCost) : '—'}</td>
-                    <td>{formatCurrency(car.price)}</td>
-                    <td className={margin === null ? '' : margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
-                      {margin === null ? '—' : formatCurrency(margin)}
-                    </td>
+                    <td>{formatDate(soldDate && soldDate.length <= 10 ? `${soldDate}T00:00:00` : soldDate)}</td>
+                    <td>{sellerName}</td>
+                    {canSeeCosts && <td>{car.purchasePrice ? formatCurrency(totalCost) : '—'}</td>}
+                    {canSeeSaleValues && <td>{revenue != null ? formatCurrency(revenue) : '—'}</td>}
+                    {canSeeCosts && (
+                      <td className={margin === null ? '' : margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
+                        {margin === null ? '—' : formatCurrency(margin)}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -261,29 +291,37 @@ export default function AdminHistory() {
           </div>
 
           <div className="admin-card-list">
-            {soldCars.map(({ car, totalCost, margin }) => (
+            {soldCars.map(({ car, totalCost, margin, revenue, soldDate, sellerName }) => (
               <div className="admin-card" key={car.id}>
                 <div className="admin-card-top">
                   <div className="admin-card-title">
                     <strong>{car.brand} {car.model}</strong>
                     <span className="admin-table-sub">{car.version}</span>
-                    <span className="admin-card-meta">Vendido em {formatDate(car.soldAt)}</span>
+                    <span className="admin-card-meta">
+                      Vendido em {formatDate(soldDate && soldDate.length <= 10 ? `${soldDate}T00:00:00` : soldDate)} · {sellerName}
+                    </span>
                   </div>
                 </div>
-                <div className="admin-card-stats">
-                  <div>
-                    <span>Custo total</span>
-                    <strong>{car.purchasePrice ? formatCurrency(totalCost) : '—'}</strong>
+                {canSeeSaleValues && (
+                  <div className="admin-card-stats">
+                    {canSeeCosts && (
+                      <div>
+                        <span>Custo total</span>
+                        <strong>{car.purchasePrice ? formatCurrency(totalCost) : '—'}</strong>
+                      </div>
+                    )}
+                    <div>
+                      <span>Valor da venda</span>
+                      <strong>{revenue != null ? formatCurrency(revenue) : '—'}</strong>
+                    </div>
+                    {canSeeCosts && (
+                      <div className={margin === null ? '' : margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
+                        <span>Margem</span>
+                        <strong>{margin === null ? '—' : formatCurrency(margin)}</strong>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <span>Preço de venda</span>
-                    <strong>{formatCurrency(car.price)}</strong>
-                  </div>
-                  <div className={margin === null ? '' : margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
-                    <span>Margem</span>
-                    <strong>{margin === null ? '—' : formatCurrency(margin)}</strong>
-                  </div>
-                </div>
+                )}
               </div>
             ))}
           </div>

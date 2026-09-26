@@ -23,9 +23,10 @@ function loadEnv() {
 const env = loadEnv()
 const SUPABASE_URL = env.VITE_SUPABASE_URL
 const SUPABASE_ANON_KEY = env.VITE_SUPABASE_ANON_KEY
+const COMPANY_ID = env.VITE_COMPANY_ID
 const SITE_URL = (env.VITE_SITE_URL || '').replace(/\/$/, '')
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !COMPANY_ID) {
   console.log('[prerender-og] Supabase não configurado (.env vazio) — pulando geração de previews por carro.')
   process.exit(0)
 }
@@ -44,10 +45,13 @@ if (!existsSync(distIndexPath)) {
 const template = readFileSync(distIndexPath, 'utf-8')
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+// O banco é compartilhado entre várias lojas: só os carros desta, visíveis no site
 const { data: cars, error } = await supabase
   .from('cars')
   .select('slug, brand, model, version, model_year, km, transmission, price, images')
-  .eq('status', 'disponivel')
+  .eq('company_id', COMPANY_ID)
+  .in('status', ['disponivel', 'manutencao'])
+  .eq('hidden', false)
 
 if (error) {
   console.error('[prerender-og] Falha ao buscar carros no Supabase:', error.message)
@@ -72,7 +76,8 @@ function withMeta(html, { title, description, image, url }) {
 let count = 0
 for (const row of cars || []) {
   if (!row.slug) continue
-  const title = `${row.brand} ${row.model} ${row.version} — ${formatCurrency(row.price)} | M&3 Veículos`
+  const priceLabel = row.price != null ? formatCurrency(row.price) : 'Consulte o valor'
+  const title = `${row.brand} ${row.model} ${row.version} — ${priceLabel} | M&3 Veículos`
   const description = `${row.model_year} · ${Number(row.km).toLocaleString('pt-BR')} km · ${row.transmission}. Confira esse e outros veículos na M&3 Veículos.`
   const image = row.images?.[0] || `${SITE_URL}/logo.jpg`
   const url = `${SITE_URL}/carro/${row.slug}`

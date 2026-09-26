@@ -1,4 +1,4 @@
--- M&3 Veículos — schema do Supabase
+-- Dom Motors — schema do Supabase
 -- Rode este arquivo inteiro no SQL Editor do seu projeto Supabase (Project > SQL Editor > New query).
 -- Pode rodar novamente sem problemas: os comandos são "idempotentes" (if not exists / on conflict).
 
@@ -26,22 +26,22 @@ create table if not exists public.cars (
   highlights text[] not null default '{}',
   description text not null default '',
   images jsonb not null default '[]',
-  featured boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-alter table public.cars add column if not exists featured boolean not null default false;
+create index if not exists cars_status_idx on public.cars (status);
+create index if not exists cars_category_idx on public.cars (category);
+create index if not exists cars_brand_idx on public.cars (brand);
+create index if not exists cars_slug_idx on public.cars (slug);
 
 -- Custo de aquisição do carro (controle financeiro interno, não aparece no site público)
 alter table public.cars add column if not exists purchase_price integer;
 alter table public.cars add column if not exists purchase_date date;
 
-create index if not exists cars_status_idx on public.cars (status);
-create index if not exists cars_category_idx on public.cars (category);
-create index if not exists cars_brand_idx on public.cars (brand);
+-- Controle manual de "carros em destaque" na home (marcado pelo admin)
+alter table public.cars add column if not exists featured boolean not null default false;
 create index if not exists cars_featured_idx on public.cars (featured);
-create index if not exists cars_slug_idx on public.cars (slug);
 
 -- mantém updated_at em dia automaticamente
 create or replace function public.set_updated_at()
@@ -209,7 +209,151 @@ on storage.objects for delete
 to authenticated
 using (bucket_id = 'expense-attachments');
 
--- 6) Ocultar carro do site sem marcar como vendido (reservado, em negociação etc.) -
+-- 6) Dados de exemplo (opcional) ---------------------------------------------
+-- 16 carros fictícios para o site não ficar vazio no primeiro acesso.
+-- Apague ou edite pelo painel /admin depois que os dados reais estiverem prontos.
+-- Só roda numa instalação nova (antes da coluna company_id existir — seção 11).
+-- Num projeto que já passou pela migração multi-tenant, rodar o schema.sql de
+-- novo pularia isso: inserir sem company_id violaria a constraint not null.
+do $$
+begin
+if not exists (
+  select 1 from information_schema.columns
+  where table_schema = 'public' and table_name = 'cars' and column_name = 'company_id'
+) then
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'toyota-corolla-xei-2022', 'Toyota', 'Corolla', 'XEi 2.0 Flex', 2022, '2022/2022', 32000,
+  'Automático CVT', 'Flex', 'Branco Polar', 4, 'sedan', 'Único dono',
+  119900, 129900, 'Última unidade', 'disponivel',
+  ARRAY['Revisado na concessionária', 'Único dono', 'IPVA 2026 pago', 'Laudo cautelar aprovado']::text[], 'Corolla XEi impecável, com histórico completo de revisões na concessionária Toyota. Interior conservado, multimídia com Apple CarPlay/Android Auto, bancos em couro e piloto automático adaptativo.', '["https://images.unsplash.com/photo-1774854158646-589f7c712bdc?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1582639510494-c80b5de9f148?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1613027633780-8bc7365c0101?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'honda-hrv-exl-2023', 'Honda', 'HR-V', 'EXL 1.5 Turbo', 2023, '2023/2023', 18500,
+  'Automático CVT', 'Flex', 'Prata Lunar', 4, 'suv', 'Único dono',
+  139900, 149900, 'Poucas unidades', 'disponivel',
+  ARRAY['Garantia de fábrica', 'Teto solar', 'Câmera 360°', 'Revisado']::text[], 'HR-V EXL Turbo com baixíssima quilometragem, ainda na garantia de fábrica. Teto solar panorâmico, central multimídia de 9", sensores dianteiros e traseiros e assistente de permanência em faixa.', '["https://images.unsplash.com/photo-1653325189816-5d8dc746cc16?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1658988297153-e173ba9c490d?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1748214547184-d994bfe53322?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'volkswagen-polo-highline-2021', 'Volkswagen', 'Polo', 'Highline 200 TSI', 2021, '2021/2021', 41000,
+  'Automático 6 marchas', 'Flex', 'Vermelho Flash', 4, 'hatch', 'Segundo dono',
+  79900, 84900, 'Disponível', 'disponivel',
+  ARRAY['Revisado', 'IPVA pago', 'Rodas de liga leve 17"', 'Multimídia VW Play']::text[], 'Polo Highline turbo, ágil e econômico. Bancos com acabamento premium, ar-condicionado digital de duas zonas e faróis full LED. Pneus novos e revisão completa em dia.', '["https://images.unsplash.com/photo-1586201047938-f117c409e2d7?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1605270396307-d00ba5cda1d0?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1605270397189-b613ace3b4f3?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'chevrolet-onix-plus-ltz-2022', 'Chevrolet', 'Onix Plus', 'LTZ 1.0 Turbo', 2022, '2022/2023', 29000,
+  'Automático', 'Flex', 'Branco Summit', 4, 'sedan', 'Único dono',
+  84900, 89900, 'Disponível', 'disponivel',
+  ARRAY['Único dono', 'Revisado na concessionária', 'IPVA 2026 pago', 'Central multimídia 8"']::text[], 'Onix Plus LTZ Turbo com ótimo custo-benefício, completo com sensor de estacionamento, câmera de ré, piloto automático e conectividade sem fio com Apple CarPlay/Android Auto.', '["https://images.unsplash.com/photo-1656200529331-0596ff6372f1?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1656200732291-78edf5bec525?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1758179128122-6079c9cb3e4e?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'jeep-compass-longitude-2021', 'Jeep', 'Compass', 'Longitude 1.3 Turbo', 2021, '2021/2021', 52000,
+  'Automático 6 marchas', 'Flex', 'Cinza Granite', 4, 'suv', 'Segundo dono',
+  118900, 124900, 'Disponível', 'disponivel',
+  ARRAY['Revisado', 'Laudo cautelar aprovado', 'Bancos em couro', 'Central 8.4"']::text[], 'Compass Longitude robusto e confortável para o dia a dia e viagens em família. Suspensão revisada, pneus em bom estado e documentação 100% regularizada.', '["https://images.unsplash.com/photo-1748214547306-360d11024747?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1758411898236-60451aa6c6c9?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1758411898280-2dc7c95e0ba7?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'fiat-toro-freedom-2022', 'Fiat', 'Toro', 'Freedom 2.0 Diesel 4x4', 2022, '2022/2022', 38000,
+  'Automático 9 marchas', 'Diesel', 'Preto Vulcano', 4, 'picape', 'Único dono',
+  149900, 159900, 'Última unidade', 'disponivel',
+  ARRAY['Tração 4x4', 'Único dono', 'Revisado', 'Caçamba com forração']::text[], 'Toro Freedom Diesel 4x4, motor forte e econômico para trabalho e lazer. Caçamba com forração e engate, ótima para quem precisa de espaço e robustez sem abrir mão do conforto.', '["https://images.unsplash.com/photo-1598043249911-1122b7faa4f3?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1655209302911-a1e6d6253d77?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1509510834889-05f7321fa47d?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'hyundai-hb20-comfort-2023', 'Hyundai', 'HB20', 'Comfort 1.0', 2023, '2023/2023', 15000,
+  'Manual', 'Flex', 'Prata Sleek', 4, 'hatch', 'Único dono',
+  76900, null, 'Poucas unidades', 'disponivel',
+  ARRAY['Baixa km', 'Único dono', 'IPVA pago', 'Revisado']::text[], 'HB20 Comfort com baixíssima quilometragem, ideal para o dia a dia na cidade. Econômico, ágil e com excelente valor de revenda. Documentação em dia e pronto para transferência.', '["https://images.unsplash.com/photo-1471444928139-48c5bf5173f8?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1663852408695-f57f4d75a536?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1667913605679-278b1b9604fa?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'renault-duster-iconic-2020', 'Renault', 'Duster', 'Iconic 1.6 CVT', 2020, '2020/2020', 61000,
+  'Automático CVT', 'Flex', 'Branco Glacier', 4, 'suv', 'Segundo dono',
+  76900, 82900, 'Disponível', 'disponivel',
+  ARRAY['Revisado', 'Laudo cautelar aprovado', 'Câmera de ré', 'Multimídia com GPS']::text[], 'Duster Iconic com ótimo espaço interno e porta-malas generoso. Suspensão alta ideal para estradas de terra, revisão em dia e pneus com boa vida útil restante.', '["https://images.unsplash.com/photo-1760163288073-74799d2275c4?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1788873951020-59860eb91280?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1767749995450-7b63ab7cd4fd?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'nissan-kicks-sl-2022', 'Nissan', 'Kicks', 'SL CVT', 2022, '2022/2022', 34000,
+  'Automático CVT', 'Flex', 'Vermelho Vibrante', 4, 'suv', 'Único dono',
+  108900, null, 'Disponível', 'disponivel',
+  ARRAY['Único dono', 'Revisado na concessionária', 'Câmera 360°', 'Teto bicolor']::text[], 'Kicks SL completo, com câmera 360°, central multimídia com navegação e acabamento bicolor. Excelente estado de conservação, interno e externo.', '["https://images.unsplash.com/photo-1758411898226-5b91498e87e0?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1788874620958-3a96ce22f5b4?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1658988297153-e173ba9c490d?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'ford-ranger-xls-2021', 'Ford', 'Ranger', 'XLS 2.2 Diesel 4x4', 2021, '2021/2021', 47000,
+  'Manual', 'Diesel', 'Prata Aluminium', 4, 'picape', 'Segundo dono',
+  179900, 189900, 'Disponível', 'disponivel',
+  ARRAY['Tração 4x4', 'Revisada', 'Laudo cautelar aprovado', 'Capota marítima']::text[], 'Ranger XLS Diesel 4x4, robusta e preparada para o trabalho pesado ou aventura fora de estrada. Capota marítima incluída, revisões em dia e pneus em ótimo estado.', '["https://images.unsplash.com/photo-1564355172839-be57081c219f?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1592092186887-af4968ddc78c?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1598043249911-1122b7faa4f3?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'volkswagen-t-cross-comfortline-2023', 'Volkswagen', 'T-Cross', 'Comfortline 200 TSI', 2023, '2023/2023', 21000,
+  'Automático 6 marchas', 'Flex', 'Azul Biscay', 4, 'suv', 'Único dono',
+  132900, null, 'Poucas unidades', 'disponivel',
+  ARRAY['Único dono', 'Garantia de fábrica', 'Multimídia VW Play', 'Revisado']::text[], 'T-Cross Comfortline com baixa quilometragem e ainda coberta pela garantia de fábrica. Ótimo espaço interno, porta-malas amplo e assistentes de condução completos.', '["https://images.unsplash.com/photo-1779983625011-e9c207710d11?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1771208442405-73a20b41111a?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1758411898236-60451aa6c6c9?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'toyota-corolla-cross-xre-2023', 'Toyota', 'Corolla Cross', 'XRE 2.0 Flex', 2023, '2023/2023', 12000,
+  'Automático CVT', 'Flex', 'Preto Ébano', 4, 'suv', 'Único dono',
+  149900, 159900, 'Última unidade', 'disponivel',
+  ARRAY['Baixa km', 'Único dono', 'Garantia de fábrica', 'Bancos em couro']::text[], 'Corolla Cross XRE seminovo, com quilometragem baixíssima e ainda na garantia de fábrica. Interior premium, central multimídia de 9" e pacote completo de segurança Toyota Safety Sense.', '["https://images.unsplash.com/photo-1653325189816-5d8dc746cc16?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1788874620958-3a96ce22f5b4?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1788873951020-59860eb91280?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'chevrolet-tracker-premier-2022', 'Chevrolet', 'Tracker', 'Premier 1.2 Turbo', 2022, '2022/2022', 26000,
+  'Automático', 'Flex', 'Branco Summit', 4, 'suv', 'Único dono',
+  119900, null, 'Disponível', 'disponivel',
+  ARRAY['Único dono', 'Revisado', 'Teto solar', 'Central multimídia 8"']::text[], 'Tracker Premier completa, com teto solar, bancos aquecidos e central multimídia com navegação. Estado de conservação impecável, dentro e fora.', '["https://images.unsplash.com/photo-1758411898280-2dc7c95e0ba7?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1758411898226-5b91498e87e0?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1748214547306-360d11024747?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'honda-civic-touring-2021', 'Honda', 'Civic', 'Touring 1.5 Turbo', 2021, '2021/2021', 44000,
+  'Automático CVT', 'Flex', 'Cinza Modern Steel', 4, 'sedan', 'Segundo dono',
+  129900, 139900, 'Disponível', 'disponivel',
+  ARRAY['Revisado', 'Bancos em couro', 'Teto solar', 'Honda Sensing']::text[], 'Civic Touring, o sedan esportivo com acabamento premium. Pacote completo de segurança Honda Sensing, teto solar e bancos em couro com ajuste elétrico.', '["https://images.unsplash.com/photo-1613027633780-8bc7365c0101?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1656200732291-78edf5bec525?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1774854158646-589f7c712bdc?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'fiat-pulse-drive-2023', 'Fiat', 'Pulse', 'Drive 1.3', 2023, '2023/2023', 9000,
+  'Manual', 'Flex', 'Amarelo Racing', 4, 'suv', 'Único dono',
+  98900, null, 'Poucas unidades', 'disponivel',
+  ARRAY['Baixa km', 'Único dono', 'Garantia de fábrica', 'Central multimídia 10.1"']::text[], 'Pulse Drive praticamente zero km, com visual marcante e central multimídia de 10.1". Ótima opção de SUV compacto com baixo custo de manutenção.', '["https://images.unsplash.com/photo-1771208442405-73a20b41111a?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1748214547184-d994bfe53322?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1767749995450-7b63ab7cd4fd?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+insert into public.cars (slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors, category, condition, price, original_price, badge, status, highlights, description, images) values (
+  'renault-kwid-zen-2022', 'Renault', 'Kwid', 'Zen 1.0', 2022, '2022/2022', 22000,
+  'Manual', 'Flex', 'Branco Glacier', 4, 'hatch', 'Único dono',
+  54900, 59900, 'Disponível', 'disponivel',
+  ARRAY['Único dono', 'Baixo consumo', 'IPVA pago', 'Revisado']::text[], 'Kwid Zen, o hatch compacto mais econômico da categoria. Ideal para o dia a dia na cidade, com baixíssimo custo de manutenção e seguro acessível.', '["https://images.unsplash.com/photo-1605270397189-b613ace3b4f3?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1663852408695-f57f4d75a536?auto=format&fit=crop&w=1200&q=80","https://images.unsplash.com/photo-1586201047938-f117c409e2d7?auto=format&fit=crop&w=1200&q=80"]'::jsonb
+)
+on conflict (slug) do nothing;
+
+end if;
+end $$;
+
+-- 7) Ocultar carro do site sem marcar como vendido (reservado, em negociação etc.) -
 -- Diferente de "vendido", um carro oculto some do site mas continua no estoque.
 
 alter table public.cars add column if not exists hidden boolean not null default false;
@@ -229,7 +373,7 @@ alter table public.cars add column if not exists renavam text;
 -- padrão de car_expenses.attachments, guardado como jsonb de {path, name, type}.
 alter table public.cars add column if not exists documents jsonb not null default '[]';
 
--- 7) Storage: bucket PRIVADO para documentos dos carros ----------------------
+-- 8) Storage: bucket PRIVADO para documentos dos carros ----------------------
 -- Igual ao "expense-attachments": só o painel admin (authenticated) acessa,
 -- nunca fica público.
 
@@ -255,7 +399,7 @@ on storage.objects for delete
 to authenticated
 using (bucket_id = 'car-documents');
 
--- 8) Contratos de venda gerados pelo painel -----------------------------------
+-- 9) Contratos de venda gerados pelo painel -----------------------------------
 -- Guarda um "retrato" (snapshot) dos dados da empresa, do comprador e do veículo
 -- no momento em que o contrato foi gerado — assim, editar ou apagar o carro depois
 -- não altera contratos já emitidos. Só acessível pelo painel admin.
@@ -306,9 +450,1551 @@ on public.contracts for delete
 to authenticated
 using (true);
 
--- 9) Status "em manutenção" — carro fora de venda mas ainda não vendido -----
+-- 10) Status "em manutenção" — carro fora de venda mas ainda não vendido -----
 -- (retirado de circulação pra reparo/preparação antes de ir pro estoque disponível)
 
 alter table public.cars drop constraint if exists cars_status_check;
 alter table public.cars add constraint cars_status_check
   check (status in ('disponivel', 'manutencao', 'vendido'));
+
+-- 11) Multi-tenant: várias empresas (sites) no mesmo projeto Supabase --------
+-- Cada empresa é uma linha em "companies". Cada usuário do Supabase Auth é
+-- vinculado a uma empresa via "user_company". A função current_company_id()
+-- devolve a empresa do usuário logado e é usada nas policies de RLS abaixo
+-- pra isolar os dados: um admin da empresa A nunca lê/escreve dado da empresa B.
+-- Isso existe pra não precisar criar um projeto Supabase novo (e pagar mais
+-- $10/mês de compute) a cada cliente novo — todos compartilham este projeto.
+
+create table if not exists public.companies (
+  id uuid primary key default gen_random_uuid(),
+  slug text unique not null,
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.user_company (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  primary key (user_id, company_id)
+);
+
+alter table public.user_company enable row level security;
+
+drop policy if exists "User can read own company link" on public.user_company;
+create policy "User can read own company link"
+on public.user_company for select
+to authenticated
+using (user_id = auth.uid());
+
+-- security definer: precisa ler user_company ignorando a RLS dela (que só
+-- deixa cada usuário ver a própria linha), senão vira referência circular.
+create or replace function public.current_company_id()
+returns uuid
+language sql stable security definer set search_path = public
+as $$
+  select company_id from public.user_company where user_id = auth.uid() limit 1
+$$;
+grant execute on function public.current_company_id() to authenticated;
+
+-- Empresa "Dom Motors" (a primeira, já existente) e migração dos dados atuais
+insert into public.companies (slug, name) values ('dom-motors', 'Dom Motors')
+on conflict (slug) do nothing;
+
+alter table public.cars add column if not exists company_id uuid references public.companies(id);
+update public.cars set company_id = (select id from public.companies where slug = 'dom-motors') where company_id is null;
+alter table public.cars alter column company_id set not null;
+create index if not exists cars_company_id_idx on public.cars (company_id);
+
+alter table public.car_expenses add column if not exists company_id uuid references public.companies(id);
+update public.car_expenses set company_id = (select id from public.companies where slug = 'dom-motors') where company_id is null;
+alter table public.car_expenses alter column company_id set not null;
+create index if not exists car_expenses_company_id_idx on public.car_expenses (company_id);
+
+alter table public.contracts add column if not exists company_id uuid references public.companies(id);
+update public.contracts set company_id = (select id from public.companies where slug = 'dom-motors') where company_id is null;
+alter table public.contracts alter column company_id set not null;
+create index if not exists contracts_company_id_idx on public.contracts (company_id);
+
+-- Todo usuário já existente neste projeto é admin da Dom Motors (hoje é a
+-- única empresa aqui). Pra um cliente novo, insira manualmente uma linha em
+-- user_company vinculando o auth.uid() dele à company_id certa.
+insert into public.user_company (user_id, company_id)
+select id, (select id from public.companies where slug = 'dom-motors') from auth.users
+on conflict do nothing;
+
+-- company_id precisa estar liberado pro "anon" ler, senão o filtro
+-- .eq('company_id', ...) do site público falha por falta de permissão de
+-- coluna (mesmo motivo do "hidden" — ver comentário na seção 2).
+revoke select on public.cars from anon;
+grant select (
+  id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
+  category, condition, price, original_price, badge, status, highlights, description, images,
+  featured, hidden, company_id, created_at, updated_at
+) on public.cars to anon;
+
+-- Escrita em "cars" agora exige ser da mesma empresa do carro
+drop policy if exists "Authenticated can insert cars" on public.cars;
+create policy "Authenticated can insert cars"
+on public.cars for insert
+to authenticated
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can update cars" on public.cars;
+create policy "Authenticated can update cars"
+on public.cars for update
+to authenticated
+using (company_id = public.current_company_id())
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can delete cars" on public.cars;
+create policy "Authenticated can delete cars"
+on public.cars for delete
+to authenticated
+using (company_id = public.current_company_id());
+
+-- "car_expenses" e "contracts" nunca são lidos pelo site público — antes
+-- qualquer admin logado (de qualquer empresa) lia/escrevia tudo; agora fica
+-- restrito à própria empresa.
+drop policy if exists "Authenticated can read expenses" on public.car_expenses;
+create policy "Authenticated can read expenses"
+on public.car_expenses for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can insert expenses" on public.car_expenses;
+create policy "Authenticated can insert expenses"
+on public.car_expenses for insert
+to authenticated
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can update expenses" on public.car_expenses;
+create policy "Authenticated can update expenses"
+on public.car_expenses for update
+to authenticated
+using (company_id = public.current_company_id())
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can delete expenses" on public.car_expenses;
+create policy "Authenticated can delete expenses"
+on public.car_expenses for delete
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can read contracts" on public.contracts;
+create policy "Authenticated can read contracts"
+on public.contracts for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can insert contracts" on public.contracts;
+create policy "Authenticated can insert contracts"
+on public.contracts for insert
+to authenticated
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can delete contracts" on public.contracts;
+create policy "Authenticated can delete contracts"
+on public.contracts for delete
+to authenticated
+using (company_id = public.current_company_id());
+
+-- Storage: cada arquivo passa a viver dentro de uma pasta "{company_id}/...".
+-- Os 3 buckets estão vazios hoje, então não há arquivo antigo pra realocar.
+drop policy if exists "Authenticated can upload car photos" on storage.objects;
+create policy "Authenticated can upload car photos"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'car-photos'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can update car photos" on storage.objects;
+create policy "Authenticated can update car photos"
+on storage.objects for update
+to authenticated
+using (
+  bucket_id = 'car-photos'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can delete car photos" on storage.objects;
+create policy "Authenticated can delete car photos"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'car-photos'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can view expense attachments" on storage.objects;
+create policy "Authenticated can view expense attachments"
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'expense-attachments'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can upload expense attachments" on storage.objects;
+create policy "Authenticated can upload expense attachments"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'expense-attachments'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can delete expense attachments" on storage.objects;
+create policy "Authenticated can delete expense attachments"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'expense-attachments'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can view car documents" on storage.objects;
+create policy "Authenticated can view car documents"
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'car-documents'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can upload car documents" on storage.objects;
+create policy "Authenticated can upload car documents"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'car-documents'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can delete car documents" on storage.objects;
+create policy "Authenticated can delete car documents"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'car-documents'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+-- 12) Corrige leitura de "cars" pra admin autenticado ------------------------
+-- A policy da seção 2 ("Public can read cars") cobria "anon" e "authenticated"
+-- com using(true) — certo pro site público (vitrine é mesmo pra todo mundo ver),
+-- mas deixava qualquer admin logado (de qualquer empresa) ler os carros de
+-- TODAS as empresas via API direta, inclusive purchase_price/purchase_date
+-- (que "authenticated" tem permissão de coluna pra ver, diferente de "anon").
+-- Agora "anon" continua liberado geral; "authenticated" só lê da própria empresa.
+drop policy if exists "Public can read cars" on public.cars;
+create policy "Public can read cars"
+on public.cars for select
+to anon
+using (true);
+
+drop policy if exists "Authenticated can read own company cars" on public.cars;
+create policy "Authenticated can read own company cars"
+on public.cars for select
+to authenticated
+using (company_id = public.current_company_id());
+
+-- 13) Preço opcional ------------------------------------------------------------
+-- Algumas lojas preferem não expor o valor no anúncio (carro aparece como
+-- "Consulte o valor" e o cliente fala direto com o vendedor pelo WhatsApp).
+alter table public.cars alter column price drop not null;
+
+-- 14) Fornecedores ---------------------------------------------------------------
+-- Permite registrar com quem cada gasto foi feito (oficina, loja de peças etc.)
+-- pra loja acompanhar quanto gastou em cada prestador/fornecedor ao longo do ano.
+
+create table if not exists public.suppliers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  name text not null,
+  category text not null default 'servico' check (category in ('servico', 'pecas', 'outros')),
+  contact text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists suppliers_company_id_idx on public.suppliers (company_id);
+
+drop trigger if exists suppliers_set_updated_at on public.suppliers;
+create trigger suppliers_set_updated_at
+before update on public.suppliers
+for each row execute function public.set_updated_at();
+
+alter table public.suppliers enable row level security;
+
+drop policy if exists "Authenticated can read suppliers" on public.suppliers;
+create policy "Authenticated can read suppliers"
+on public.suppliers for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can insert suppliers" on public.suppliers;
+create policy "Authenticated can insert suppliers"
+on public.suppliers for insert
+to authenticated
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can update suppliers" on public.suppliers;
+create policy "Authenticated can update suppliers"
+on public.suppliers for update
+to authenticated
+using (company_id = public.current_company_id())
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can delete suppliers" on public.suppliers;
+create policy "Authenticated can delete suppliers"
+on public.suppliers for delete
+to authenticated
+using (company_id = public.current_company_id());
+
+-- Vincula o gasto a um fornecedor (opcional) pra alimentar o relatório
+-- "gasto por fornecedor" na aba Financeiro.
+alter table public.car_expenses add column if not exists supplier_id uuid references public.suppliers(id) on delete set null;
+create index if not exists car_expenses_supplier_id_idx on public.car_expenses (supplier_id);
+
+-- 15) Cadastro de clientes -------------------------------------------------------
+-- Controle de pra quem cada carro foi vendido, com os dados relevantes do
+-- comprador (documento, contato) reaproveitáveis na hora de gerar o contrato.
+
+create table if not exists public.customers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  name text not null,
+  document text not null default '',
+  rg text not null default '',
+  phone text not null default '',
+  email text not null default '',
+  address text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists customers_company_id_idx on public.customers (company_id);
+
+drop trigger if exists customers_set_updated_at on public.customers;
+create trigger customers_set_updated_at
+before update on public.customers
+for each row execute function public.set_updated_at();
+
+alter table public.customers enable row level security;
+
+drop policy if exists "Authenticated can read customers" on public.customers;
+create policy "Authenticated can read customers"
+on public.customers for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can insert customers" on public.customers;
+create policy "Authenticated can insert customers"
+on public.customers for insert
+to authenticated
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can update customers" on public.customers;
+create policy "Authenticated can update customers"
+on public.customers for update
+to authenticated
+using (company_id = public.current_company_id())
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can delete customers" on public.customers;
+create policy "Authenticated can delete customers"
+on public.customers for delete
+to authenticated
+using (company_id = public.current_company_id());
+
+-- Vincula o carro ao cliente que comprou (opcional, normalmente preenchido
+-- quando o carro é marcado como vendido).
+alter table public.cars add column if not exists customer_id uuid references public.customers(id) on delete set null;
+create index if not exists cars_customer_id_idx on public.cars (customer_id);
+
+-- 16) Modelos de contrato próprios da loja ----------------------------------------
+-- Cada loja pode subir seus próprios modelos de contrato em .docx (com garantia,
+-- sem garantia, repasse etc.) com marcadores {tag} que o sistema preenche
+-- automaticamente na hora de gerar. Bucket privado, só o painel admin acessa.
+
+create table if not exists public.contract_templates (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  name text not null,
+  file_path text not null,
+  original_filename text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists contract_templates_company_id_idx on public.contract_templates (company_id);
+
+alter table public.contract_templates enable row level security;
+
+drop policy if exists "Authenticated can read contract templates" on public.contract_templates;
+create policy "Authenticated can read contract templates"
+on public.contract_templates for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can insert contract templates" on public.contract_templates;
+create policy "Authenticated can insert contract templates"
+on public.contract_templates for insert
+to authenticated
+with check (company_id = public.current_company_id());
+
+drop policy if exists "Authenticated can delete contract templates" on public.contract_templates;
+create policy "Authenticated can delete contract templates"
+on public.contract_templates for delete
+to authenticated
+using (company_id = public.current_company_id());
+
+insert into storage.buckets (id, name, public)
+values ('contract-templates', 'contract-templates', false)
+on conflict (id) do nothing;
+
+drop policy if exists "Authenticated can view contract templates" on storage.objects;
+create policy "Authenticated can view contract templates"
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'contract-templates'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can upload contract templates" on storage.objects;
+create policy "Authenticated can upload contract templates"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'contract-templates'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+drop policy if exists "Authenticated can delete contract templates storage" on storage.objects;
+create policy "Authenticated can delete contract templates storage"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'contract-templates'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+);
+
+-- 17) Tipo de documento gerado (contrato ou recibo de venda) ----------------------
+-- A tela de Contratos passa a gerar tanto o contrato de compra e venda quanto um
+-- recibo de venda simples (comprovante interno, não substitui NF-e). O histórico
+-- guarda qual dos dois foi gerado pra poder baixar de novo corretamente.
+
+alter table public.contracts add column if not exists document_type text not null default 'contrato';
+
+alter table public.contracts drop constraint if exists contracts_document_type_check;
+alter table public.contracts add constraint contracts_document_type_check check (document_type in ('contrato', 'recibo'));
+
+-- 18) Protege a tabela "companies" com RLS -----------------------------------------
+-- Faltava habilitar RLS nesta tabela. Sem isso, um usuário autenticado de
+-- QUALQUER empresa conseguia ler a lista completa de empresas do sistema
+-- (nome/slug de todo cliente) e, pior, como as outras tabelas referenciam
+-- "companies(id) on delete cascade", um delete nessa tabela apagaria em
+-- cascata TODOS os carros, gastos, contratos, clientes, fornecedores e
+-- modelos de contrato daquela empresa. Agora cada usuário só enxerga a
+-- própria empresa; não há política de insert/update/delete de propósito —
+-- cadastro de empresa continua só pelo SQL Editor (fora do RLS, via service role).
+
+alter table public.companies enable row level security;
+
+drop policy if exists "Authenticated can read own company" on public.companies;
+create policy "Authenticated can read own company"
+on public.companies for select
+to authenticated
+using (id = public.current_company_id());
+
+-- 19) Vendedores, vendas, permissões por papel e registro de atividades --------------
+-- Cada usuário vinculado a uma empresa passa a ter um papel: 'admin' (acesso
+-- total, como sempre foi) ou 'seller' (vendedor, acesso restrito). Todo usuário
+-- já existente vira 'admin' pelo default — nenhuma loja perde acesso a nada.
+--
+-- O vendedor NUNCA lê custos/margens/valor de compra: a tabela "cars" fica
+-- restrita ao admin e o vendedor lê o estoque pela view "seller_cars", que não
+-- tem essas colunas. Gastos, fornecedores, documentos dos carros e anexos de
+-- gastos também ficam só com o admin.
+
+alter table public.user_company add column if not exists role text not null default 'admin';
+alter table public.user_company drop constraint if exists user_company_role_check;
+alter table public.user_company add constraint user_company_role_check check (role in ('admin', 'seller'));
+
+create table if not exists public.sellers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  user_id uuid unique references auth.users(id) on delete set null,
+  name text not null,
+  email text not null default '',
+  phone text not null default '',
+  commission_type text not null default 'percent' check (commission_type in ('percent', 'fixed')),
+  commission_value numeric(12, 2) not null default 0 check (commission_value >= 0),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists sellers_company_id_idx on public.sellers (company_id);
+
+drop trigger if exists sellers_set_updated_at on public.sellers;
+create trigger sellers_set_updated_at
+before update on public.sellers
+for each row execute function public.set_updated_at();
+
+-- Vendedor desativado perde o acesso na hora: current_company_id() passa a
+-- devolver null pra ele, e todas as policies (que comparam com ela) negam tudo.
+create or replace function public.current_company_id()
+returns uuid
+language sql stable security definer set search_path = public
+as $$
+  select uc.company_id
+  from public.user_company uc
+  where uc.user_id = auth.uid()
+    and (
+      uc.role = 'admin'
+      or exists (select 1 from public.sellers s where s.user_id = uc.user_id and s.company_id = uc.company_id and s.active)
+    )
+  limit 1
+$$;
+
+create or replace function public.is_company_admin()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.user_company where user_id = auth.uid() and role = 'admin')
+$$;
+grant execute on function public.is_company_admin() to authenticated;
+
+create or replace function public.current_seller_id()
+returns uuid
+language sql stable security definer set search_path = public
+as $$
+  select id from public.sellers where user_id = auth.uid() and active limit 1
+$$;
+grant execute on function public.current_seller_id() to authenticated;
+
+alter table public.sellers enable row level security;
+
+drop policy if exists "Admin or self can read sellers" on public.sellers;
+create policy "Admin or self can read sellers"
+on public.sellers for select
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_admin() or user_id = auth.uid()));
+
+drop policy if exists "Admin can update sellers" on public.sellers;
+create policy "Admin can update sellers"
+on public.sellers for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+-- Sem policy de insert/delete: o vendedor (com login) é criado pela Edge
+-- Function "manage-sellers" (service role), e vendedor não é excluído — só
+-- desativado, pra não perder o histórico de vendas.
+
+-- Vendas: uma por carro. A comissão é calculada e "congelada" no momento da
+-- venda (trigger abaixo) — mudar a comissão do vendedor depois não altera
+-- vendas antigas.
+create table if not exists public.sales (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  car_id uuid not null unique references public.cars(id) on delete cascade,
+  seller_id uuid references public.sellers(id) on delete set null,
+  sale_price integer not null check (sale_price >= 0),
+  sale_date date not null default current_date,
+  commission_type text,
+  commission_value numeric(12, 2),
+  commission_amount numeric(12, 2) not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists sales_company_id_idx on public.sales (company_id);
+create index if not exists sales_seller_id_idx on public.sales (seller_id);
+
+create or replace function public.sales_compute_commission()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  s public.sellers%rowtype;
+begin
+  if new.seller_id is null then
+    new.commission_type := null;
+    new.commission_value := null;
+    new.commission_amount := 0;
+    return new;
+  end if;
+  -- Numa edição, só recalcula se trocou o vendedor ou o valor da venda.
+  if tg_op = 'UPDATE' and new.seller_id is not distinct from old.seller_id
+     and new.sale_price = old.sale_price then
+    new.commission_type := old.commission_type;
+    new.commission_value := old.commission_value;
+    new.commission_amount := old.commission_amount;
+    return new;
+  end if;
+  select * into s from public.sellers where id = new.seller_id and company_id = new.company_id;
+  if not found then
+    raise exception 'Vendedor inválido para esta empresa';
+  end if;
+  new.commission_type := s.commission_type;
+  new.commission_value := s.commission_value;
+  new.commission_amount := case
+    when s.commission_type = 'percent' then round(new.sale_price * s.commission_value / 100, 2)
+    else s.commission_value
+  end;
+  return new;
+end;
+$$;
+
+drop trigger if exists sales_compute_commission on public.sales;
+create trigger sales_compute_commission
+before insert or update on public.sales
+for each row execute function public.sales_compute_commission();
+
+alter table public.sales enable row level security;
+
+drop policy if exists "Admin or own seller can read sales" on public.sales;
+create policy "Admin or own seller can read sales"
+on public.sales for select
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_admin() or seller_id = public.current_seller_id()));
+
+drop policy if exists "Admin can insert sales" on public.sales;
+create policy "Admin can insert sales"
+on public.sales for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Admin can update sales" on public.sales;
+create policy "Admin can update sales"
+on public.sales for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Admin can delete sales" on public.sales;
+create policy "Admin can delete sales"
+on public.sales for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Estoque do vendedor: mesmas linhas da empresa, SEM purchase_price,
+-- purchase_date e documents. A view roda com o dono (ignora a RLS de "cars",
+-- que agora é só admin), por isso filtra a empresa explicitamente.
+create or replace view public.seller_cars as
+select
+  id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
+  category, condition, price, original_price, badge, status, highlights, description, images,
+  featured, hidden, sold_at, plate, chassis, renavam, customer_id, company_id, created_at, updated_at
+from public.cars
+where company_id = public.current_company_id();
+
+revoke all on public.seller_cars from anon, public;
+grant select on public.seller_cars to authenticated;
+
+-- "cars": leitura e escrita autenticada passam a exigir admin. (O site público
+-- continua lendo pela policy "Public can read cars", do papel anon.)
+drop policy if exists "Authenticated can read own company cars" on public.cars;
+create policy "Authenticated can read own company cars"
+on public.cars for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can insert cars" on public.cars;
+create policy "Authenticated can insert cars"
+on public.cars for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can update cars" on public.cars;
+create policy "Authenticated can update cars"
+on public.cars for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete cars" on public.cars;
+create policy "Authenticated can delete cars"
+on public.cars for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Gastos e fornecedores: só admin
+drop policy if exists "Authenticated can read expenses" on public.car_expenses;
+create policy "Authenticated can read expenses"
+on public.car_expenses for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can insert expenses" on public.car_expenses;
+create policy "Authenticated can insert expenses"
+on public.car_expenses for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can update expenses" on public.car_expenses;
+create policy "Authenticated can update expenses"
+on public.car_expenses for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete expenses" on public.car_expenses;
+create policy "Authenticated can delete expenses"
+on public.car_expenses for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can read suppliers" on public.suppliers;
+create policy "Authenticated can read suppliers"
+on public.suppliers for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can insert suppliers" on public.suppliers;
+create policy "Authenticated can insert suppliers"
+on public.suppliers for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can update suppliers" on public.suppliers;
+create policy "Authenticated can update suppliers"
+on public.suppliers for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete suppliers" on public.suppliers;
+create policy "Authenticated can delete suppliers"
+on public.suppliers for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Clientes: vendedor lê, cadastra e edita; excluir só admin
+drop policy if exists "Authenticated can delete customers" on public.customers;
+create policy "Authenticated can delete customers"
+on public.customers for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Contratos: vendedor gera e vê só os que ele mesmo criou; admin vê todos
+alter table public.contracts add column if not exists created_by uuid default auth.uid() references auth.users(id) on delete set null;
+
+drop policy if exists "Authenticated can read contracts" on public.contracts;
+create policy "Authenticated can read contracts"
+on public.contracts for select
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_admin() or created_by = auth.uid()));
+
+drop policy if exists "Authenticated can insert contracts" on public.contracts;
+create policy "Authenticated can insert contracts"
+on public.contracts for insert
+to authenticated
+with check (company_id = public.current_company_id() and (public.is_company_admin() or created_by = auth.uid()));
+
+drop policy if exists "Authenticated can delete contracts" on public.contracts;
+create policy "Authenticated can delete contracts"
+on public.contracts for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Modelos de contrato: vendedor usa (lê), só admin sobe/apaga
+drop policy if exists "Authenticated can insert contract templates" on public.contract_templates;
+create policy "Authenticated can insert contract templates"
+on public.contract_templates for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete contract templates" on public.contract_templates;
+create policy "Authenticated can delete contract templates"
+on public.contract_templates for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Storage: escrita de fotos e tudo de anexos/documentos só admin
+drop policy if exists "Authenticated can upload car photos" on storage.objects;
+create policy "Authenticated can upload car photos"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'car-photos' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can update car photos" on storage.objects;
+create policy "Authenticated can update car photos"
+on storage.objects for update
+to authenticated
+using (bucket_id = 'car-photos' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete car photos" on storage.objects;
+create policy "Authenticated can delete car photos"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'car-photos' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can view expense attachments" on storage.objects;
+create policy "Authenticated can view expense attachments"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can upload expense attachments" on storage.objects;
+create policy "Authenticated can upload expense attachments"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete expense attachments" on storage.objects;
+create policy "Authenticated can delete expense attachments"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can view car documents" on storage.objects;
+create policy "Authenticated can view car documents"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'car-documents' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can upload car documents" on storage.objects;
+create policy "Authenticated can upload car documents"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'car-documents' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete car documents" on storage.objects;
+create policy "Authenticated can delete car documents"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'car-documents' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can upload contract templates" on storage.objects;
+create policy "Authenticated can upload contract templates"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'contract-templates' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete contract templates storage" on storage.objects;
+create policy "Authenticated can delete contract templates storage"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'contract-templates' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+-- Registro de atividades -------------------------------------------------------
+-- Preenchido só por triggers (security definer) — nenhum usuário consegue
+-- inserir, editar ou apagar linhas direto. Só o admin da empresa lê.
+create table if not exists public.activity_log (
+  id bigserial primary key,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  user_id uuid,
+  user_email text,
+  action text not null,
+  entity text not null,
+  entity_id uuid,
+  label text,
+  details text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists activity_log_company_created_idx on public.activity_log (company_id, created_at desc);
+
+alter table public.activity_log enable row level security;
+
+drop policy if exists "Admin can read activity log" on public.activity_log;
+create policy "Admin can read activity log"
+on public.activity_log for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+create or replace function public.log_activity()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb;
+  old_rec jsonb;
+  v_company uuid;
+  v_label text;
+  v_details text;
+  v_email text;
+  v_changed text[];
+begin
+  begin
+    if tg_op = 'DELETE' then rec := to_jsonb(old); else rec := to_jsonb(new); end if;
+    v_company := (rec->>'company_id')::uuid;
+    -- Sem usuário = SQL Editor ou Edge Function (que grava o próprio log).
+    if v_company is null or auth.uid() is null then return null; end if;
+
+    if tg_op = 'UPDATE' then
+      old_rec := to_jsonb(old);
+      select array_agg(n.key order by n.key) into v_changed
+      from jsonb_each(rec) n
+      where n.key not in ('updated_at') and n.value is distinct from old_rec->n.key;
+      if v_changed is null then return null; end if;
+      v_details := array_to_string(v_changed, ', ');
+      if 'status' = any(v_changed) then
+        v_details := format('status: %s → %s', old_rec->>'status', rec->>'status');
+      end if;
+    end if;
+
+    v_label := case tg_table_name
+      when 'cars' then concat_ws(' ', rec->>'brand', rec->>'model', rec->>'version')
+      when 'customers' then rec->>'name'
+      when 'suppliers' then rec->>'name'
+      when 'sellers' then rec->>'name'
+      when 'contract_templates' then rec->>'name'
+      when 'contracts' then concat(case rec->>'document_type' when 'recibo' then 'Recibo' else 'Contrato' end, ' — ', rec->>'buyer_name')
+      when 'car_expenses' then concat(coalesce(nullif(rec->>'description', ''), rec->>'category'), ' — R$ ', rec->>'amount')
+      when 'sales' then (select concat(c.brand, ' ', c.model, ' — R$ ', rec->>'sale_price') from public.cars c where c.id = (rec->>'car_id')::uuid)
+      else null
+    end;
+
+    select email into v_email from auth.users where id = auth.uid();
+
+    insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label, details)
+    values (v_company, auth.uid(), v_email, lower(tg_op), tg_table_name, (rec->>'id')::uuid, v_label, v_details);
+  exception when others then
+    -- O log nunca pode impedir a operação principal
+    null;
+  end;
+  return null;
+end;
+$$;
+
+drop trigger if exists cars_log_activity on public.cars;
+create trigger cars_log_activity after insert or update or delete on public.cars
+for each row execute function public.log_activity();
+
+drop trigger if exists car_expenses_log_activity on public.car_expenses;
+create trigger car_expenses_log_activity after insert or update or delete on public.car_expenses
+for each row execute function public.log_activity();
+
+drop trigger if exists suppliers_log_activity on public.suppliers;
+create trigger suppliers_log_activity after insert or update or delete on public.suppliers
+for each row execute function public.log_activity();
+
+drop trigger if exists customers_log_activity on public.customers;
+create trigger customers_log_activity after insert or update or delete on public.customers
+for each row execute function public.log_activity();
+
+drop trigger if exists contracts_log_activity on public.contracts;
+create trigger contracts_log_activity after insert or update or delete on public.contracts
+for each row execute function public.log_activity();
+
+drop trigger if exists contract_templates_log_activity on public.contract_templates;
+create trigger contract_templates_log_activity after insert or update or delete on public.contract_templates
+for each row execute function public.log_activity();
+
+drop trigger if exists sellers_log_activity on public.sellers;
+create trigger sellers_log_activity after insert or update or delete on public.sellers
+for each row execute function public.log_activity();
+
+drop trigger if exists sales_log_activity on public.sales;
+create trigger sales_log_activity after insert or update or delete on public.sales
+for each row execute function public.log_activity();
+
+-- Login no painel (chamado pelo front logo após entrar)
+create or replace function public.log_login()
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+begin
+  if v_company is null then return; end if;
+  insert into public.activity_log (company_id, user_id, user_email, action, entity, label)
+  values (v_company, auth.uid(), (select email from auth.users where id = auth.uid()), 'login', 'auth', 'Entrou no painel');
+end;
+$$;
+grant execute on function public.log_login() to authenticated;
+
+-- 20) Gerente, comissão opcional e aviso de dias em estoque ---------------------------
+-- Novo papel 'manager' (gerente): cadastra/edita carros, fotos, gastos,
+-- fornecedores, vendas, contratos e clientes, vê tudo que é financeiro e os
+-- números da equipe — mas NÃO exclui nada (delete continua só admin) e não
+-- gerencia a equipe. Vendedores e gerentes ficam na tabela "sellers" (Equipe).
+
+alter table public.user_company drop constraint if exists user_company_role_check;
+alter table public.user_company add constraint user_company_role_check check (role in ('admin', 'manager', 'seller'));
+
+alter table public.sellers add column if not exists role text not null default 'seller';
+alter table public.sellers drop constraint if exists sellers_role_check;
+alter table public.sellers add constraint sellers_role_check check (role in ('seller', 'manager'));
+
+-- Comissão opcional: 'none' = não recebe comissão
+alter table public.sellers drop constraint if exists sellers_commission_type_check;
+alter table public.sellers add constraint sellers_commission_type_check check (commission_type in ('percent', 'fixed', 'none'));
+
+create or replace function public.sales_compute_commission()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  s public.sellers%rowtype;
+begin
+  if new.seller_id is null then
+    new.commission_type := null;
+    new.commission_value := null;
+    new.commission_amount := 0;
+    return new;
+  end if;
+  -- Numa edição, só recalcula se trocou o vendedor ou o valor da venda.
+  if tg_op = 'UPDATE' and new.seller_id is not distinct from old.seller_id
+     and new.sale_price = old.sale_price then
+    new.commission_type := old.commission_type;
+    new.commission_value := old.commission_value;
+    new.commission_amount := old.commission_amount;
+    return new;
+  end if;
+  select * into s from public.sellers where id = new.seller_id and company_id = new.company_id;
+  if not found then
+    raise exception 'Vendedor inválido para esta empresa';
+  end if;
+  new.commission_type := s.commission_type;
+  new.commission_value := s.commission_value;
+  new.commission_amount := case
+    when s.commission_type = 'percent' then round(new.sale_price * s.commission_value / 100, 2)
+    when s.commission_type = 'fixed' then s.commission_value
+    else 0
+  end;
+  return new;
+end;
+$$;
+
+-- admin ou gerente ("equipe de gestão")
+create or replace function public.is_company_staff()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.user_company where user_id = auth.uid() and role in ('admin', 'manager'))
+$$;
+grant execute on function public.is_company_staff() to authenticated;
+
+-- Equipe: gerente vê todos (acompanha os números); só admin edita
+drop policy if exists "Admin or self can read sellers" on public.sellers;
+create policy "Admin or self can read sellers"
+on public.sellers for select
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or user_id = auth.uid()));
+
+-- Vendas: gerente registra e edita; desfazer (excluir) só admin
+drop policy if exists "Admin or own seller can read sales" on public.sales;
+create policy "Admin or own seller can read sales"
+on public.sales for select
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or seller_id = public.current_seller_id()));
+
+drop policy if exists "Admin can insert sales" on public.sales;
+create policy "Admin can insert sales"
+on public.sales for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Admin can update sales" on public.sales;
+create policy "Admin can update sales"
+on public.sales for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff())
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+-- Carros: gerente lê, cadastra e edita; excluir só admin
+drop policy if exists "Authenticated can read own company cars" on public.cars;
+create policy "Authenticated can read own company cars"
+on public.cars for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Authenticated can insert cars" on public.cars;
+create policy "Authenticated can insert cars"
+on public.cars for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Authenticated can update cars" on public.cars;
+create policy "Authenticated can update cars"
+on public.cars for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff())
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+-- Gastos e fornecedores: gerente lê, lança e edita; excluir só admin
+drop policy if exists "Authenticated can read expenses" on public.car_expenses;
+create policy "Authenticated can read expenses"
+on public.car_expenses for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Authenticated can insert expenses" on public.car_expenses;
+create policy "Authenticated can insert expenses"
+on public.car_expenses for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Authenticated can update expenses" on public.car_expenses;
+create policy "Authenticated can update expenses"
+on public.car_expenses for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff())
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Authenticated can read suppliers" on public.suppliers;
+create policy "Authenticated can read suppliers"
+on public.suppliers for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Authenticated can insert suppliers" on public.suppliers;
+create policy "Authenticated can insert suppliers"
+on public.suppliers for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Authenticated can update suppliers" on public.suppliers;
+create policy "Authenticated can update suppliers"
+on public.suppliers for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff())
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+-- Contratos: gerente vê todos da loja
+drop policy if exists "Authenticated can read contracts" on public.contracts;
+create policy "Authenticated can read contracts"
+on public.contracts for select
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()));
+
+drop policy if exists "Authenticated can insert contracts" on public.contracts;
+create policy "Authenticated can insert contracts"
+on public.contracts for insert
+to authenticated
+with check (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()));
+
+-- Registro de atividades: gerente também lê
+drop policy if exists "Admin can read activity log" on public.activity_log;
+create policy "Admin can read activity log"
+on public.activity_log for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff());
+
+-- Storage: gerente sobe fotos, documentos e anexos (e vê os privados); apagar arquivo só admin
+drop policy if exists "Authenticated can upload car photos" on storage.objects;
+create policy "Authenticated can upload car photos"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'car-photos' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_staff());
+
+drop policy if exists "Authenticated can update car photos" on storage.objects;
+create policy "Authenticated can update car photos"
+on storage.objects for update
+to authenticated
+using (bucket_id = 'car-photos' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_staff());
+
+drop policy if exists "Authenticated can view expense attachments" on storage.objects;
+create policy "Authenticated can view expense attachments"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_staff());
+
+drop policy if exists "Authenticated can upload expense attachments" on storage.objects;
+create policy "Authenticated can upload expense attachments"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_staff());
+
+drop policy if exists "Authenticated can view car documents" on storage.objects;
+create policy "Authenticated can view car documents"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'car-documents' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_staff());
+
+drop policy if exists "Authenticated can upload car documents" on storage.objects;
+create policy "Authenticated can upload car documents"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'car-documents' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_staff());
+
+-- Aviso de dias em estoque: prazo por carro (null = usa o padrão da loja)
+alter table public.cars add column if not exists stock_alert_days integer check (stock_alert_days is null or stock_alert_days > 0);
+alter table public.companies add column if not exists stock_alert_days integer not null default 60 check (stock_alert_days > 0);
+
+-- Admin/gerente só pode alterar o prazo padrão — nenhuma outra coluna da empresa
+revoke update on public.companies from authenticated;
+grant update (stock_alert_days) on public.companies to authenticated;
+
+drop policy if exists "Staff can update company stock alert" on public.companies;
+create policy "Staff can update company stock alert"
+on public.companies for update
+to authenticated
+using (id = public.current_company_id() and public.is_company_staff())
+with check (id = public.current_company_id() and public.is_company_staff());
+
+-- O log por linha ignora operações em massa marcadas com esta flag (a função
+-- em massa grava um único registro resumido no lugar).
+create or replace function public.log_activity()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb;
+  old_rec jsonb;
+  v_company uuid;
+  v_label text;
+  v_details text;
+  v_email text;
+  v_changed text[];
+begin
+  begin
+    if current_setting('app.skip_activity_log', true) = '1' then return null; end if;
+    if tg_op = 'DELETE' then rec := to_jsonb(old); else rec := to_jsonb(new); end if;
+    v_company := (rec->>'company_id')::uuid;
+    -- Sem usuário = SQL Editor ou Edge Function (que grava o próprio log).
+    if v_company is null or auth.uid() is null then return null; end if;
+
+    if tg_op = 'UPDATE' then
+      old_rec := to_jsonb(old);
+      select array_agg(n.key order by n.key) into v_changed
+      from jsonb_each(rec) n
+      where n.key not in ('updated_at') and n.value is distinct from old_rec->n.key;
+      if v_changed is null then return null; end if;
+      v_details := array_to_string(v_changed, ', ');
+      if 'status' = any(v_changed) then
+        v_details := format('status: %s → %s', old_rec->>'status', rec->>'status');
+      end if;
+    end if;
+
+    v_label := case tg_table_name
+      when 'cars' then concat_ws(' ', rec->>'brand', rec->>'model', rec->>'version')
+      when 'customers' then rec->>'name'
+      when 'suppliers' then rec->>'name'
+      when 'sellers' then rec->>'name'
+      when 'contract_templates' then rec->>'name'
+      when 'contracts' then concat(case rec->>'document_type' when 'recibo' then 'Recibo' else 'Contrato' end, ' — ', rec->>'buyer_name')
+      when 'car_expenses' then concat(coalesce(nullif(rec->>'description', ''), rec->>'category'), ' — R$ ', rec->>'amount')
+      when 'sales' then (select concat(c.brand, ' ', c.model, ' — R$ ', rec->>'sale_price') from public.cars c where c.id = (rec->>'car_id')::uuid)
+      else null
+    end;
+
+    select email into v_email from auth.users where id = auth.uid();
+
+    insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label, details)
+    values (v_company, auth.uid(), v_email, lower(tg_op), tg_table_name, (rec->>'id')::uuid, v_label, v_details);
+  exception when others then
+    -- O log nunca pode impedir a operação principal
+    null;
+  end;
+  return null;
+end;
+$$;
+
+-- "Aplicar a todos": muda o padrão da loja e sobrescreve o prazo de todos os
+-- carros. Security definer para gravar o log resumido; as checagens de
+-- empresa e papel são feitas aqui dentro.
+create or replace function public.apply_stock_alert_to_all(p_days integer)
+returns integer
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_count integer;
+begin
+  if v_company is null or not public.is_company_staff() then
+    raise exception 'Sem permissão';
+  end if;
+  if p_days is null or p_days < 1 then
+    raise exception 'Informe um número de dias válido';
+  end if;
+  perform set_config('app.skip_activity_log', '1', true);
+  update public.companies set stock_alert_days = p_days where id = v_company;
+  update public.cars set stock_alert_days = p_days where company_id = v_company;
+  get diagnostics v_count = row_count;
+  perform set_config('app.skip_activity_log', '0', true);
+  insert into public.activity_log (company_id, user_id, user_email, action, entity, label, details)
+  values (v_company, auth.uid(), (select email from auth.users where id = auth.uid()), 'update', 'cars',
+          'Todos os carros', format('Aviso de estoque: %s dias (aplicado a %s carros)', p_days, v_count));
+  return v_count;
+end;
+$$;
+revoke execute on function public.apply_stock_alert_to_all(integer) from anon, public;
+grant execute on function public.apply_stock_alert_to_all(integer) to authenticated;
+
+-- 21) Gerente sem acesso a custos e gastos -------------------------------------------
+-- O gerente deixa de ver o custo de aquisição (preço e data de compra), os gastos
+-- dos carros e tudo que sai deles (custo total, margem, lucro, investimento).
+-- Isso vale aqui no banco, não só na tela:
+--   * "cars" volta a ser só do admin; o gerente lê e grava o estoque pela view
+--     "staff_cars", que não tem purchase_price nem purchase_date;
+--   * o gerente informa o custo de aquisição uma única vez (ao cadastrar o
+--     carro) pela função set_car_purchase — depois disso só o admin vê e altera;
+--   * gastos: o gerente só lança; ler, editar e excluir é do admin;
+--   * fornecedores: o gerente cadastra e vê os nomes (para escolher no gasto),
+--     editar e excluir é do admin.
+-- O que cada gerente vê das vendas — valores ('values') ou só quantidades
+-- ('counts') — é escolhido pelo admin na Equipe e aplicado nas telas.
+
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'sellers' and column_name = 'finance_access'
+  ) then
+    alter table public.sellers add column finance_access text not null default 'counts';
+    -- Gerentes que já existiam continuam vendo os valores das vendas
+    update public.sellers set finance_access = 'values' where role = 'manager';
+  end if;
+end $$;
+
+alter table public.sellers drop constraint if exists sellers_finance_access_check;
+alter table public.sellers add constraint sellers_finance_access_check check (finance_access in ('values', 'counts'));
+
+-- Carros: leitura e escrita direta só do admin (excluir já era só admin)
+drop policy if exists "Authenticated can read own company cars" on public.cars;
+create policy "Authenticated can read own company cars"
+on public.cars for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can insert cars" on public.cars;
+create policy "Authenticated can insert cars"
+on public.cars for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can update cars" on public.cars;
+create policy "Authenticated can update cars"
+on public.cars for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Estoque do gerente: tudo menos o custo de aquisição. A view roda com o dono
+-- (ignora a RLS de "cars"), então filtra empresa e papel explicitamente; o
+-- CHECK OPTION impede gravar carro de outra empresa por ela. Sem DELETE.
+create or replace view public.staff_cars as
+select
+  id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
+  category, condition, price, original_price, badge, status, highlights, description, images,
+  featured, hidden, sold_at, plate, chassis, renavam, documents, customer_id, stock_alert_days,
+  company_id, created_at, updated_at
+from public.cars
+where company_id = public.current_company_id() and public.is_company_staff()
+with local check option;
+
+revoke all on public.staff_cars from anon, authenticated, public;
+grant select, insert, update on public.staff_cars to authenticated;
+
+-- A view do vendedor é só leitura (sem isto, o privilégio padrão do Supabase
+-- deixaria gravar por ela, passando por cima da RLS de "cars").
+revoke all on public.seller_cars from anon, authenticated, public;
+grant select on public.seller_cars to authenticated;
+
+-- Custo de aquisição informado pelo gerente: só se ainda estiver em branco
+create or replace function public.set_car_purchase(p_car_id uuid, p_price integer, p_date date)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_already boolean;
+begin
+  if v_company is null or not public.is_company_staff() then
+    raise exception 'Sem permissão';
+  end if;
+  select (purchase_price is not null or purchase_date is not null) into v_already
+  from public.cars
+  where id = p_car_id and company_id = v_company;
+  if not found then
+    raise exception 'Carro não encontrado';
+  end if;
+  if v_already and not public.is_company_admin() then
+    raise exception 'O custo de aquisição deste carro já foi informado. Só o administrador pode alterar.';
+  end if;
+  update public.cars
+  set purchase_price = p_price, purchase_date = p_date
+  where id = p_car_id and company_id = v_company;
+end;
+$$;
+revoke execute on function public.set_car_purchase(uuid, integer, date) from anon, public;
+grant execute on function public.set_car_purchase(uuid, integer, date) to authenticated;
+
+-- Gastos: gerente só lança
+drop policy if exists "Authenticated can read expenses" on public.car_expenses;
+create policy "Authenticated can read expenses"
+on public.car_expenses for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can update expenses" on public.car_expenses;
+create policy "Authenticated can update expenses"
+on public.car_expenses for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can view expense attachments" on storage.objects;
+create policy "Authenticated can view expense attachments"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+-- Fornecedores: gerente cadastra; editar só admin
+drop policy if exists "Authenticated can update suppliers" on public.suppliers;
+create policy "Authenticated can update suppliers"
+on public.suppliers for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Registro de atividades: o gerente não vê os gastos lançados por outras
+-- pessoas (o texto do registro traz o valor do gasto)
+drop policy if exists "Admin can read activity log" on public.activity_log;
+create policy "Admin can read activity log"
+on public.activity_log for select
+to authenticated
+using (
+  company_id = public.current_company_id()
+  and (
+    public.is_company_admin()
+    or (public.is_company_staff() and (entity <> 'car_expenses' or user_id = auth.uid()))
+  )
+);
+
+-- 22) Contador de visitas do site e de visualizações por carro ----------------------
+-- O site público soma, por dia:
+--   * visitas: cada acesso ao site (voltar em até 30 min conta como o mesmo
+--     acesso, pra não contar recarregar a página) e pessoas diferentes no dia
+--     (cada navegador conta 1 vez por dia);
+--   * por carro: visualizações da página do carro (mesma regra) e pessoas
+--     diferentes no dia.
+-- A regra dos 30 min e do "1 vez por dia" roda no navegador do visitante. Aqui
+-- ficam só os totais diários — nada que identifique quem visitou (sem IP, sem
+-- cookie de rastreamento). Gravação só pelas funções track_* (o site público
+-- chama como anon); leitura: admin e gerente veem tudo, o vendedor vê as
+-- visualizações dos carros.
+
+create table if not exists public.site_visits_daily (
+  company_id uuid not null references public.companies(id) on delete cascade,
+  day date not null,
+  visits integer not null default 0,
+  visitors integer not null default 0,
+  primary key (company_id, day)
+);
+
+create table if not exists public.car_views_daily (
+  company_id uuid not null references public.companies(id) on delete cascade,
+  car_id uuid not null references public.cars(id) on delete cascade,
+  day date not null,
+  views integer not null default 0,
+  viewers integer not null default 0,
+  primary key (car_id, day)
+);
+
+create index if not exists car_views_daily_company_day_idx on public.car_views_daily (company_id, day);
+
+alter table public.site_visits_daily enable row level security;
+alter table public.car_views_daily enable row level security;
+
+revoke all on public.site_visits_daily from anon, authenticated, public;
+revoke all on public.car_views_daily from anon, authenticated, public;
+grant select on public.site_visits_daily to authenticated;
+grant select on public.car_views_daily to authenticated;
+
+drop policy if exists "Staff can read site visits" on public.site_visits_daily;
+create policy "Staff can read site visits"
+on public.site_visits_daily for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Team can read car views" on public.car_views_daily;
+create policy "Team can read car views"
+on public.car_views_daily for select
+to authenticated
+using (company_id = public.current_company_id());
+
+-- Dia no fuso das lojas (Maranhão, UTC-3)
+create or replace function public.stats_today()
+returns date
+language sql stable
+as $$
+  select (now() at time zone 'America/Fortaleza')::date
+$$;
+
+create or replace function public.track_site_visit(p_company uuid, p_new_visitor boolean)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.companies where id = p_company) then
+    return;
+  end if;
+  insert into public.site_visits_daily as s (company_id, day, visits, visitors)
+  values (p_company, public.stats_today(), 1, case when p_new_visitor then 1 else 0 end)
+  on conflict (company_id, day) do update
+  set visits = s.visits + 1,
+      visitors = s.visitors + case when p_new_visitor then 1 else 0 end;
+end;
+$$;
+
+create or replace function public.track_car_view(p_car uuid, p_new_viewer boolean)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid;
+begin
+  select company_id into v_company from public.cars where id = p_car and not hidden;
+  if v_company is null then
+    return;
+  end if;
+  insert into public.car_views_daily as v (company_id, car_id, day, views, viewers)
+  values (v_company, p_car, public.stats_today(), 1, case when p_new_viewer then 1 else 0 end)
+  on conflict (car_id, day) do update
+  set views = v.views + 1,
+      viewers = v.viewers + case when p_new_viewer then 1 else 0 end;
+end;
+$$;
+
+revoke execute on function public.track_site_visit(uuid, boolean) from public;
+revoke execute on function public.track_car_view(uuid, boolean) from public;
+grant execute on function public.track_site_visit(uuid, boolean) to anon, authenticated;
+grant execute on function public.track_car_view(uuid, boolean) to anon, authenticated;
+
+-- Totais de um período (null = sem limite), somados no banco. Rodam com a
+-- permissão de quem chama, então a RLS acima vale normalmente.
+create or replace function public.site_visit_totals(p_start date default null, p_end date default null)
+returns table (visits bigint, visitors bigint)
+language sql stable
+as $$
+  select coalesce(sum(visits), 0), coalesce(sum(visitors), 0)
+  from public.site_visits_daily
+  where company_id = public.current_company_id()
+    and (p_start is null or day >= p_start)
+    and (p_end is null or day <= p_end)
+$$;
+
+create or replace function public.car_view_totals(p_start date default null, p_end date default null)
+returns table (car_id uuid, views bigint, viewers bigint)
+language sql stable
+as $$
+  select car_id, sum(views), sum(viewers)
+  from public.car_views_daily
+  where company_id = public.current_company_id()
+    and (p_start is null or day >= p_start)
+    and (p_end is null or day <= p_end)
+  group by car_id
+$$;
+
+revoke execute on function public.site_visit_totals(date, date) from public, anon;
+revoke execute on function public.car_view_totals(date, date) from public, anon;
+grant execute on function public.site_visit_totals(date, date) to authenticated;
+grant execute on function public.car_view_totals(date, date) to authenticated;
+
+-- 23) Endereço (slug) do carro único por loja, e não no projeto inteiro -------------
+-- Antes, se duas lojas cadastrassem o mesmo modelo/ano (ex.: "honda-civic-2020"),
+-- a segunda recebia erro de duplicidade. O site já busca o carro por loja + slug.
+-- (Numa instalação nova, a seção 1 cria o "unique (slug)" que os dados de exemplo
+-- usam; esta seção troca pela regra por loja logo depois.)
+alter table public.cars drop constraint if exists cars_slug_key;
+alter table public.cars drop constraint if exists cars_company_slug_key;
+alter table public.cars add constraint cars_company_slug_key unique (company_id, slug);

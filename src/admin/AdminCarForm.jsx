@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, Trash2, Receipt } from 'lucide-react'
-import { fetchCarById, createCar, updateCar, deleteCar } from '../lib/carsApi.js'
-import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS, CAR_STATUSES, parseLocaleNumber } from '../utils/carFormat.js'
+import { fetchCarById, createCar, updateCar, deleteCar, uploadCarDocument, updateCarDocuments } from '../lib/carsApi.js'
+import { fetchAllCustomers } from '../lib/customersApi.js'
+import { fetchSellers } from '../lib/sellersApi.js'
+import { fetchSaleByCar, saveSaleForCar, deleteSaleForCar } from '../lib/salesApi.js'
+import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS, CAR_STATUSES, parseIntBR, todayISO } from '../utils/carFormat.js'
 import ImageUploader from './ImageUploader.jsx'
 import CarDocumentUploader from './CarDocumentUploader.jsx'
+import CustomerPicker from './CustomerPicker.jsx'
+import DateInputBR from '../components/DateInputBR.jsx'
+import FipeLookup from '../components/FipeLookup.jsx'
 import './admin.css'
+import useConfirm from '../components/useConfirm.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
+import { fetchStockAlertDefault, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 
 const EMPTY_CAR = {
   brand: '',
@@ -36,9 +45,19 @@ const EMPTY_CAR = {
   chassis: '',
   renavam: '',
   documents: [],
+  customerId: '',
 }
 
 export default function AdminCarForm() {
+  const { confirm, confirmDialog } = useConfirm()
+  const { isAdmin, canSeeCosts } = useAuth()
+  const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
+  // Documentos escolhidos antes de o carro existir: sobem logo após o cadastro
+  const [pendingDocs, setPendingDocs] = useState([])
+
+  useEffect(() => {
+    fetchStockAlertDefault().then(setAlertDefault)
+  }, [])
   const { id } = useParams()
   const isEditing = Boolean(id)
   const navigate = useNavigate()
@@ -49,14 +68,39 @@ export default function AdminCarForm() {
   const [loading, setLoading] = useState(isEditing)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [noPrice, setNoPrice] = useState(false)
+  const [customers, setCustomers] = useState([])
+  const [sellers, setSellers] = useState([])
+  const [existingSale, setExistingSale] = useState(null)
+  const [sale, setSale] = useState({ sellerId: '', price: '', date: todayISO() })
+
+  useEffect(() => {
+    fetchAllCustomers().then(setCustomers).catch(() => {})
+    fetchSellers().then(setSellers).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!isEditing) return
+    fetchSaleByCar(id)
+      .then((found) => {
+        setExistingSale(found)
+        if (found) setSale({ sellerId: found.sellerId || '', price: String(found.salePrice), date: found.saleDate })
+      })
+      .catch(() => {})
+  }, [id, isEditing])
+
+  function updateSale(field, value) {
+    setSale((prev) => ({ ...prev, [field]: value }))
+  }
 
   useEffect(() => {
     if (!isEditing) return
     fetchCarById(id).then((found) => {
       if (found) {
-        setCar(found)
+        setCar({ ...found, customerId: found.customerId || '' })
         setOriginalStatus(found.status)
         setHighlightsText(found.highlights.join('\n'))
+        setNoPrice(found.price == null)
       } else {
         setError('Carro não encontrado.')
       }
@@ -73,33 +117,81 @@ export default function AdminCarForm() {
     setSaving(true)
     setError('')
 
-    let soldAt = car.soldAt || null
-    if (car.status === 'vendido' && originalStatus !== 'vendido') {
-      soldAt = new Date().toISOString()
-    } else if (car.status !== 'vendido') {
-      soldAt = null
+    const isSold = car.status === 'vendido'
+    const salePrice = isSold ? parseIntBR(sale.price) ?? (noPrice ? null : parseIntBR(car.price)) : null
+    if (isSold && !salePrice) {
+      setError('Informe o valor final da venda.')
+      setSaving(false)
+      return
     }
+    if (isSold && !sale.date) {
+      setError('Informe a data da venda (dd/mm/aaaa).')
+      setSaving(false)
+      return
+    }
+    if (!isSold && existingSale && !isAdmin) {
+      setError('Esse carro tem uma venda registrada. Só o administrador pode desfazer uma venda.')
+      setSaving(false)
+      return
+    }
+    if (!isSold && existingSale
+      && !(await confirm('Esse carro tem uma venda registrada (vendedor, valor e comissão). Ao mudar o status, o registro da venda será apagado. Continuar?'))) {
+      setSaving(false)
+      return
+    }
+
+    let soldAt = null
+    if (isSold) {
+      const saleDateChanged = !existingSale || existingSale.saleDate !== sale.date
+      soldAt = car.soldAt && originalStatus === 'vendido' && !saleDateChanged
+        ? car.soldAt
+        : new Date(`${sale.date}T12:00:00`).toISOString()
+    }
+
+    // Saiu de "vendido": o carro deixa de ter cliente comprador
+    const customerId = !isSold && originalStatus === 'vendido' ? null : car.customerId || null
 
     const payload = {
       ...car,
       year: Number(car.year),
-      km: Math.round(parseLocaleNumber(car.km) || 0),
+      km: parseIntBR(car.km),
       doors: Number(car.doors),
-      price: Math.round(parseLocaleNumber(car.price) || 0),
-      originalPrice: car.originalPrice ? Math.round(parseLocaleNumber(car.originalPrice) || 0) : null,
-      purchasePrice: car.purchasePrice ? Math.round(parseLocaleNumber(car.purchasePrice) || 0) : null,
+      price: noPrice ? null : parseIntBR(car.price),
+      originalPrice: !noPrice && car.originalPrice ? parseIntBR(car.originalPrice) : null,
+      purchasePrice: car.purchasePrice ? parseIntBR(car.purchasePrice) : null,
       purchaseDate: car.purchaseDate || null,
+      customerId,
+      stockAlertDays: car.stockAlertDays ? Number.parseInt(car.stockAlertDays, 10) || null : null,
       soldAt,
       highlights: highlightsText.split('\n').map((h) => h.trim()).filter(Boolean),
     }
 
     try {
-      if (isEditing) {
-        await updateCar(id, payload)
-      } else {
-        await createCar(payload)
+      const saved = isEditing ? await updateCar(id, payload) : await createCar(payload)
+      let docError = null
+      if (!isEditing && pendingDocs.length > 0) {
+        try {
+          const uploaded = []
+          for (const file of pendingDocs) uploaded.push(await uploadCarDocument(saved.id, file))
+          await updateCarDocuments(saved.id, uploaded)
+        } catch (err) {
+          docError = err
+        }
       }
-      navigate('/admin')
+      if (isSold) {
+        await saveSaleForCar(saved.id, { sellerId: sale.sellerId || null, salePrice, saleDate: sale.date })
+      } else if (existingSale) {
+        await deleteSaleForCar(saved.id)
+      }
+      if (docError) {
+        // O carro já foi cadastrado: abre a edição dele para anexar de novo
+        setError('Carro cadastrado, mas os documentos não foram enviados (' + docError.message + '). Anexe de novo abaixo.')
+        setPendingDocs([])
+        setSaving(false)
+        navigate(`/admin/carros/${saved.id}`, { replace: true })
+        return
+      }
+      navigate('/admin/estoque')
     } catch (err) {
       setError('Não foi possível salvar: ' + err.message)
       setSaving(false)
@@ -107,11 +199,11 @@ export default function AdminCarForm() {
   }
 
   async function handleDelete() {
-    if (!confirm(`Excluir "${car.brand} ${car.model}"? Essa ação não pode ser desfeita.`)) return
+    if (!(await confirm(`Excluir "${car.brand} ${car.model}"? Essa ação não pode ser desfeita.`))) return
     setSaving(true)
     try {
       await deleteCar(id)
-      navigate('/admin')
+      navigate('/admin/estoque')
     } catch (err) {
       setError('Não foi possível excluir: ' + err.message)
       setSaving(false)
@@ -120,9 +212,12 @@ export default function AdminCarForm() {
 
   if (loading) return <p className="admin-muted">Carregando…</p>
 
+  // Gerente informa o custo só no cadastro; na edição o campo nem aparece
+  const showPurchase = canSeeCosts || !isEditing
+
   return (
     <div className="admin-page admin-form-page">
-      <Link to="/admin" className="admin-back-link">
+      <Link to="/admin/estoque" className="admin-back-link">
         <ChevronLeft size={16} /> Voltar para o estoque
       </Link>
 
@@ -131,11 +226,13 @@ export default function AdminCarForm() {
         {isEditing && (
           <div className="admin-row-actions">
             <Link to={`/admin/carros/${id}/gastos`} className="btn btn-outline">
-              <Receipt size={15} /> Ver gastos
+              <Receipt size={15} /> {canSeeCosts ? 'Ver gastos' : 'Lançar gasto'}
             </Link>
-            <button type="button" className="btn btn-outline admin-delete-btn" onClick={handleDelete} disabled={saving}>
-              <Trash2 size={15} /> Excluir
-            </button>
+            {isAdmin && (
+              <button type="button" className="btn btn-outline admin-delete-btn" onClick={handleDelete} disabled={saving}>
+                <Trash2 size={15} /> Excluir
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -188,14 +285,7 @@ export default function AdminCarForm() {
             </label>
             <label>
               Quilometragem
-              <input
-                type="text"
-                inputMode="decimal"
-                required
-                value={car.km}
-                onChange={(e) => update('km', e.target.value)}
-                placeholder="Ex: 45.000"
-              />
+              <input inputMode="numeric" required value={car.km} onChange={(e) => update('km', e.target.value)} />
             </label>
             <label>
               Câmbio
@@ -250,26 +340,40 @@ export default function AdminCarForm() {
 
         <section className="admin-form-section">
           <h2>Preço e status</h2>
+
+          <details className="fipe-lookup-details">
+            <summary>Consultar tabela FIPE (opcional)</summary>
+            <p className="admin-form-hint">
+              Ajuda a ver o valor de referência FIPE do modelo. Não altera o preço até você clicar em "Usar como preço de venda".
+            </p>
+            <FipeLookup
+              onUseValue={(value) => {
+                if (value == null) return
+                setNoPrice(false)
+                update('price', String(value))
+              }}
+            />
+          </details>
+
           <div className="admin-form-grid">
             <label>
               Preço de venda (R$)
               <input
-                type="text"
-                inputMode="decimal"
-                required
-                value={car.price}
+                inputMode="numeric"
+                required={!noPrice}
+                disabled={noPrice}
+                value={noPrice ? '' : car.price}
                 onChange={(e) => update('price', e.target.value)}
-                placeholder="Ex: 45.900"
+                placeholder={noPrice ? 'Sem preço definido' : ''}
               />
             </label>
             <label>
               Preço "de" — opcional, mostra desconto
               <input
-                type="text"
-                inputMode="decimal"
-                value={car.originalPrice || ''}
+                inputMode="numeric"
+                disabled={noPrice}
+                value={noPrice ? '' : car.originalPrice || ''}
                 onChange={(e) => update('originalPrice', e.target.value)}
-                placeholder="Ex: 49.900"
               />
             </label>
             <label>
@@ -283,6 +387,52 @@ export default function AdminCarForm() {
               </select>
             </label>
           </div>
+
+          {car.status === 'vendido' && (
+            <div className="admin-sale-fields">
+              <h3>Dados da venda</h3>
+              <div className="admin-form-grid">
+                <label>
+                  Vendedor
+                  <select value={sale.sellerId} onChange={(e) => updateSale('sellerId', e.target.value)}>
+                    <option value="">Sem vendedor (venda direta da loja)</option>
+                    {sellers
+                      .filter((s) => s.active || s.id === sale.sellerId)
+                      .map((s) => <option key={s.id} value={s.id}>{s.name}{s.role === 'manager' ? ' (gerente)' : ''}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Valor final da venda (R$)
+                  <input
+                    inputMode="numeric"
+                    value={sale.price}
+                    onChange={(e) => updateSale('price', e.target.value)}
+                    placeholder={noPrice ? 'Ex: 95.000' : 'Em branco = preço anunciado'}
+                  />
+                </label>
+                <label>
+                  Data da venda
+                  <DateInputBR value={sale.date} onChange={(v) => updateSale('date', v)} />
+                </label>
+                <CustomerPicker
+                  customers={customers}
+                  value={car.customerId}
+                  onChange={(value) => update('customerId', value)}
+                  onCreated={(created) => setCustomers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))}
+                  disabled={saving}
+                />
+              </div>
+            </div>
+          )}
+
+          <label className="admin-checkbox">
+            <input
+              type="checkbox"
+              checked={noPrice}
+              onChange={(e) => setNoPrice(e.target.checked)}
+            />
+            Sem preço definido (site mostra "Consulte o valor", sem opção de simular financiamento)
+          </label>
 
           <label className="admin-checkbox">
             <input
@@ -304,26 +454,45 @@ export default function AdminCarForm() {
         </section>
 
         <section className="admin-form-section">
-          <h2>Custo de aquisição</h2>
-          <p className="admin-form-hint">
-            Usado para calcular o custo total e a margem do carro (junto com os gastos cadastrados em "Ver gastos"). Não aparece no site público.
-          </p>
+          <h2>{showPurchase ? 'Custo de aquisição' : 'Aviso de estoque'}</h2>
+          {showPurchase && (
+            <p className="admin-form-hint">
+              {canSeeCosts
+                ? 'Usado para calcular o custo total e a margem do carro (junto com os gastos cadastrados em "Ver gastos"). Não aparece no site público.'
+                : 'Informe quanto a loja pagou pelo carro. Depois de cadastrar, só o administrador vê e altera esse valor.'}
+            </p>
+          )}
           <div className="admin-form-grid">
+            {showPurchase && (
+              <label>
+                Preço de compra (R$)
+                <input
+                  inputMode="numeric"
+                  value={car.purchasePrice || ''}
+                  onChange={(e) => update('purchasePrice', e.target.value)}
+                  placeholder="Quanto a loja pagou pelo carro"
+                />
+              </label>
+            )}
+            {showPurchase && (
+              <label>
+                Data da compra
+                <DateInputBR value={car.purchaseDate || ''} onChange={(iso) => update('purchaseDate', iso)} />
+              </label>
+            )}
             <label>
-              Preço de compra (R$)
+              Aviso de estoque (dias)
               <input
-                type="text"
-                inputMode="decimal"
-                value={car.purchasePrice || ''}
-                onChange={(e) => update('purchasePrice', e.target.value)}
-                placeholder="Ex: 32.500"
+                inputMode="numeric"
+                value={car.stockAlertDays || ''}
+                onChange={(e) => update('stockAlertDays', e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder={`Padrão da loja: ${alertDefault} dias`}
               />
             </label>
-            <label>
-              Data da compra
-              <input type="date" value={car.purchaseDate || ''} onChange={(e) => update('purchaseDate', e.target.value)} />
-            </label>
           </div>
+          <p className="admin-form-note">
+            O tempo em estoque fica em vermelho a partir desse prazo. Em branco, usa o padrão da loja (ajustável em Estoque → Aviso de estoque).
+          </p>
         </section>
 
         <section className="admin-form-section">
@@ -337,13 +506,17 @@ export default function AdminCarForm() {
           />
         </section>
 
-        {isEditing && (
-          <section className="admin-form-section">
-            <h2>Documentos do carro</h2>
-            <p className="admin-form-hint">CRLV, laudo cautelar, nota fiscal etc. Ficam visíveis só para o painel admin.</p>
-            <CarDocumentUploader carId={id} documents={car.documents} onChange={(documents) => update('documents', documents)} />
-          </section>
-        )}
+        <section className="admin-form-section">
+          <h2>Documentos do carro</h2>
+          <p className="admin-form-hint">CRLV, laudo cautelar, nota fiscal etc. Ficam visíveis só no painel (admin e gerente), nunca no site.</p>
+          <CarDocumentUploader
+            carId={id}
+            documents={car.documents}
+            onChange={(documents) => update('documents', documents)}
+            pendingFiles={pendingDocs}
+            onPendingChange={setPendingDocs}
+          />
+        </section>
 
         <section className="admin-form-section">
           <h2>Descrição</h2>
@@ -356,12 +529,13 @@ export default function AdminCarForm() {
         </section>
 
         <div className="admin-form-actions">
-          <Link to="/admin" className="btn btn-outline">Cancelar</Link>
+          <Link to="/admin/estoque" className="btn btn-outline">Cancelar</Link>
           <button type="submit" className="btn btn-primary" disabled={saving}>
             {saving ? 'Salvando…' : isEditing ? 'Salvar alterações' : 'Cadastrar carro'}
           </button>
         </div>
       </form>
+      {confirmDialog}
     </div>
   )
 }

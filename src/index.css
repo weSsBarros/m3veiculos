@@ -27,7 +27,7 @@
   --shadow-card: 0 8px 24px rgba(10, 14, 23, 0.08);
   --shadow-card-hover: 0 14px 32px rgba(10, 14, 23, 0.14);
 
-  --container-w: 1240px;
+  --container-w: 1480px;
 
   color-scheme: light;
 }
@@ -81,7 +81,7 @@ ul {
   width: 100%;
   max-width: var(--container-w);
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 clamp(16px, 2.5vw, 32px);
 }
 
 .section {

@@ -5,21 +5,19 @@ import { fetchCarById } from '../lib/carsApi.js'
 import {
   fetchExpensesByCar,
   createExpense,
+  launchExpense,
   updateExpense,
   deleteExpense,
   getAttachmentSignedUrl,
 } from '../lib/expensesApi.js'
-import { EXPENSE_CATEGORIES, expenseCategoryLabel, formatCurrency, parseLocaleNumber } from '../utils/carFormat.js'
+import { fetchAllSuppliers } from '../lib/suppliersApi.js'
+import { EXPENSE_CATEGORIES, expenseCategoryLabel, formatCurrency, parseIntBR, formatDateBR as formatDate } from '../utils/carFormat.js'
 import ExpenseAttachmentUploader from './ExpenseAttachmentUploader.jsx'
+import DateInputBR from '../components/DateInputBR.jsx'
 import { downloadCsv } from '../utils/exportCsv.js'
 import './admin.css'
-
-const EXPENSE_CSV_COLUMNS = [
-  { label: 'Data', value: (e) => e.expenseDate },
-  { label: 'Categoria', value: (e) => expenseCategoryLabel(e.category) },
-  { label: 'Descrição', value: (e) => e.description },
-  { label: 'Valor (R$)', value: (e) => e.amount },
-]
+import useConfirm from '../components/useConfirm.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 
 function emptyExpense() {
   return {
@@ -28,30 +26,37 @@ function emptyExpense() {
     amount: '',
     expenseDate: new Date().toISOString().slice(0, 10),
     attachments: [],
+    supplierId: '',
   }
 }
 
-function formatDate(isoDate) {
-  return new Date(`${isoDate}T00:00:00`).toLocaleDateString('pt-BR')
-}
-
 export default function AdminCarExpenses() {
+  const { confirm, confirmDialog } = useConfirm()
+  // Gerente (sem canSeeCosts) só lança gastos: não vê a lista, os valores nem os totais
+  const { isAdmin, canSeeCosts } = useAuth()
   const { id } = useParams()
   const [car, setCar] = useState(null)
   const [expenses, setExpenses] = useState([])
+  const [suppliers, setSuppliers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [form, setForm] = useState(emptyExpense)
   const [editingId, setEditingId] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [success, setSuccess] = useState('')
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const [foundCar, foundExpenses] = await Promise.all([fetchCarById(id), fetchExpensesByCar(id)])
+      const [foundCar, foundExpenses, foundSuppliers] = await Promise.all([
+        fetchCarById(id),
+        canSeeCosts ? fetchExpensesByCar(id) : Promise.resolve([]),
+        fetchAllSuppliers(),
+      ])
       setCar(foundCar)
       setExpenses(foundExpenses)
+      setSuppliers(foundSuppliers)
     } catch (err) {
       setError(err.message || 'Erro ao carregar os gastos.')
     } finally {
@@ -64,9 +69,15 @@ export default function AdminCarExpenses() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  const suppliersById = useMemo(() => {
+    const map = {}
+    for (const s of suppliers) map[s.id] = s
+    return map
+  }, [suppliers])
+
   const totalExpenses = useMemo(() => expenses.reduce((sum, e) => sum + e.amount, 0), [expenses])
   const totalCost = (car?.purchasePrice || 0) + totalExpenses
-  const margin = car ? car.price - totalCost : 0
+  const margin = car && car.price != null ? car.price - totalCost : null
 
   const byCategory = useMemo(() => {
     const map = {}
@@ -86,6 +97,7 @@ export default function AdminCarExpenses() {
       amount: expense.amount,
       expenseDate: expense.expenseDate,
       attachments: expense.attachments,
+      supplierId: expense.supplierId || '',
     })
   }
 
@@ -98,16 +110,21 @@ export default function AdminCarExpenses() {
     e.preventDefault()
     setSaving(true)
     setError('')
+    setSuccess('')
     const payload = {
       carId: id,
       category: form.category,
       description: form.description,
-      amount: Math.round(parseLocaleNumber(form.amount) || 0),
+      amount: parseIntBR(form.amount),
       expenseDate: form.expenseDate,
       attachments: form.attachments,
+      supplierId: form.supplierId || null,
     }
     try {
-      if (editingId) {
+      if (!canSeeCosts) {
+        await launchExpense(payload)
+        setSuccess('Gasto lançado. Os valores lançados ficam visíveis só para o administrador.')
+      } else if (editingId) {
         const updated = await updateExpense(editingId, payload)
         setExpenses((prev) => prev.map((e) => (e.id === editingId ? updated : e)))
       } else {
@@ -123,7 +140,7 @@ export default function AdminCarExpenses() {
   }
 
   async function handleDelete(expense) {
-    if (!confirm('Excluir este gasto? Essa ação não pode ser desfeita.')) return
+    if (!(await confirm('Excluir este gasto? Essa ação não pode ser desfeita.'))) return
     try {
       await deleteExpense(expense.id)
       setExpenses((prev) => prev.filter((e) => e.id !== expense.id))
@@ -143,8 +160,15 @@ export default function AdminCarExpenses() {
   }
 
   function handleExportCsv() {
+    const columns = [
+      { label: 'Data', value: (e) => e.expenseDate },
+      { label: 'Categoria', value: (e) => expenseCategoryLabel(e.category) },
+      { label: 'Fornecedor', value: (e) => (e.supplierId ? suppliersById[e.supplierId]?.name || '—' : '—') },
+      { label: 'Descrição', value: (e) => e.description },
+      { label: 'Valor (R$)', value: (e) => e.amount },
+    ]
     const filename = `gastos-${car.brand}-${car.model}`.toLowerCase().replace(/\s+/g, '-') + '.csv'
-    downloadCsv(filename, EXPENSE_CSV_COLUMNS, expenses)
+    downloadCsv(filename, columns, expenses)
   }
 
   if (loading) return <p className="admin-muted">Carregando…</p>
@@ -152,45 +176,49 @@ export default function AdminCarExpenses() {
 
   return (
     <div className="admin-page">
-      <Link to="/admin" className="admin-back-link">
+      <Link to="/admin/estoque" className="admin-back-link">
         <ChevronLeft size={16} /> Voltar para o estoque
       </Link>
 
       <div className="admin-page-head">
         <div>
-          <h1>Gastos — {car.brand} {car.model}</h1>
+          <h1>{canSeeCosts ? 'Gastos' : 'Lançar gasto'} — {car.brand} {car.model}</h1>
           <p>{car.version} · {car.modelYear}</p>
         </div>
         <div className="admin-row-actions">
-          <button type="button" className="btn btn-outline" onClick={handleExportCsv} disabled={expenses.length === 0}>
-            <Download size={15} /> Exportar CSV
-          </button>
+          {canSeeCosts && (
+            <button type="button" className="btn btn-outline" onClick={handleExportCsv} disabled={expenses.length === 0}>
+              <Download size={15} /> Exportar CSV
+            </button>
+          )}
           <Link to={`/admin/carros/${id}`} className="btn btn-outline">Editar dados do carro</Link>
         </div>
       </div>
 
       {error && <p className="admin-error">{error}</p>}
 
-      <div className="expense-summary">
-        <div className="expense-summary-card">
-          <span>Preço de compra</span>
-          <strong>{car.purchasePrice ? formatCurrency(car.purchasePrice) : '—'}</strong>
+      {canSeeCosts && (
+        <div className="expense-summary">
+          <div className="expense-summary-card">
+            <span>Preço de compra</span>
+            <strong>{car.purchasePrice ? formatCurrency(car.purchasePrice) : '—'}</strong>
+          </div>
+          <div className="expense-summary-card">
+            <span>Gastos ({expenses.length})</span>
+            <strong>{formatCurrency(totalExpenses)}</strong>
+          </div>
+          <div className="expense-summary-card">
+            <span>Custo total</span>
+            <strong>{formatCurrency(totalCost)}</strong>
+          </div>
+          <div className={`expense-summary-card ${margin == null ? '' : margin < 0 ? 'is-negative' : 'is-positive'}`}>
+            <span>Margem (preço de venda)</span>
+            <strong>{margin != null ? formatCurrency(margin) : '—'}</strong>
+          </div>
         </div>
-        <div className="expense-summary-card">
-          <span>Gastos ({expenses.length})</span>
-          <strong>{formatCurrency(totalExpenses)}</strong>
-        </div>
-        <div className="expense-summary-card">
-          <span>Custo total</span>
-          <strong>{formatCurrency(totalCost)}</strong>
-        </div>
-        <div className={`expense-summary-card ${margin < 0 ? 'is-negative' : 'is-positive'}`}>
-          <span>Margem (preço de venda)</span>
-          <strong>{formatCurrency(margin)}</strong>
-        </div>
-      </div>
+      )}
 
-      {byCategory.length > 0 && (
+      {canSeeCosts && byCategory.length > 0 && (
         <div className="expense-categories">
           {byCategory.map(([slug, amount]) => (
             <span className="expense-category-chip" key={slug}>
@@ -213,18 +241,20 @@ export default function AdminCarExpenses() {
           </label>
           <label>
             Valor (R$)
-            <input
-              type="text"
-              inputMode="decimal"
-              required
-              value={form.amount}
-              onChange={(e) => update('amount', e.target.value)}
-              placeholder="Ex: 1.250"
-            />
+            <input inputMode="numeric" required value={form.amount} onChange={(e) => update('amount', e.target.value)} />
           </label>
           <label>
             Data
-            <input type="date" required value={form.expenseDate} onChange={(e) => update('expenseDate', e.target.value)} />
+            <DateInputBR required value={form.expenseDate} onChange={(iso) => update('expenseDate', iso)} />
+          </label>
+          <label>
+            Fornecedor (opcional)
+            <select value={form.supplierId} onChange={(e) => update('supplierId', e.target.value)}>
+              <option value="">— Nenhum —</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
           </label>
         </div>
         <label>
@@ -240,6 +270,7 @@ export default function AdminCarExpenses() {
           Anexos (fotos, notas fiscais em PDF)
           <ExpenseAttachmentUploader carId={id} attachments={form.attachments} onChange={(a) => update('attachments', a)} />
         </label>
+        {success && <p className="admin-success">{success}</p>}
         <div className="admin-form-actions">
           {editingId && (
             <button type="button" className="btn btn-outline" onClick={cancelEdit}>
@@ -247,12 +278,14 @@ export default function AdminCarExpenses() {
             </button>
           )}
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Salvando…' : editingId ? 'Salvar alterações' : 'Adicionar gasto'}
+            {saving ? 'Salvando…' : editingId ? 'Salvar alterações' : canSeeCosts ? 'Adicionar gasto' : 'Lançar gasto'}
           </button>
         </div>
       </form>
 
-      {expenses.length === 0 ? (
+      {!canSeeCosts ? (
+        <p className="admin-muted">Os gastos já lançados e os totais deste carro ficam visíveis só para o administrador.</p>
+      ) : expenses.length === 0 ? (
         <p className="admin-muted">Nenhum gasto cadastrado para este carro ainda.</p>
       ) : (
         <>
@@ -262,6 +295,7 @@ export default function AdminCarExpenses() {
                 <tr>
                   <th>Data</th>
                   <th>Categoria</th>
+                  <th>Fornecedor</th>
                   <th>Descrição</th>
                   <th>Valor</th>
                   <th>Anexos</th>
@@ -273,6 +307,7 @@ export default function AdminCarExpenses() {
                   <tr key={expense.id} className={editingId === expense.id ? 'is-busy' : ''}>
                     <td>{formatDate(expense.expenseDate)}</td>
                     <td>{expenseCategoryLabel(expense.category)}</td>
+                    <td>{expense.supplierId ? suppliersById[expense.supplierId]?.name || '—' : '—'}</td>
                     <td>{expense.description || '—'}</td>
                     <td>{formatCurrency(expense.amount)}</td>
                     <td>
@@ -294,19 +329,16 @@ export default function AdminCarExpenses() {
                       )}
                     </td>
                     <td>
-                      <div className="admin-row-actions">
-                        <button type="button" className="admin-icon-btn" aria-label="Editar" onClick={() => startEdit(expense)}>
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="admin-icon-btn admin-icon-btn-danger"
-                          aria-label="Excluir"
-                          onClick={() => handleDelete(expense)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
+                      <div className="admin-action-group">
+                          <button type="button" className="admin-action-btn" onClick={() => startEdit(expense)}>
+                            <Pencil size={15} /> Editar
+                          </button>
+                          {isAdmin && (
+                            <button type="button" className="admin-action-btn admin-action-danger" onClick={() => handleDelete(expense)}>
+                              <Trash2 size={15} /> Excluir
+                            </button>
+                          )}
+                        </div>
                     </td>
                   </tr>
                 ))}
@@ -320,7 +352,10 @@ export default function AdminCarExpenses() {
                 <div className="admin-card-top">
                   <div className="admin-card-title">
                     <span className="expense-category-chip">{expenseCategoryLabel(expense.category)}</span>
-                    <span className="admin-card-meta">{formatDate(expense.expenseDate)}</span>
+                    <span className="admin-card-meta">
+                      {formatDate(expense.expenseDate)}
+                      {expense.supplierId && suppliersById[expense.supplierId] && ` · ${suppliersById[expense.supplierId].name}`}
+                    </span>
                   </div>
                   <strong>{formatCurrency(expense.amount)}</strong>
                 </div>
@@ -346,15 +381,18 @@ export default function AdminCarExpenses() {
                   <button type="button" onClick={() => startEdit(expense)}>
                     <Pencil size={14} /> Editar
                   </button>
-                  <button type="button" className="admin-icon-btn-danger" onClick={() => handleDelete(expense)}>
-                    <Trash2 size={14} /> Excluir
-                  </button>
+                  {isAdmin && (
+                    <button type="button" className="admin-icon-btn-danger" onClick={() => handleDelete(expense)}>
+                      <Trash2 size={14} /> Excluir
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         </>
       )}
+      {confirmDialog}
     </div>
   )
 }

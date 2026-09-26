@@ -1,17 +1,37 @@
 // Import dinâmico: docx só é carregado quando o admin gera um Word, pra não
 // engordar o bundle do site público.
 
-export async function generateContractDocx({ title, paragraphs, signatures, filename }) {
-  const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } = await import('docx')
+export async function generateContractDocx({ title, paragraphs, signatures, filename, logo }) {
+  const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, ImageRun } = await import('docx')
 
-  const children = [
+  const children = []
+
+  if (logo) {
+    const logoWidth = 110
+    const logoHeight = Math.round((logo.height / logo.width) * logoWidth)
+    children.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 200 },
+        children: [
+          new ImageRun({
+            type: logo.format === 'PNG' ? 'png' : 'jpg',
+            data: logo.arrayBuffer,
+            transformation: { width: logoWidth, height: logoHeight },
+          }),
+        ],
+      })
+    )
+  }
+
+  children.push(
     new Paragraph({
       text: title,
       heading: HeadingLevel.HEADING_2,
       alignment: AlignmentType.CENTER,
       spacing: { after: 300 },
-    }),
-  ]
+    })
+  )
 
   for (const paragraph of paragraphs) {
     const parts = paragraph.split('\n')

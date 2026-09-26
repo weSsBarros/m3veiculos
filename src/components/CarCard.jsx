@@ -4,7 +4,8 @@ import { formatCurrency, estimateInstallment, discountPercent } from '../utils/c
 import './CarCard.css'
 
 export default function CarCard({ car }) {
-  const off = discountPercent(car.price, car.originalPrice)
+  const hasPrice = car.price != null
+  const off = hasPrice && discountPercent(car.price, car.originalPrice)
 
   return (
     <Link to={`/carro/${car.slug}`} className="car-card">
@@ -26,9 +27,15 @@ export default function CarCard({ car }) {
         </div>
 
         <div className="car-card-price">
-          {car.originalPrice && <span className="price-old">{formatCurrency(car.originalPrice)}</span>}
-          <span className="price-main">{formatCurrency(car.price)}</span>
-          <span className="price-installment">ou em até 48x de {estimateInstallment(car.price)}</span>
+          {hasPrice ? (
+            <>
+              {car.originalPrice && <span className="price-old">{formatCurrency(car.originalPrice)}</span>}
+              <span className="price-main">{formatCurrency(car.price)}</span>
+              <span className="price-installment">ou em até 48x de {estimateInstallment(car.price)}</span>
+            </>
+          ) : (
+            <span className="price-main">Consulte o valor</span>
+          )}
         </div>
 
         <span className="btn btn-outline btn-block car-card-cta">Ver detalhes</span>

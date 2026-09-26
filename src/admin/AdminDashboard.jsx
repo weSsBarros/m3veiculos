@@ -1,30 +1,62 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { RefreshCcw, Download } from 'lucide-react'
+import { RefreshCcw } from 'lucide-react'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
-import { expenseCategoryLabel, formatCurrency, carStatusLabel } from '../utils/carFormat.js'
-import { downloadCsv } from '../utils/exportCsv.js'
+import { fetchAllSuppliers } from '../lib/suppliersApi.js'
+import { fetchSales, effectiveSalePrice, effectiveSaleDate } from '../lib/salesApi.js'
+import { fetchSellers } from '../lib/sellersApi.js'
+import { expenseCategoryLabel, formatCurrency, formatCurrencyCents, daysInStock } from '../utils/carFormat.js'
+import { periodRange, inRange } from '../utils/period.js'
+import BarChart from '../components/charts/BarChart.jsx'
+import DonutChart from '../components/charts/DonutChart.jsx'
+import HBarChart from '../components/charts/HBarChart.jsx'
+import PeriodFilter from './PeriodFilter.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
+import { fetchSiteVisitTotals, fetchDailyVisits, fetchCarViewTotals } from '../lib/statsApi.js'
 import './admin.css'
 
-const ALL_CARS_VALUE = 'todos'
+const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+const CATEGORY_COLORS = ['#0ea0db', '#1c9b56', '#f5a623', '#e0392c', '#7b61ff', '#00b3a4', '#8a94a6', '#d4418e']
 
+// Admin vê tudo. Gerente: nunca vê gastos nem investimento no estoque; os
+// valores das vendas (faturamento, comissões) só se o admin liberou — senão
+// o Dashboard dele mostra só quantidades.
 export default function AdminDashboard() {
+  const { canSeeCosts, canSeeSaleValues } = useAuth()
   const [cars, setCars] = useState([])
   const [expenses, setExpenses] = useState([])
+  const [suppliers, setSuppliers] = useState([])
+  const [sales, setSales] = useState([])
+  const [sellers, setSellers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [exportCarId, setExportCarId] = useState(ALL_CARS_VALUE)
+  const [period, setPeriod] = useState('mes')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const [dailyVisits, setDailyVisits] = useState([])
+  const [visitTotals, setVisitTotals] = useState({ visits: 0, visitors: 0 })
+  const [carViews, setCarViews] = useState({})
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const [carsData, expensesData] = await Promise.all([fetchAllCarsAdmin(), fetchAllExpensesAdmin()])
+      const [carsData, expensesData, suppliersData, salesData, sellersData] = await Promise.all([
+        fetchAllCarsAdmin(),
+        canSeeCosts ? fetchAllExpensesAdmin() : Promise.resolve([]),
+        canSeeCosts ? fetchAllSuppliers() : Promise.resolve([]),
+        fetchSales(),
+        fetchSellers(),
+      ])
       setCars(carsData)
       setExpenses(expensesData)
+      setSuppliers(suppliersData)
+      setSales(salesData)
+      setSellers(sellersData)
+      // Visitas: se falhar, o resto do Dashboard continua funcionando
+      fetchDailyVisits(14).then(setDailyVisits).catch(() => setDailyVisits([]))
     } catch (err) {
-      setError(err.message || 'Erro ao carregar o painel.')
+      setError(err.message || 'Erro ao carregar o dashboard.')
     } finally {
       setLoading(false)
     }
@@ -32,7 +64,51 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const range = periodRange(period, customStart, customEnd)
+
+  // Visitas do site e visualizações por carro no período escolhido
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([fetchSiteVisitTotals(range.start, range.end), fetchCarViewTotals(range.start, range.end)])
+      .then(([totals, views]) => {
+        if (cancelled) return
+        setVisitTotals(totals)
+        setCarViews(views)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [range.start, range.end])
+
+  const salesByCar = useMemo(() => {
+    const map = {}
+    for (const s of sales) map[s.carId] = s
+    return map
+  }, [sales])
+
+  // Toda venda (carro vendido), com valor e data efetivos — inclui vendas
+  // antigas sem registro (usa preço anunciado e data de venda do carro).
+  const soldEntries = useMemo(
+    () =>
+      cars
+        .filter((c) => c.status === 'vendido')
+        .map((car) => {
+          const sale = salesByCar[car.id] || null
+          return { car, sale, price: effectiveSalePrice(car, sale), date: effectiveSaleDate(car, sale) }
+        }),
+    [cars, salesByCar]
+  )
+
+  const periodEntries = useMemo(
+    () => soldEntries.filter((e) => inRange(e.date, { start: range.start, end: range.end })),
+    [soldEntries, range.start, range.end]
+  )
+  const periodRevenue = periodEntries.reduce((sum, e) => sum + (e.price || 0), 0)
+  const periodCommission = periodEntries.reduce((sum, e) => sum + (e.sale?.commissionAmount || 0), 0)
 
   const expensesByCar = useMemo(() => {
     const map = {}
@@ -40,54 +116,107 @@ export default function AdminDashboard() {
     return map
   }, [expenses])
 
-  const rows = useMemo(
-    () =>
-      cars.map((car) => {
-        const totalExpenses = expensesByCar[car.id] || 0
-        const totalCost = (car.purchasePrice || 0) + totalExpenses
-        const margin = car.price - totalCost
-        return { car, totalExpenses, totalCost, margin }
-      }),
-    [cars, expensesByCar]
-  )
-
-  const availableRows = rows.filter((r) => r.car.status === 'disponivel')
-  const totalInvestedAvailable = availableRows.reduce((sum, r) => sum + r.totalCost, 0)
-  const avgMargin = availableRows.length
-    ? availableRows.reduce((sum, r) => sum + r.margin, 0) / availableRows.length
+  const availableCars = cars.filter((c) => c.status === 'disponivel')
+  const investedAvailable = availableCars.reduce((sum, c) => sum + (c.purchasePrice || 0) + (expensesByCar[c.id] || 0), 0)
+  const avgDaysInStock = availableCars.length
+    ? Math.round(availableCars.reduce((sum, c) => sum + daysInStock(c), 0) / availableCars.length)
     : 0
-  const totalExpensesAll = expenses.reduce((sum, e) => sum + e.amount, 0)
+  const periodExpenses = useMemo(
+    () => expenses.filter((e) => inRange(e.expenseDate, { start: range.start, end: range.end })),
+    [expenses, range.start, range.end]
+  )
+  const periodExpensesTotal = periodExpenses.reduce((sum, e) => sum + e.amount, 0)
+
+  const statusData = useMemo(() => {
+    const counts = { disponivel: 0, manutencao: 0, vendido: 0 }
+    for (const car of cars) counts[car.status] = (counts[car.status] || 0) + 1
+    return [
+      { label: 'Disponível', value: counts.disponivel, color: 'var(--color-success)' },
+      { label: 'Em manutenção', value: counts.manutencao, color: '#f5a623' },
+      { label: 'Vendido', value: counts.vendido, color: 'var(--color-text-muted)' },
+    ]
+  }, [cars])
+
+  const monthlyRevenue = useMemo(() => {
+    const now = new Date()
+    const months = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      months.push({ year: d.getFullYear(), monthIdx: d.getMonth(), label: MONTH_LABELS[d.getMonth()], value: 0 })
+    }
+    for (const e of soldEntries) {
+      if (!e.date) continue
+      const [y, m] = e.date.split('-').map(Number)
+      const match = months.find((mo) => mo.year === y && mo.monthIdx === m - 1)
+      if (match) match.value += e.price || 0
+    }
+    return months
+  }, [soldEntries])
+
+  const monthlySalesCount = monthlyRevenue.map((m) => ({
+    label: m.label,
+    value: soldEntries.filter((e) => {
+      if (!e.date) return false
+      const [y, mo] = e.date.split('-').map(Number)
+      return y === m.year && mo - 1 === m.monthIdx
+    }).length,
+  }))
+
+  const bySeller = useMemo(() => {
+    const map = {}
+    for (const e of periodEntries) {
+      const key = e.sale?.sellerId || 'loja'
+      if (!map[key]) map[key] = { revenue: 0, count: 0, commission: 0 }
+      map[key].revenue += e.price || 0
+      map[key].count += 1
+      map[key].commission += e.sale?.commissionAmount || 0
+    }
+    return Object.entries(map)
+      .map(([key, v]) => ({
+        key,
+        label: key === 'loja' ? 'Sem vendedor / venda direta' : sellers.find((s) => s.id === key)?.name || 'Vendedor removido',
+        value: canSeeSaleValues ? v.revenue : v.count,
+        sub: canSeeSaleValues
+          ? `${v.count} ${v.count === 1 ? 'venda' : 'vendas'}${v.commission ? ` · comissão ${formatCurrencyCents(v.commission)}` : ''}`
+          : '',
+      }))
+      .sort((a, b) => b.value - a.value)
+  }, [periodEntries, sellers, canSeeSaleValues])
 
   const byCategory = useMemo(() => {
     const map = {}
-    for (const e of expenses) map[e.category] = (map[e.category] || 0) + e.amount
-    return Object.entries(map).sort((a, b) => b[1] - a[1])
-  }, [expenses])
+    for (const e of periodExpenses) map[e.category] = (map[e.category] || 0) + e.amount
+    return Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .map(([slug, amount], i) => ({ label: expenseCategoryLabel(slug), value: amount, color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }))
+  }, [periodExpenses])
 
-  const carsById = useMemo(() => {
+  const bySupplier = useMemo(() => {
     const map = {}
-    for (const c of cars) map[c.id] = c
-    return map
-  }, [cars])
-
-  function handleExportExpenses() {
-    const filtered = exportCarId === ALL_CARS_VALUE ? expenses : expenses.filter((e) => e.carId === exportCarId)
-    if (filtered.length === 0) {
-      alert('Nenhum gasto para exportar.')
-      return
+    for (const e of periodExpenses) {
+      if (!e.supplierId) continue
+      map[e.supplierId] = (map[e.supplierId] || 0) + e.amount
     }
-    const columns = [
-      { label: 'Carro', value: (e) => { const c = carsById[e.carId]; return c ? `${c.brand} ${c.model}` : '—' } },
-      { label: 'Data', value: (e) => e.expenseDate },
-      { label: 'Categoria', value: (e) => expenseCategoryLabel(e.category) },
-      { label: 'Descrição', value: (e) => e.description },
-      { label: 'Valor (R$)', value: (e) => e.amount },
-    ]
-    const filename = exportCarId === ALL_CARS_VALUE
-      ? 'gastos-todos-os-carros.csv'
-      : `gastos-${(carsById[exportCarId]?.brand || '')}-${(carsById[exportCarId]?.model || '')}`.toLowerCase().replace(/\s+/g, '-') + '.csv'
-    downloadCsv(filename, columns, filtered)
-  }
+    return Object.entries(map)
+      .map(([id, amount]) => ({ key: id, label: suppliers.find((s) => s.id === id)?.name || 'Fornecedor removido', value: amount }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8)
+  }, [periodExpenses, suppliers])
+
+  const topViewed = cars
+    .filter((car) => carViews[car.id]?.views)
+    .map((car) => {
+      const v = carViews[car.id]
+      const days = daysInStock(car)
+      return {
+        key: car.id,
+        label: `${car.brand} ${car.model}`,
+        value: v.views,
+        sub: `${v.viewers} ${v.viewers === 1 ? 'pessoa' : 'pessoas'} · ${car.status === 'vendido' ? 'vendido' : `${days} ${days === 1 ? 'dia' : 'dias'} em estoque`}`,
+      }
+    })
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8)
 
   if (loading) return <p className="admin-muted">Carregando…</p>
 
@@ -95,24 +224,18 @@ export default function AdminDashboard() {
     <div className="admin-page">
       <div className="admin-page-head">
         <div>
-          <h1>Financeiro</h1>
-          <p>Visão consolidada de custo e margem do estoque</p>
+          <h1>Dashboard</h1>
+          <p>{canSeeCosts ? 'Visão geral de vendas, estoque e gastos' : 'Visão geral de vendas e estoque'}</p>
         </div>
         <div className="admin-row-actions">
-          <select
-            className="admin-export-select"
-            value={exportCarId}
-            onChange={(e) => setExportCarId(e.target.value)}
-            aria-label="Carro para exportar"
-          >
-            <option value={ALL_CARS_VALUE}>Todos os carros</option>
-            {cars.map((c) => (
-              <option key={c.id} value={c.id}>{c.brand} {c.model}</option>
-            ))}
-          </select>
-          <button type="button" className="btn btn-outline" onClick={handleExportExpenses}>
-            <Download size={15} /> Exportar gastos (CSV)
-          </button>
+          <PeriodFilter
+            period={period}
+            onPeriodChange={setPeriod}
+            customStart={customStart}
+            customEnd={customEnd}
+            onCustomStartChange={setCustomStart}
+            onCustomEndChange={setCustomEnd}
+          />
           <button type="button" className="btn btn-outline" onClick={load}>
             <RefreshCcw size={15} /> Atualizar
           </button>
@@ -122,112 +245,132 @@ export default function AdminDashboard() {
       {error && <p className="admin-error">{error}</p>}
 
       <div className="expense-summary">
+        {canSeeSaleValues && (
+          <div className="expense-summary-card">
+            <span>Faturamento no período</span>
+            <strong>{formatCurrency(periodRevenue)}</strong>
+          </div>
+        )}
         <div className="expense-summary-card">
-          <span>Investido no estoque disponível</span>
-          <strong>{formatCurrency(totalInvestedAvailable)}</strong>
+          <span>Carros vendidos no período</span>
+          <strong>{periodEntries.length}</strong>
         </div>
-        <div className="expense-summary-card">
-          <span>Margem média (estoque disponível)</span>
-          <strong>{formatCurrency(Math.round(avgMargin))}</strong>
-        </div>
-        <div className="expense-summary-card">
-          <span>Total gasto (todos os carros)</span>
-          <strong>{formatCurrency(totalExpensesAll)}</strong>
-        </div>
+        {canSeeSaleValues && (
+          <div className="expense-summary-card">
+            <span>Comissões no período</span>
+            <strong>{formatCurrencyCents(periodCommission)}</strong>
+          </div>
+        )}
+        {canSeeCosts && (
+          <div className="expense-summary-card">
+            <span>Gastos no período</span>
+            <strong>{formatCurrency(periodExpensesTotal)}</strong>
+          </div>
+        )}
         <div className="expense-summary-card">
           <span>Carros em estoque</span>
-          <strong>{availableRows.length}</strong>
+          <strong>{availableCars.length}</strong>
+        </div>
+        {canSeeCosts && (
+          <div className="expense-summary-card">
+            <span>Investido no estoque</span>
+            <strong>{formatCurrency(investedAvailable)}</strong>
+          </div>
+        )}
+        <div className="expense-summary-card">
+          <span>Tempo médio em estoque</span>
+          <strong>{availableCars.length ? `${avgDaysInStock} ${avgDaysInStock === 1 ? 'dia' : 'dias'}` : '—'}</strong>
         </div>
       </div>
 
-      {byCategory.length > 0 && (
-        <>
-          <h2 className="admin-section-title">Gastos por categoria</h2>
-          <div className="expense-categories">
-            {byCategory.map(([slug, amount]) => (
-              <span className="expense-category-chip" key={slug}>
-                {expenseCategoryLabel(slug)} · {formatCurrency(amount)}
-              </span>
-            ))}
+      <div className="charts-grid charts-grid-3">
+        {canSeeSaleValues && (
+          <div className="chart-card chart-card-wide">
+            <h3>Faturamento dos últimos 6 meses</h3>
+            <BarChart data={monthlyRevenue} formatValue={(v) => (v > 0 ? formatCurrency(v) : '—')} />
           </div>
-        </>
-      )}
-
-      <h2 className="admin-section-title">Custo e margem por carro</h2>
-      {rows.length === 0 ? (
-        <p className="admin-muted">Nenhum carro cadastrado ainda.</p>
-      ) : (
-        <>
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Carro</th>
-                  <th>Status</th>
-                  <th>Custo total</th>
-                  <th>Preço de venda</th>
-                  <th>Margem</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ car, totalCost, margin }) => (
-                  <tr key={car.id}>
-                    <td>
-                      <strong>{car.brand} {car.model}</strong>
-                      <span className="admin-table-sub">{car.version}</span>
-                    </td>
-                    <td>{carStatusLabel(car.status)}</td>
-                    <td>{formatCurrency(totalCost)}</td>
-                    <td>{formatCurrency(car.price)}</td>
-                    <td className={margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
-                      {formatCurrency(margin)}
-                    </td>
-                    <td>
-                      <Link to={`/admin/carros/${car.id}/gastos`} className="btn btn-outline">Ver gastos</Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        )}
+        {!canSeeSaleValues && (
+          <div className="chart-card chart-card-wide">
+            <h3>Vendas por mês (quantidade)</h3>
+            <BarChart data={monthlySalesCount} color="var(--color-success)" formatValue={(v) => (v > 0 ? v : '—')} />
           </div>
-
-          <div className="admin-card-list">
-            {rows.map(({ car, totalCost, margin }) => (
-              <div className="admin-card" key={car.id}>
-                <div className="admin-card-top">
-                  <div className="admin-card-title">
-                    <strong>{car.brand} {car.model}</strong>
-                    <span className="admin-table-sub">{car.version}</span>
-                  </div>
-                  <span className={`admin-status-toggle status-${car.status}`}>
-                    {carStatusLabel(car.status)}
-                  </span>
-                </div>
-
-                <div className="admin-card-stats">
-                  <div>
-                    <span>Custo total</span>
-                    <strong>{formatCurrency(totalCost)}</strong>
-                  </div>
-                  <div>
-                    <span>Preço de venda</span>
-                    <strong>{formatCurrency(car.price)}</strong>
-                  </div>
-                  <div className={margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
-                    <span>Margem</span>
-                    <strong>{formatCurrency(margin)}</strong>
-                  </div>
-                </div>
-
-                <div className="admin-card-actions">
-                  <Link to={`/admin/carros/${car.id}/gastos`}>Ver gastos</Link>
-                </div>
-              </div>
-            ))}
+        )}
+        <div className="chart-card">
+          <h3>Carros por status</h3>
+          <DonutChart data={statusData} />
+        </div>
+        {canSeeSaleValues && (
+          <div className="chart-card">
+            <h3>Vendas por mês (quantidade)</h3>
+            <BarChart data={monthlySalesCount} color="var(--color-success)" formatValue={(v) => (v > 0 ? v : '—')} />
           </div>
-        </>
-      )}
+        )}
+        <div className="chart-card chart-card-wide">
+          <h3>{canSeeSaleValues ? 'Faturamento por vendedor (período)' : 'Vendas por vendedor (período)'}</h3>
+          <HBarChart
+            data={bySeller}
+            formatValue={canSeeSaleValues ? formatCurrency : (v) => `${v} ${v === 1 ? 'venda' : 'vendas'}`}
+            emptyLabel="Nenhuma venda no período."
+          />
+        </div>
+        {canSeeCosts && (
+          <div className="chart-card">
+            <h3>Gastos por categoria (período)</h3>
+            {byCategory.length ? (
+              <DonutChart data={byCategory} formatValue={formatCurrency} />
+            ) : (
+              <p className="admin-muted">Nenhum gasto no período.</p>
+            )}
+          </div>
+        )}
+        {canSeeCosts && (
+          <div className="chart-card chart-card-wide">
+            <h3>Gastos por fornecedor (período)</h3>
+            <HBarChart data={bySupplier} formatValue={formatCurrency} color="#f5a623" emptyLabel="Nenhum gasto com fornecedor no período." />
+          </div>
+        )}
+      </div>
+
+      <h2 className="admin-section-title">Visitas no site</h2>
+      <div className="expense-summary">
+        <div className="expense-summary-card">
+          <span>Visitas no período</span>
+          <strong>{visitTotals.visits.toLocaleString('pt-BR')}</strong>
+        </div>
+        <div className="expense-summary-card">
+          <span>Visitantes no período</span>
+          <strong>{visitTotals.visitors.toLocaleString('pt-BR')}</strong>
+        </div>
+        <div className="expense-summary-card">
+          <span>Visitas hoje</span>
+          <strong>{(dailyVisits[dailyVisits.length - 1]?.visits || 0).toLocaleString('pt-BR')}</strong>
+        </div>
+      </div>
+
+      <div className="charts-grid charts-grid-3">
+        <div className="chart-card chart-card-wide">
+          <h3>Visitas por dia (últimos 14 dias)</h3>
+          <BarChart
+            data={dailyVisits.map((d) => ({ label: d.label, value: d.visits }))}
+            color="#7b61ff"
+            formatValue={(v) => (v > 0 ? v : '—')}
+          />
+        </div>
+        <div className="chart-card">
+          <h3>Carros mais vistos (período)</h3>
+          <HBarChart
+            data={topViewed}
+            formatValue={(v) => `${v.toLocaleString('pt-BR')} ${v === 1 ? 'visualização' : 'visualizações'}`}
+            color="#7b61ff"
+            emptyLabel="Nenhuma visualização no período."
+          />
+        </div>
+      </div>
+      <p className="admin-form-hint">
+        Visitas: cada acesso ao site (voltar em até 30 minutos conta como o mesmo acesso). Visitantes: pessoas diferentes em
+        cada dia — quem volta em outro dia conta de novo. A equipe logada no painel não entra na contagem.
+      </p>
     </div>
   )
 }

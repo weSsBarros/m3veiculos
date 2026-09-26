@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { whatsappLinkForFinancing } from '../utils/whatsapp.js'
-import { maskBirthDate } from '../utils/carFormat.js'
+import { maskBirthDate } from '../utils/masks.js'
 import './FinancingModal.css'
 
 const EMPTY_FORM = {

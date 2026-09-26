@@ -12,3 +12,18 @@ export default function AdminGuard({ children }) {
 
   return children
 }
+
+// Telas restritas. O bloqueio de verdade é a RLS no banco; isto só evita
+// cair numa tela que não carregaria nada.
+export function AdminOnly({ children }) {
+  const { isAdmin } = useAuth()
+  if (!isAdmin) return <Navigate to="/admin" replace />
+  return children
+}
+
+// Admin ou gerente
+export function StaffOnly({ children }) {
+  const { isStaff } = useAuth()
+  if (!isStaff) return <Navigate to="/admin" replace />
+  return children
+}

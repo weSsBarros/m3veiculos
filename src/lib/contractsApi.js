@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js'
+import { supabase, COMPANY_ID } from './supabaseClient.js'
 
 function fromRow(row) {
   return {
@@ -26,6 +26,7 @@ function fromRow(row) {
     saleDate: row.sale_date,
     saleCity: row.sale_city || '',
     notes: row.notes || '',
+    documentType: row.document_type || 'contrato',
     createdAt: row.created_at,
   }
 }
@@ -33,6 +34,7 @@ function fromRow(row) {
 function toRow(contract) {
   return {
     car_id: contract.carId || null,
+    company_id: COMPANY_ID,
     company_name: contract.company.name,
     company_document: contract.company.document,
     company_address: contract.company.address || '',
@@ -51,6 +53,7 @@ function toRow(contract) {
     sale_date: contract.saleDate,
     sale_city: contract.saleCity || '',
     notes: contract.notes || '',
+    document_type: contract.documentType || 'contrato',
   }
 }
 
@@ -67,6 +70,7 @@ export async function fetchContractsAdmin() {
   const { data, error } = await supabase
     .from('contracts')
     .select('*')
+    .eq('company_id', COMPANY_ID)
     .order('created_at', { ascending: false })
   if (error) throw error
   return data.map(fromRow)
