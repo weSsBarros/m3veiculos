@@ -4,6 +4,7 @@ import { ShieldCheck, Wrench, FileCheck2, UserCheck, ChevronRight, MessageCircle
 import { fetchCarBySlug, fetchSimilarCars } from '../lib/carsApi.js'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
 import { trackCarView } from '../lib/statsApi.js'
+import { thumbUrl } from '../utils/carPhotos.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCurrency, estimateInstallment, discountPercent } from '../utils/carFormat.js'
 import { whatsappLinkForCar } from '../utils/whatsapp.js'
@@ -145,7 +146,7 @@ export default function CarDetail() {
                     className={i === activeImage ? 'is-active' : ''}
                     onClick={() => setActiveImage(i)}
                   >
-                    <img src={src} alt="" />
+                    <img src={thumbUrl(src)} alt="" loading="lazy" />
                   </button>
                 ))}
               </div>

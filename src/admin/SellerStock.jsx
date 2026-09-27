@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { fetchSellerCars } from '../lib/carsApi.js'
 import { formatCurrency, CATEGORIES, daysInStock } from '../utils/carFormat.js'
 import { fetchCarViewTotals, formatViews } from '../lib/statsApi.js'
+import { thumbUrl } from '../utils/carPhotos.js'
 import './admin.css'
 
 // Estoque do vendedor: só leitura, sem custo de compra, gastos ou margem
@@ -82,7 +83,7 @@ export default function SellerStock() {
           {available.map((car) => (
             <div className="seller-stock-card" key={car.id}>
               <div className="seller-stock-photo">
-                {car.images[0] ? <img src={car.images[0]} alt="" /> : <span>Sem foto</span>}
+                {car.images[0] ? <img src={thumbUrl(car.images[0])} alt="" loading="lazy" /> : <span>Sem foto</span>}
                 {car.status === 'manutencao' && <span className="seller-stock-badge">Em manutenção</span>}
               </div>
               <div className="seller-stock-body">

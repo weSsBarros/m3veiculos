@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Gauge, Fuel, Settings2 } from 'lucide-react'
 import { formatCurrency, estimateInstallment, discountPercent } from '../utils/carFormat.js'
+import { responsivePhoto } from '../utils/carPhotos.js'
 import './CarCard.css'
 
 export default function CarCard({ car }) {
@@ -12,7 +13,11 @@ export default function CarCard({ car }) {
       <div className="car-card-media">
         {off && <span className="pill pill-danger car-card-badge">{off}% OFF</span>}
         <span className="pill pill-dark car-card-stock">{car.badge}</span>
-        <img src={car.images[0]} alt={`${car.brand} ${car.model}`} loading="lazy" />
+        <img
+          {...responsivePhoto(car.images[0], '(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 360px')}
+          alt={`${car.brand} ${car.model}`}
+          loading="lazy"
+        />
       </div>
       <div className="car-card-body">
         <h3>

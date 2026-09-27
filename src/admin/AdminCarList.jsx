@@ -4,6 +4,7 @@ import { Pencil, Trash2, RefreshCcw, Receipt, Star, Eye, EyeOff, Search, Handsha
 import { fetchAllCarsAdmin, updateCarStatus, updateCarCustomer, updateCarFeatured, updateCarHidden, deleteCar } from '../lib/carsApi.js'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchCarViewTotals, formatViews } from '../lib/statsApi.js'
+import { thumbUrl } from '../utils/carPhotos.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchSales, saveSaleForCar, deleteSaleForCar } from '../lib/salesApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
@@ -87,7 +88,7 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
   return (
     <article className={`stock-card ${car.hidden ? 'is-hidden-row' : ''} ${busy ? 'is-busy' : ''}`}>
       <div className="stock-card-photo">
-        {car.images[0] ? <img src={car.images[0]} alt="" loading="lazy" /> : <span>Sem foto</span>}
+        {car.images[0] ? <img src={thumbUrl(car.images[0])} alt="" loading="lazy" /> : <span>Sem foto</span>}
         <div className="stock-card-badges">
           {car.featured && <span className="stock-card-badge is-featured"><Star size={12} fill="currentColor" /> Destaque</span>}
           {car.hidden && <span className="stock-card-badge is-hidden"><EyeOff size={12} /> Oculto no site</span>}
@@ -218,7 +219,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
               <tr key={car.id} className={`${busyId === car.id ? 'is-busy' : ''} ${car.hidden ? 'is-hidden-row' : ''}`}>
                 <td>
                   <div className="admin-thumb">
-                    {car.images[0] ? <img src={car.images[0]} alt="" /> : <span>Sem foto</span>}
+                    {car.images[0] ? <img src={thumbUrl(car.images[0])} alt="" loading="lazy" /> : <span>Sem foto</span>}
                   </div>
                 </td>
                 <td>
@@ -279,7 +280,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
           <div className={`admin-card ${car.hidden ? 'is-hidden-row' : ''}`} key={car.id}>
             <div className="admin-card-top">
               <div className="admin-thumb admin-card-thumb">
-                {car.images[0] ? <img src={car.images[0]} alt="" /> : <span>Sem foto</span>}
+                {car.images[0] ? <img src={thumbUrl(car.images[0])} alt="" loading="lazy" /> : <span>Sem foto</span>}
               </div>
               <div className="admin-card-title">
                 <strong>{car.brand} {car.model}</strong>

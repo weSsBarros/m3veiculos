@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react'
 import { X, ChevronLeft, ChevronRight, Upload } from 'lucide-react'
 import { uploadCarImage, deleteCarImage } from '../lib/carsApi.js'
+import { thumbUrl } from '../utils/carPhotos.js'
 
 export default function ImageUploader({ images, onChange }) {
   const [uploading, setUploading] = useState(false)
+  const [done, setDone] = useState(0)
+  const [total, setTotal] = useState(0)
   const [error, setError] = useState('')
   const inputRef = useRef(null)
 
@@ -12,11 +15,14 @@ export default function ImageUploader({ images, onChange }) {
     if (files.length === 0) return
     setUploading(true)
     setError('')
+    setDone(0)
+    setTotal(files.length)
     try {
       const urls = []
       for (const file of files) {
         const url = await uploadCarImage(file)
         urls.push(url)
+        setDone(urls.length)
       }
       onChange([...images, ...urls])
     } catch (err) {
@@ -46,7 +52,7 @@ export default function ImageUploader({ images, onChange }) {
         <div className="image-uploader-grid">
           {images.map((url, i) => (
             <div className="image-uploader-item" key={url}>
-              <img src={url} alt="" />
+              <img src={thumbUrl(url)} alt="" />
               {i === 0 && <span className="image-uploader-main-badge">Capa</span>}
               <div className="image-uploader-item-actions">
                 <button type="button" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Mover para a esquerda">
@@ -71,7 +77,11 @@ export default function ImageUploader({ images, onChange }) {
 
       <label className="image-uploader-drop">
         <Upload size={18} />
-        <span>{uploading ? 'Enviando fotos…' : 'Clique para enviar fotos (pode selecionar várias)'}</span>
+        <span>
+          {uploading
+            ? `Otimizando e enviando fotos… (${done} de ${total})`
+            : 'Clique para enviar fotos (pode selecionar várias)'}
+        </span>
         <input
           ref={inputRef}
           type="file"

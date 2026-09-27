@@ -1,5 +1,6 @@
 import { supabase, publicSupabase, COMPANY_ID } from './supabaseClient.js'
 import { slugify } from '../utils/carFormat.js'
+import { compressCarPhoto, hasThumb, thumbUrl } from '../utils/carPhotos.js'
 
 // Colunas visíveis para o site público (chave "anon"). "purchase_price" e
 // "purchase_date" (custo de aquisição) ficam de fora — são bloqueadas a nível
@@ -288,17 +289,42 @@ export async function deleteCar(id) {
 
 // -- Fotos (Supabase Storage, bucket "car-photos") ----------------------------
 
+// A foto é comprimida no navegador e sobe junto com a miniatura (ver
+// utils/carPhotos.js). Os nomes são aleatórios e nunca reaproveitados, então
+// o cache pode ser longo — menos tráfego no plano do Supabase.
 export async function uploadCarImage(file) {
   requireSupabase()
-  const ext = file.name.split('.').pop()
-  const path = `${COMPANY_ID}/${crypto.randomUUID()}.${ext}`
-  const { error } = await supabase.storage.from('car-photos').upload(path, file, {
-    cacheControl: '3600',
-    upsert: false,
-  })
-  if (error) throw error
-  const { data } = supabase.storage.from('car-photos').getPublicUrl(path)
-  return data.publicUrl
+  const bucket = supabase.storage.from('car-photos')
+  const id = crypto.randomUUID()
+
+  let compressed = null
+  try {
+    compressed = await compressCarPhoto(file)
+  } catch {
+    compressed = null
+  }
+
+  if (!compressed) {
+    // Formato que o navegador não abre: envia o arquivo como veio, sem miniatura
+    const path = `${COMPANY_ID}/${id}.${file.name.split('.').pop()}`
+    const { error } = await bucket.upload(path, file, { cacheControl: '3600', upsert: false })
+    if (error) throw error
+    return bucket.getPublicUrl(path).data.publicUrl
+  }
+
+  const name = `${id}.${compressed.ext}`
+  const path = `${COMPANY_ID}/p/${name}`
+  const thumbPath = `${COMPANY_ID}/p/thumbs/${name}`
+  const options = { contentType: compressed.photo.type, cacheControl: '31536000', upsert: false }
+  // Miniatura primeiro: uma foto "com miniatura" nunca fica sem ela
+  const thumbUpload = await bucket.upload(thumbPath, compressed.thumb, options)
+  if (thumbUpload.error) throw thumbUpload.error
+  const photoUpload = await bucket.upload(path, compressed.photo, options)
+  if (photoUpload.error) {
+    await bucket.remove([thumbPath])
+    throw photoUpload.error
+  }
+  return bucket.getPublicUrl(path).data.publicUrl
 }
 
 export async function deleteCarImage(url) {
@@ -306,8 +332,12 @@ export async function deleteCarImage(url) {
   const marker = '/car-photos/'
   const idx = url.indexOf(marker)
   if (idx === -1) return
-  const path = url.slice(idx + marker.length)
-  await supabase.storage.from('car-photos').remove([path])
+  const paths = [url.slice(idx + marker.length)]
+  if (hasThumb(url)) {
+    const thumb = thumbUrl(url)
+    paths.push(thumb.slice(thumb.indexOf(marker) + marker.length))
+  }
+  await supabase.storage.from('car-photos').remove(paths)
 }
 
 // -- Documentos do carro (Supabase Storage, bucket PRIVADO "car-documents") --
