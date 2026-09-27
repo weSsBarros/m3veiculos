@@ -17,20 +17,27 @@ export default function ImageUploader({ images, onChange }) {
     setError('')
     setDone(0)
     setTotal(files.length)
-    try {
-      const urls = []
-      for (const file of files) {
-        const url = await uploadCarImage(file)
-        urls.push(url)
-        setDone(urls.length)
+    // Uma foto com problema não impede as outras: as que subiram entram no
+    // cadastro e cada falha é avisada.
+    const urls = []
+    const failures = []
+    for (const [index, file] of files.entries()) {
+      try {
+        urls.push(await uploadCarImage(file))
+      } catch (err) {
+        failures.push(err.message)
       }
-      onChange([...images, ...urls])
-    } catch (err) {
-      setError('Falha ao enviar foto: ' + err.message)
-    } finally {
-      setUploading(false)
-      if (inputRef.current) inputRef.current.value = ''
+      setDone(index + 1)
     }
+    if (urls.length > 0) onChange([...images, ...urls])
+    if (failures.length > 0) {
+      setError(
+        (failures.length === 1 ? 'Uma foto não foi enviada: ' : `${failures.length} fotos não foram enviadas: `) +
+          failures.join(' ')
+      )
+    }
+    setUploading(false)
+    if (inputRef.current) inputRef.current.value = ''
   }
 
   async function handleRemove(url) {

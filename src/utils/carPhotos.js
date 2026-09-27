@@ -69,7 +69,7 @@ async function encode(source, maxSide, quality) {
 }
 
 // { photo, thumb, ext } — lança erro se o navegador não conseguir abrir o
-// arquivo (ex.: HEIC no computador); quem chama envia o original nesse caso.
+// arquivo (ex.: HEIC no computador); quem chama avisa que o formato não é aceito.
 export async function compressCarPhoto(file) {
   const source = await loadImage(file)
   try {

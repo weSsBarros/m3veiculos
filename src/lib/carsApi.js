@@ -1,6 +1,7 @@
 import { supabase, publicSupabase, COMPANY_ID } from './supabaseClient.js'
 import { slugify } from '../utils/carFormat.js'
 import { compressCarPhoto, hasThumb, thumbUrl } from '../utils/carPhotos.js'
+import { friendlyUploadError } from './storageErrors.js'
 
 // Colunas visíveis para o site público (chave "anon"). "purchase_price" e
 // "purchase_date" (custo de aquisição) ficam de fora — são bloqueadas a nível
@@ -292,37 +293,35 @@ export async function deleteCar(id) {
 // A foto é comprimida no navegador e sobe junto com a miniatura (ver
 // utils/carPhotos.js). Os nomes são aleatórios e nunca reaproveitados, então
 // o cache pode ser longo — menos tráfego no plano do Supabase.
+const PHOTO_LIMITS = { accepted: 'fotos em JPG, PNG ou WebP', maxSize: '10 MB' }
+
 export async function uploadCarImage(file) {
   requireSupabase()
   const bucket = supabase.storage.from('car-photos')
-  const id = crypto.randomUUID()
 
-  let compressed = null
+  let compressed
   try {
     compressed = await compressCarPhoto(file)
   } catch {
-    compressed = null
+    // O navegador não abre o arquivo (ex.: HEIC no computador, ou algo que
+    // não é imagem). Mesmo que subisse, a maioria dos visitantes não veria a foto.
+    throw new Error(
+      `"${file.name}" está num formato que o navegador não consegue abrir (por exemplo, HEIC). ` +
+        'Envie as fotos em JPG, PNG ou WebP. No iPhone: Ajustes › Câmera › Formatos › "Mais compatível".'
+    )
   }
 
-  if (!compressed) {
-    // Formato que o navegador não abre: envia o arquivo como veio, sem miniatura
-    const path = `${COMPANY_ID}/${id}.${file.name.split('.').pop()}`
-    const { error } = await bucket.upload(path, file, { cacheControl: '3600', upsert: false })
-    if (error) throw error
-    return bucket.getPublicUrl(path).data.publicUrl
-  }
-
-  const name = `${id}.${compressed.ext}`
+  const name = `${crypto.randomUUID()}.${compressed.ext}`
   const path = `${COMPANY_ID}/p/${name}`
   const thumbPath = `${COMPANY_ID}/p/thumbs/${name}`
   const options = { contentType: compressed.photo.type, cacheControl: '31536000', upsert: false }
   // Miniatura primeiro: uma foto "com miniatura" nunca fica sem ela
   const thumbUpload = await bucket.upload(thumbPath, compressed.thumb, options)
-  if (thumbUpload.error) throw thumbUpload.error
+  if (thumbUpload.error) throw friendlyUploadError(thumbUpload.error, file.name, PHOTO_LIMITS)
   const photoUpload = await bucket.upload(path, compressed.photo, options)
   if (photoUpload.error) {
     await bucket.remove([thumbPath])
-    throw photoUpload.error
+    throw friendlyUploadError(photoUpload.error, file.name, PHOTO_LIMITS)
   }
   return bucket.getPublicUrl(path).data.publicUrl
 }
@@ -352,7 +351,7 @@ export async function uploadCarDocument(carId, file) {
     cacheControl: '3600',
     upsert: false,
   })
-  if (error) throw error
+  if (error) throw friendlyUploadError(error, file.name, { accepted: 'PDF ou imagem (JPG, PNG)', maxSize: '20 MB' })
   return { path, name: file.name, type: file.type }
 }
 

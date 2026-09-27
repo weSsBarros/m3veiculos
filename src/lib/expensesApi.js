@@ -1,4 +1,5 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
+import { friendlyUploadError } from './storageErrors.js'
 
 function fromRow(row) {
   return {
@@ -99,7 +100,7 @@ export async function uploadExpenseAttachment(carId, file) {
     cacheControl: '3600',
     upsert: false,
   })
-  if (error) throw error
+  if (error) throw friendlyUploadError(error, file.name, { accepted: 'PDF ou imagem (JPG, PNG)', maxSize: '20 MB' })
   return { path, name: file.name, type: file.type }
 }
 
