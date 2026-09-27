@@ -1998,3 +1998,36 @@ grant execute on function public.car_view_totals(date, date) to authenticated;
 alter table public.cars drop constraint if exists cars_slug_key;
 alter table public.cars drop constraint if exists cars_company_slug_key;
 alter table public.cars add constraint cars_company_slug_key unique (company_id, slug);
+
+-- 24) Armazenamento: fotos sem listagem pública, tipos e tamanhos limitados --------
+-- O bucket "car-photos" é público: o site mostra as fotos pelo endereço público
+-- (/object/public/...), que não passa pelas regras abaixo. A regra de leitura
+-- antiga ("Public can view car photos") valia para qualquer pessoa e sem filtro
+-- de loja, o que permitia LISTAR os arquivos de todas as lojas. Agora só admin
+-- e gerente da própria loja leem pelas regras (o painel precisa disso para
+-- apagar fotos). Os buckets passam a aceitar só os tipos que o painel envia e
+-- têm tamanho máximo — evita, por exemplo, alguém hospedar um .html no bucket
+-- público de fotos.
+
+drop policy if exists "Public can view car photos" on storage.objects;
+drop policy if exists "Staff can read own car photos" on storage.objects;
+create policy "Staff can read own car photos"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'car-photos' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_staff());
+
+-- Fotos: só imagens (o painel comprime para WebP/JPEG antes de enviar)
+update storage.buckets
+set allowed_mime_types = array['image/*'], file_size_limit = 10485760
+where id = 'car-photos';
+
+-- Documentos dos carros e anexos de gastos: imagens e PDF
+update storage.buckets
+set allowed_mime_types = array['image/*', 'application/pdf'], file_size_limit = 20971520
+where id in ('car-documents', 'expense-attachments');
+
+-- Modelos de contrato (.docx): só limite de tamanho — alguns computadores
+-- enviam o .docx sem tipo definido, e o bucket é privado.
+update storage.buckets
+set file_size_limit = 10485760
+where id = 'contract-templates';
