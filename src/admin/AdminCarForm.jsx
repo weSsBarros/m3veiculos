@@ -398,7 +398,7 @@ export default function AdminCarForm() {
                     <option value="">Sem vendedor (venda direta da loja)</option>
                     {sellers
                       .filter((s) => s.active || s.id === sale.sellerId)
-                      .map((s) => <option key={s.id} value={s.id}>{s.name}{s.role === 'manager' ? ' (gerente)' : ''}</option>)}
+                      .map((s) => <option key={s.id} value={s.id}>{s.name}{s.role === 'manager' ? ' (gerente)' : ''}{s.deletedAt ? ' (excluído)' : ''}</option>)}
                   </select>
                 </label>
                 <label>

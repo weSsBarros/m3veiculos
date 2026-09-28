@@ -2031,3 +2031,13 @@ where id in ('car-documents', 'expense-attachments');
 update storage.buckets
 set file_size_limit = 10485760
 where id = 'contract-templates';
+
+-- 25) Excluir vendedor ou gerente sem perder o histórico ---------------------------
+-- O admin pode excluir alguém da Equipe (Edge Function "manage-sellers", ação
+-- "delete"): o login é apagado (o e-mail fica livre para um cadastro novo) e a
+-- pessoa sai da lista. O cadastro fica guardado como excluído, inativo e sem
+-- login, para as vendas antigas continuarem com o nome e a comissão dela e o
+-- registro de atividades continuar mostrando quem fez cada coisa
+-- ("former_user_id" guarda o login que ela usava).
+alter table public.sellers add column if not exists deleted_at timestamptz;
+alter table public.sellers add column if not exists former_user_id uuid;

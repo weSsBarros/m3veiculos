@@ -100,19 +100,25 @@ export default function AdminActivity() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userFilter, range.start, range.end])
 
+  // Quem foi excluído da equipe não tem mais login: vale o que ele usava
   const sellersByUser = useMemo(() => {
     const map = {}
-    for (const s of sellers) if (s.userId) map[s.userId] = s
+    for (const s of sellers) {
+      const id = s.userId || s.formerUserId
+      if (id) map[id] = s
+    }
     return map
   }, [sellers])
 
   // Opções do filtro de pessoa: vendedores cadastrados + quem aparece no log
   const people = useMemo(() => {
     const map = {}
-    for (const s of sellers) if (s.userId) map[s.userId] = `${s.name} (${s.role === 'manager' ? 'gerente' : 'vendedor'})`
+    for (const [id, s] of Object.entries(sellersByUser)) {
+      map[id] = `${s.name} (${s.role === 'manager' ? 'gerente' : 'vendedor'}${s.deletedAt ? ', excluído' : ''})`
+    }
     for (const e of entries) if (e.userId && !map[e.userId]) map[e.userId] = e.userEmail || 'Usuário'
     return Object.entries(map).sort((a, b) => a[1].localeCompare(b[1]))
-  }, [sellers, entries])
+  }, [sellersByUser, entries])
 
   const visible = entityFilter ? entries.filter((e) => e.entity === entityFilter) : entries
 
@@ -125,7 +131,10 @@ export default function AdminActivity() {
 
   function personName(entry) {
     const seller = sellersByUser[entry.userId]
-    if (seller) return { name: seller.name, role: seller.role === 'manager' ? 'Gerente' : 'Vendedor' }
+    if (seller) {
+      const role = seller.role === 'manager' ? 'Gerente' : 'Vendedor'
+      return { name: seller.name, role: seller.deletedAt ? `${role} (excluído)` : role }
+    }
     return { name: entry.userEmail || '—', role: 'Admin' }
   }
 

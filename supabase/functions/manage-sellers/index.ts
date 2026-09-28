@@ -1,5 +1,5 @@
-// Edge Function "manage-sellers" — cria login da equipe (vendedor ou gerente)
-// e redefine senha.
+// Edge Function "manage-sellers" — cria login da equipe (vendedor ou gerente),
+// redefine senha e exclui da equipe.
 // Só um usuário com papel 'admin' consegue chamar, e só age dentro da
 // própria empresa. A service role key existe apenas aqui no servidor.
 import { createClient } from 'jsr:@supabase/supabase-js@2'
@@ -143,6 +143,59 @@ Deno.serve(async (req) => {
     })
 
     return json({ ok: true })
+  }
+
+  // Excluir: apaga o login e tira a pessoa da equipe. O cadastro fica guardado
+  // como excluído (inativo, sem login) para as vendas antigas manterem o nome e
+  // a comissão, e o registro de atividades continuar mostrando quem fez o quê.
+  if (body.action === 'delete') {
+    const sellerId = String(body.sellerId ?? '')
+
+    const { data: seller } = await admin
+      .from('sellers')
+      .select('id, user_id, name, role, active, deleted_at')
+      .eq('id', sellerId)
+      .eq('company_id', companyId)
+      .maybeSingle()
+    if (!seller || seller.deleted_at) return json({ error: 'Pessoa não encontrada na equipe' }, 404)
+    if (seller.user_id === userData.user.id) return json({ error: 'Você não pode excluir o seu próprio acesso' }, 400)
+
+    const { data: saved, error: updateError } = await admin
+      .from('sellers')
+      .update({ active: false, deleted_at: new Date().toISOString(), former_user_id: seller.user_id })
+      .eq('id', seller.id)
+      .select()
+      .single()
+    if (updateError) return json({ error: 'Não foi possível excluir' }, 500)
+
+    if (seller.user_id) {
+      // Só apaga o login se ele for apenas vendedor/gerente desta loja. Se a
+      // mesma conta tiver outro acesso (admin aqui ou em outra loja), só tira o
+      // vínculo com a equipe desta loja.
+      const { data: links } = await admin.from('user_company').select('company_id, role').eq('user_id', seller.user_id)
+      const onlyHere = (links ?? []).every((l) => l.company_id === companyId && l.role !== 'admin')
+      const { error: accessError } = onlyHere
+        ? await admin.auth.admin.deleteUser(seller.user_id)
+        : await admin.from('user_company').delete().eq('user_id', seller.user_id).eq('company_id', companyId).neq('role', 'admin')
+      if (accessError) {
+        await admin.from('sellers').update({ active: seller.active, deleted_at: null, former_user_id: null }).eq('id', seller.id)
+        return json({ error: 'Não foi possível apagar o login' }, 500)
+      }
+      if (!onlyHere) await admin.from('sellers').update({ user_id: null }).eq('id', seller.id)
+    }
+
+    await admin.from('activity_log').insert({
+      company_id: companyId,
+      user_id: userData.user.id,
+      user_email: userData.user.email,
+      action: 'delete',
+      entity: 'sellers',
+      entity_id: seller.id,
+      label: seller.name,
+      details: seller.role === 'manager' ? 'Excluiu o gerente e o login dele' : 'Excluiu o vendedor e o login dele',
+    })
+
+    return json({ seller: { ...saved, user_id: null } })
   }
 
   return json({ error: 'Ação desconhecida' }, 400)

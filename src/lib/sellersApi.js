@@ -13,6 +13,10 @@ function fromRow(row) {
     active: row.active,
     // Gerente: 'values' (vê valores das vendas) ou 'counts' (só quantidades)
     financeAccess: row.finance_access || 'counts',
+    // Excluído da equipe: some da lista, mas o cadastro fica para as vendas
+    // antigas e o registro de atividades (formerUserId = login que ele usava)
+    deletedAt: row.deleted_at || null,
+    formerUserId: row.former_user_id || null,
     createdAt: row.created_at,
   }
 }
@@ -59,7 +63,7 @@ export async function updateSeller(id, seller) {
   return fromRow(data)
 }
 
-// Criar login e redefinir senha passam pela Edge Function (precisa da
+// Criar login, redefinir senha e excluir passam pela Edge Function (precisa da
 // service role, que só existe no servidor).
 async function invokeManageSellers(body) {
   const { data, error } = await supabase.functions.invoke('manage-sellers', { body })
@@ -101,6 +105,13 @@ export async function createSeller(seller) {
 export async function resetSellerPassword(sellerId, password) {
   requireSupabase()
   await invokeManageSellers({ action: 'reset_password', sellerId, password })
+}
+
+// Apaga o login e tira da equipe; devolve o cadastro já marcado como excluído
+export async function deleteSeller(sellerId) {
+  requireSupabase()
+  const data = await invokeManageSellers({ action: 'delete', sellerId })
+  return fromRow(data.seller)
 }
 
 export function describeCommission(seller) {

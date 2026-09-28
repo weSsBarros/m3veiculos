@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus } from 'lucide-react'
-import { fetchSellers, createSeller, updateSeller, resetSellerPassword, describeCommission, roleLabel, financeAccessLabel } from '../lib/sellersApi.js'
+import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2 } from 'lucide-react'
+import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, financeAccessLabel } from '../lib/sellersApi.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchSales } from '../lib/salesApi.js'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
@@ -103,6 +103,10 @@ export default function AdminSellers() {
     return map
   }, [periodSales])
 
+  // Quem foi excluído só aparece se tiver vendas no período (para os números
+  // da tabela baterem com os totais)
+  const listed = sellers.filter((s) => !s.deletedAt || statsBySeller[s.id])
+
   const totals = Object.values(statsBySeller).reduce(
     (acc, st) => ({ count: acc.count + st.count, revenue: acc.revenue + st.revenue, commission: acc.commission + st.commission }),
     { count: 0, revenue: 0, commission: 0 }
@@ -193,6 +197,23 @@ export default function AdminSellers() {
       setSellers((prev) => prev.map((s) => (s.id === seller.id ? saved : s)))
     } catch (err) {
       alert('Não foi possível atualizar: ' + err.message)
+    }
+  }
+
+  async function handleDelete(seller) {
+    const salesCount = sales.filter((s) => s.sellerId === seller.id).length
+    const history = salesCount
+      ? ` ${salesCount === 1 ? 'A venda dele continua' : `As ${salesCount} vendas dele continuam`} no histórico, com o nome e a comissão.`
+      : ''
+    const msg = `Excluir "${seller.name}"? O login dele é apagado e ele sai da equipe.${history} Não dá para desfazer. Se for só um afastamento, use Desativar.`
+    if (!(await confirm(msg, { title: `Excluir ${roleLabel(seller.role).toLowerCase()}`, confirmLabel: 'Excluir' }))) return
+    try {
+      const saved = await deleteSeller(seller.id)
+      setSellers((prev) => prev.map((s) => (s.id === seller.id ? saved : s)))
+      if (editingId === seller.id) cancelEdit()
+      setFormSuccess(`${roleLabel(seller.role)} "${seller.name}" excluído da equipe.`)
+    } catch (err) {
+      alert('Não foi possível excluir: ' + err.message)
     }
   }
 
@@ -418,7 +439,7 @@ export default function AdminSellers() {
       {!isAdmin && formSuccess && <p className="admin-success">{formSuccess}</p>}
 
       <h2 className="admin-section-title">Desempenho no período</h2>
-      {sellers.length === 0 ? (
+      {listed.length === 0 ? (
         <p className="admin-muted">Ninguém cadastrado na equipe ainda.</p>
       ) : (
         <>
@@ -438,7 +459,7 @@ export default function AdminSellers() {
                 </tr>
               </thead>
               <tbody>
-                {sellers.map((s) => {
+                {listed.map((s) => {
                   const st = statsBySeller[s.id] || { count: 0, revenue: 0, commission: 0, lastSale: null }
                   return (
                     <tr key={s.id} className={!s.active ? 'is-hidden-row' : ''}>
@@ -456,7 +477,7 @@ export default function AdminSellers() {
                       {canSeeSaleValues && <td>{formatCurrencyCents(st.commission)}</td>}
                       <td>{st.lastSale ? formatDateBR(st.lastSale) : '—'}</td>
                       <td>
-                        <span className={`admin-status-pill ${s.active ? 'is-on' : 'is-off'}`}>{s.active ? 'Ativo' : 'Inativo'}</span>
+                        <StatusPill seller={s} />
                       </td>
                       <td>
                         <SellerActions
@@ -465,6 +486,7 @@ export default function AdminSellers() {
                           onEdit={() => startEdit(s)}
                           onReset={() => openReset(s)}
                           onToggle={() => toggleActive(s)}
+                          onDelete={() => handleDelete(s)}
                           detailOpen={detailId === s.id}
                           canManage={isAdmin}
                         />
@@ -477,7 +499,7 @@ export default function AdminSellers() {
           </div>
 
           <div className="admin-card-list">
-            {sellers.map((s) => {
+            {listed.map((s) => {
               const st = statsBySeller[s.id] || { count: 0, revenue: 0, commission: 0, lastSale: null }
               return (
                 <div className={`admin-card ${!s.active ? 'is-hidden-row' : ''}`} key={s.id}>
@@ -491,7 +513,7 @@ export default function AdminSellers() {
                         {s.role === 'manager' && isAdmin ? ` · ${financeAccessLabel(s.financeAccess).toLowerCase()}` : ''}
                       </span>
                     </div>
-                    <span className={`admin-status-pill ${s.active ? 'is-on' : 'is-off'}`}>{s.active ? 'Ativo' : 'Inativo'}</span>
+                    <StatusPill seller={s} />
                   </div>
                   <div className="admin-card-stats">
                     <div>
@@ -517,6 +539,7 @@ export default function AdminSellers() {
                     onEdit={() => startEdit(s)}
                     onReset={() => openReset(s)}
                     onToggle={() => toggleActive(s)}
+                    onDelete={() => handleDelete(s)}
                     detailOpen={detailId === s.id}
                     canManage={isAdmin}
                   />
@@ -607,13 +630,18 @@ export default function AdminSellers() {
   )
 }
 
-function SellerActions({ seller, onDetail, onEdit, onReset, onToggle, detailOpen, canManage }) {
+function StatusPill({ seller }) {
+  if (seller.deletedAt) return <span className="admin-status-pill is-off">Excluído</span>
+  return <span className={`admin-status-pill ${seller.active ? 'is-on' : 'is-off'}`}>{seller.active ? 'Ativo' : 'Inativo'}</span>
+}
+
+function SellerActions({ seller, onDetail, onEdit, onReset, onToggle, onDelete, detailOpen, canManage }) {
   return (
     <div className="admin-action-group">
       <button type="button" className={`admin-action-btn ${detailOpen ? 'is-active' : ''}`} onClick={onDetail}>
         <ListChecks size={15} /> Vendas
       </button>
-      {canManage && (
+      {canManage && !seller.deletedAt && (
       <>
       <button type="button" className="admin-action-btn" onClick={onEdit}>
         <Pencil size={15} /> Editar
@@ -623,6 +651,9 @@ function SellerActions({ seller, onDetail, onEdit, onReset, onToggle, detailOpen
       </button>
       <button type="button" className={`admin-action-btn ${seller.active ? 'admin-action-danger' : ''}`} onClick={onToggle}>
         {seller.active ? <UserX size={15} /> : <UserCheck size={15} />} {seller.active ? 'Desativar' : 'Reativar'}
+      </button>
+      <button type="button" className="admin-action-btn admin-action-danger" onClick={onDelete}>
+        <Trash2 size={15} /> Excluir
       </button>
       </>
       )}

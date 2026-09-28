@@ -73,11 +73,11 @@ export default function SaleDialog({
           <select value={sellerId} onChange={(e) => setSellerId(e.target.value)}>
             <option value="">Sem vendedor (venda direta da loja)</option>
             {activeSellers.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}{s.role === 'manager' ? ' (gerente)' : ''}</option>
+              <option key={s.id} value={s.id}>{s.name}{s.role === 'manager' ? ' (gerente)' : ''}{s.deletedAt ? ' (excluído)' : ''}</option>
             ))}
           </select>
         </label>
-        {sellers.length === 0 && (
+        {sellers.every((s) => s.deletedAt) && (
           <span className="sale-dialog-note">Ninguém cadastrado na equipe ainda — cadastre na aba Equipe.</span>
         )}
 
