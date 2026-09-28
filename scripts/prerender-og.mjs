@@ -79,7 +79,9 @@ for (const row of cars || []) {
   const priceLabel = row.price != null ? formatCurrency(row.price) : 'Consulte o valor'
   const title = `${row.brand} ${row.model} ${row.version} — ${priceLabel} | M&3 Veículos`
   const description = `${row.model_year} · ${Number(row.km).toLocaleString('pt-BR')} km · ${row.transmission}. Confira esse e outros veículos na M&3 Veículos.`
-  const image = row.images?.[0] || `${SITE_URL}/logo.jpg`
+  // As fotos no próprio site ficam salvas sem o domínio (/uploads/carros/...),
+  // mas o WhatsApp e as redes precisam do endereço completo
+  const image = row.images?.[0] ? new URL(row.images[0], `${SITE_URL}/`).href : `${SITE_URL}/logo.jpg`
   const url = `${SITE_URL}/carro/${row.slug}`
 
   const html = withMeta(template, { title, description, image, url })

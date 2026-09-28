@@ -1,0 +1,19 @@
+# Fotos dos carros enviadas pelo painel (api/fotos.php). Só imagens: nada aqui
+# dentro é executado e a pasta não é listada. Publicar o site nunca apaga esta
+# pasta (o pacote só traz este arquivo).
+Options -Indexes -ExecCGI
+RemoveHandler .php .phtml .phar .pht .php3 .php4 .php5 .php7 .php8 .cgi .pl .py
+<FilesMatch "\.(?i:php[0-9]?|phtml|phar|pht|cgi|pl|py|sh)$">
+  Require all denied
+</FilesMatch>
+
+# Foto que não existe dá 404 de verdade, em vez de cair no index.html do site
+<IfModule mod_rewrite.c>
+  RewriteEngine Off
+</IfModule>
+
+# Os nomes são aleatórios e nunca reaproveitados: cache longo
+<IfModule mod_headers.c>
+  Header set Cache-Control "public, max-age=31536000, immutable"
+  Header set X-Content-Type-Options "nosniff"
+</IfModule>

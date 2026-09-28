@@ -1,9 +1,11 @@
 // Fotos dos carros.
 //
-// Desde a compressão, o painel reduz cada foto no navegador antes de enviar
-// (até 1600 px, WebP) e cria uma miniatura (até 640 px). Elas ficam em
-// car-photos/<empresa>/p/<arquivo> e car-photos/<empresa>/p/thumbs/<arquivo>.
-// Fotos antigas (enviadas antes disso) e links externos não têm miniatura:
+// O painel reduz cada foto no navegador antes de enviar (até 1600 px, WebP) e
+// cria uma miniatura (até 640 px), que fica na subpasta "thumbs":
+// - no próprio site: /uploads/carros/<arquivo> e /uploads/carros/thumbs/<arquivo>
+// - fotos que ainda estejam no Supabase Storage:
+//   car-photos/<empresa>/p/<arquivo> e car-photos/<empresa>/p/thumbs/<arquivo>
+// Fotos antigas (de antes da compressão) e links externos não têm miniatura:
 // nesses casos as funções abaixo devolvem a própria foto.
 
 const PHOTO_MAX_SIDE = 1600
@@ -11,14 +13,14 @@ const THUMB_MAX_SIDE = 640
 const PHOTO_QUALITY = 0.8
 const THUMB_QUALITY = 0.72
 
-const WITH_THUMB = /\/car-photos\/[^/]+\/p\/[^/]+$/
+const WITH_THUMB = /^\/uploads\/carros\/[^/]+$|\/car-photos\/[^/]+\/p\/[^/]+$/
 
 export function hasThumb(url) {
   return typeof url === 'string' && WITH_THUMB.test(url)
 }
 
 export function thumbUrl(url) {
-  return hasThumb(url) ? url.replace(/\/p\/([^/]+)$/, '/p/thumbs/$1') : url
+  return hasThumb(url) ? url.replace(/\/([^/]+)$/, '/thumbs/$1') : url
 }
 
 // Atributos de <img>: o navegador escolhe a miniatura ou a foto grande

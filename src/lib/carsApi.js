@@ -288,16 +288,37 @@ export async function deleteCar(id) {
   if (error) throw error
 }
 
-// -- Fotos (Supabase Storage, bucket "car-photos") ----------------------------
+// -- Fotos (no próprio site da loja, pasta /uploads/carros) --------------------
 
-// A foto é comprimida no navegador e sobe junto com a miniatura (ver
-// utils/carPhotos.js). Os nomes são aleatórios e nunca reaproveitados, então
-// o cache pode ser longo — menos tráfego no plano do Supabase.
-const PHOTO_LIMITS = { accepted: 'fotos em JPG, PNG ou WebP', maxSize: '10 MB' }
+// A foto é comprimida no navegador (ver utils/carPhotos.js) e vai, junto com a
+// miniatura, para o api/fotos.php do site (Hostinger), que confere com o
+// Supabase se o login é de admin ou gerente desta loja. O banco guarda só o
+// endereço sem o domínio (/uploads/carros/<nome>), então trocar o domínio do
+// site não quebra as fotos. Fotos que ainda estejam no Supabase Storage
+// (bucket "car-photos") continuam aparecendo e podem ser removidas.
+const PHOTO_API = '/api/fotos.php'
+const SITE_PHOTO = /^\/uploads\/carros\//
+
+async function callPhotoApi(form) {
+  if (import.meta.env.DEV) {
+    throw new Error('O envio de fotos só funciona no site publicado (o api/fotos.php roda na Hostinger).')
+  }
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (!token) throw new Error('Sua sessão expirou. Entre de novo no painel.')
+  let res
+  try {
+    res = await fetch(PHOTO_API, { method: 'POST', headers: { 'X-Auth-Token': token }, body: form })
+  } catch {
+    throw new Error('Sem conexão com o site. Confira a internet e tente de novo.')
+  }
+  const body = await res.json().catch(() => null)
+  if (!res.ok || !body) throw new Error(body?.error || `O site recusou o envio (erro ${res.status}).`)
+  return body
+}
 
 export async function uploadCarImage(file) {
   requireSupabase()
-  const bucket = supabase.storage.from('car-photos')
 
   let compressed
   try {
@@ -311,23 +332,28 @@ export async function uploadCarImage(file) {
     )
   }
 
-  const name = `${crypto.randomUUID()}.${compressed.ext}`
-  const path = `${COMPANY_ID}/p/${name}`
-  const thumbPath = `${COMPANY_ID}/p/thumbs/${name}`
-  const options = { contentType: compressed.photo.type, cacheControl: '31536000', upsert: false }
-  // Miniatura primeiro: uma foto "com miniatura" nunca fica sem ela
-  const thumbUpload = await bucket.upload(thumbPath, compressed.thumb, options)
-  if (thumbUpload.error) throw friendlyUploadError(thumbUpload.error, file.name, PHOTO_LIMITS)
-  const photoUpload = await bucket.upload(path, compressed.photo, options)
-  if (photoUpload.error) {
-    await bucket.remove([thumbPath])
-    throw friendlyUploadError(photoUpload.error, file.name, PHOTO_LIMITS)
+  const form = new FormData()
+  form.append('action', 'upload')
+  form.append('photo', compressed.photo, `foto.${compressed.ext}`)
+  form.append('thumb', compressed.thumb, `miniatura.${compressed.ext}`)
+  try {
+    const { url } = await callPhotoApi(form)
+    return url
+  } catch (err) {
+    throw new Error(`"${file.name}": ${err.message}`)
   }
-  return bucket.getPublicUrl(path).data.publicUrl
 }
 
 export async function deleteCarImage(url) {
   requireSupabase()
+  if (SITE_PHOTO.test(url)) {
+    const form = new FormData()
+    form.append('action', 'delete')
+    form.append('url', url)
+    await callPhotoApi(form)
+    return
+  }
+  // Foto que ainda está no Supabase Storage
   const marker = '/car-photos/'
   const idx = url.indexOf(marker)
   if (idx === -1) return

@@ -1,0 +1,4 @@
+# Envio de fotos (fotos.php). A configuração é lida pelo PHP, nunca pela web.
+<Files "fotos-config.php">
+  Require all denied
+</Files>
