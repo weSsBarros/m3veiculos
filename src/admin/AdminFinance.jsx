@@ -5,9 +5,10 @@ import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchAllSuppliers } from '../lib/suppliersApi.js'
 import { fetchSales } from '../lib/salesApi.js'
-import { expenseCategoryLabel, formatCurrency, carStatusLabel, daysInStock, isStockStale } from '../utils/carFormat.js'
+import { expenseCategoryLabel, formatCurrency, carStatusLabel, daysInStock, isStockStale, slugify } from '../utils/carFormat.js'
 import { fetchStockAlertDefault, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import { downloadCsv } from '../utils/exportCsv.js'
+import FinanceTabs from './FinanceTabs.jsx'
 import './admin.css'
 
 const ALL_CARS_VALUE = 'todos'
@@ -130,17 +131,18 @@ export default function AdminFinance() {
     ]
     const filename = exportCarId === ALL_CARS_VALUE
       ? 'gastos-todos-os-carros.csv'
-      : `gastos-${(carsById[exportCarId]?.brand || '')}-${(carsById[exportCarId]?.model || '')}`.toLowerCase().replace(/\s+/g, '-') + '.csv'
+      : `gastos-${slugify(`${carsById[exportCarId]?.brand || ''} ${carsById[exportCarId]?.model || ''}`)}.csv`
     downloadCsv(filename, columns, filtered)
   }
 
-  if (loading) return <p className="admin-muted">Carregando…</p>
+  if (loading) return <><FinanceTabs /><p className="admin-muted">Carregando…</p></>
 
   return (
     <div className="admin-page">
+      <FinanceTabs />
       <div className="admin-page-head">
         <div>
-          <h1>Financeiro</h1>
+          <h1>Financeiro da loja</h1>
           <p>Custo, margem por carro e exportação de gastos (os gráficos estão no Dashboard)</p>
         </div>
         <div className="admin-row-actions">

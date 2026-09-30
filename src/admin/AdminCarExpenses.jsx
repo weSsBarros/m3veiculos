@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { downloadStorageFile } from '../lib/storageDownload.js'
 import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, Pencil, Trash2, Paperclip, Download } from 'lucide-react'
 import { fetchCarById } from '../lib/carsApi.js'
@@ -11,7 +12,7 @@ import {
   getAttachmentSignedUrl,
 } from '../lib/expensesApi.js'
 import { fetchAllSuppliers } from '../lib/suppliersApi.js'
-import { EXPENSE_CATEGORIES, expenseCategoryLabel, formatCurrency, parseIntBR, formatDateBR as formatDate } from '../utils/carFormat.js'
+import { EXPENSE_CATEGORIES, expenseCategoryLabel, formatCurrency, parseIntBR, formatDateBR as formatDate, slugify } from '../utils/carFormat.js'
 import ExpenseAttachmentUploader from './ExpenseAttachmentUploader.jsx'
 import DateInputBR from '../components/DateInputBR.jsx'
 import { downloadCsv } from '../utils/exportCsv.js'
@@ -159,6 +160,14 @@ export default function AdminCarExpenses() {
     }
   }
 
+  async function handleDownloadAttachment(attachment) {
+    try {
+      await downloadStorageFile('expense-attachments', attachment.path, attachment.name)
+    } catch (err) {
+      alert('Não foi possível baixar o anexo: ' + err.message)
+    }
+  }
+
   function handleExportCsv() {
     const columns = [
       { label: 'Data', value: (e) => e.expenseDate },
@@ -167,7 +176,7 @@ export default function AdminCarExpenses() {
       { label: 'Descrição', value: (e) => e.description },
       { label: 'Valor (R$)', value: (e) => e.amount },
     ]
-    const filename = `gastos-${car.brand}-${car.model}`.toLowerCase().replace(/\s+/g, '-') + '.csv'
+    const filename = `gastos-${slugify(`${car.brand} ${car.model}`)}.csv`
     downloadCsv(filename, columns, expenses)
   }
 
@@ -325,6 +334,17 @@ export default function AdminCarExpenses() {
                               <Paperclip size={12} /> {a.name}
                             </button>
                           ))}
+                          {expense.attachments.map((a) => (
+                            <button
+                              key={`${a.path}-baixar`}
+                              type="button"
+                              className="expense-attachment-link"
+                              onClick={() => handleDownloadAttachment(a)}
+                              title={`Baixar ${a.name}`}
+                            >
+                              <Download size={12} /> Baixar
+                            </button>
+                          ))}
                         </div>
                       )}
                     </td>
@@ -372,6 +392,17 @@ export default function AdminCarExpenses() {
                         onClick={() => handleOpenAttachment(a.path)}
                       >
                         <Paperclip size={12} /> {a.name}
+                      </button>
+                    ))}
+                    {expense.attachments.map((a) => (
+                      <button
+                        key={`${a.path}-baixar`}
+                        type="button"
+                        className="expense-attachment-link"
+                        onClick={() => handleDownloadAttachment(a)}
+                        title={`Baixar ${a.name}`}
+                      >
+                        <Download size={12} /> Baixar
                       </button>
                     ))}
                   </div>

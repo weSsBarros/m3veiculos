@@ -29,3 +29,6 @@ backup-projeto-antigo/
 *.njsproj
 *.sln
 *.sw?
+
+# Logs dos testes do banco (supabase/tests/run.sh)
+supabase/tests/.schema-*.log

@@ -96,6 +96,8 @@ using (true);
 -- usa ela num filtro (where hidden = false) nas buscas públicas — e o Postgres
 -- exige permissão de leitura da coluna pra usá-la em filtro, não só pra exibir.
 -- Sem isso, a busca pública inteira falha (nenhum carro aparece no site).
+-- (A coluna é criada aqui porque, numa instalação nova, a seção 7 ainda não rodou.)
+alter table public.cars add column if not exists hidden boolean not null default false;
 revoke select on public.cars from anon;
 grant select (
   id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
@@ -515,11 +517,15 @@ update public.contracts set company_id = (select id from public.companies where 
 alter table public.contracts alter column company_id set not null;
 create index if not exists contracts_company_id_idx on public.contracts (company_id);
 
--- Todo usuário já existente neste projeto é admin da Dom Motors (hoje é a
--- única empresa aqui). Pra um cliente novo, insira manualmente uma linha em
--- user_company vinculando o auth.uid() dele à company_id certa.
+-- Instalação nova: os usuários que já existem viram admin da Dom Motors.
+-- Isso só acontece enquanto NINGUÉM estiver vinculado a nenhuma loja. Antes,
+-- rodar o schema.sql de novo ligava como admin da Dom Motors todo usuário do
+-- projeto, inclusive a equipe das outras lojas (ver seção 27). Pra um cliente
+-- novo, insira manualmente uma linha em user_company vinculando o auth.uid()
+-- dele à company_id certa.
 insert into public.user_company (user_id, company_id)
 select id, (select id from public.companies where slug = 'dom-motors') from auth.users
+where not exists (select 1 from public.user_company)
 on conflict do nothing;
 
 -- company_id precisa estar liberado pro "anon" ler, senão o filtro
@@ -923,7 +929,9 @@ using (id = public.current_company_id());
 
 alter table public.user_company add column if not exists role text not null default 'admin';
 alter table public.user_company drop constraint if exists user_company_role_check;
-alter table public.user_company add constraint user_company_role_check check (role in ('admin', 'seller'));
+-- 'manager' já entra aqui (é criado na seção 20): ao rodar o schema de novo
+-- numa loja que já tem gerente, a regra só com admin/seller seria recusada.
+alter table public.user_company add constraint user_company_role_check check (role in ('admin', 'manager', 'seller'));
 
 create table if not exists public.sellers (
   id uuid primary key default gen_random_uuid(),
@@ -1771,6 +1779,9 @@ with check (company_id = public.current_company_id() and public.is_company_admin
 -- Estoque do gerente: tudo menos o custo de aquisição. A view roda com o dono
 -- (ignora a RLS de "cars"), então filtra empresa e papel explicitamente; o
 -- CHECK OPTION impede gravar carro de outra empresa por ela. Sem DELETE.
+-- (drop antes: rodando o schema de novo, a view já tem as colunas da seção 29,
+-- e "create or replace" não consegue tirar colunas)
+drop view if exists public.staff_cars;
 create or replace view public.staff_cars as
 select
   id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
@@ -2041,3 +2052,1306 @@ where id = 'contract-templates';
 -- ("former_user_id" guarda o login que ela usava).
 alter table public.sellers add column if not exists deleted_at timestamptz;
 alter table public.sellers add column if not exists former_user_id uuid;
+
+-- 26) Pós-venda: contratos do cliente, transferência, checklist e financiamento próprio
+--
+-- * Contratos e documentos do cliente: vários arquivos por cliente (contrato de
+--   compra, termo de entrega, pós-venda, garantia etc.), cada um com tipo, data
+--   e o carro a que se refere. Bucket privado "customer-documents". Mesma regra
+--   dos contratos gerados: o vendedor anexa e vê os que ele mesmo anexou;
+--   admin e gerente veem todos; excluir só o admin.
+-- * Contratos gerados pelo sistema passam a guardar o cliente (customer_id).
+-- * Venda: situação da transferência do veículo (quem faz, prazo, concluída
+--   em) e o checklist de itens entregues (manual, chave reserva etc.). A lista
+--   de itens é de cada loja (companies.sale_checklist).
+-- * Financiamento próprio (carnê da loja): financiamentos e parcelas dos
+--   clientes. Só o admin e os gerentes com "Vê valores das vendas" leem e
+--   registram pagamentos; excluir só o admin.
+
+-- Admin, ou gerente que o admin liberou para ver valores (mesma regra da tela)
+create or replace function public.can_manage_customer_finance()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.user_company where user_id = auth.uid() and role = 'admin')
+    or exists (
+      select 1
+      from public.user_company uc
+      join public.sellers s on s.user_id = uc.user_id and s.company_id = uc.company_id
+      where uc.user_id = auth.uid() and uc.role = 'manager' and s.active and s.finance_access = 'values'
+    )
+$$;
+revoke execute on function public.can_manage_customer_finance() from anon, public;
+grant execute on function public.can_manage_customer_finance() to authenticated;
+
+-- Contrato gerado -> cliente. Contratos antigos são ligados pelo CPF do comprador.
+alter table public.contracts add column if not exists customer_id uuid references public.customers(id) on delete set null;
+create index if not exists contracts_customer_id_idx on public.contracts (customer_id);
+
+update public.contracts ct
+set customer_id = cu.id
+from public.customers cu
+where ct.customer_id is null
+  and cu.company_id = ct.company_id
+  and regexp_replace(cu.document, '\D', '', 'g') <> ''
+  and regexp_replace(cu.document, '\D', '', 'g') = regexp_replace(ct.buyer_document, '\D', '', 'g');
+
+-- Contratos e documentos anexados ao cliente
+create table if not exists public.customer_documents (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  customer_id uuid not null references public.customers(id) on delete cascade,
+  car_id uuid references public.cars(id) on delete set null,
+  doc_type text not null default 'compra',
+  title text not null default '',
+  signed_on date,
+  notes text not null default '',
+  file_path text not null,
+  file_name text not null default '',
+  file_type text not null default '',
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.customer_documents drop constraint if exists customer_documents_doc_type_check;
+alter table public.customer_documents add constraint customer_documents_doc_type_check
+  check (doc_type in ('compra', 'entrega', 'pos_venda', 'garantia', 'financiamento', 'outro'));
+
+create index if not exists customer_documents_company_id_idx on public.customer_documents (company_id);
+create index if not exists customer_documents_customer_id_idx on public.customer_documents (customer_id);
+create index if not exists customer_documents_car_id_idx on public.customer_documents (car_id);
+
+drop trigger if exists customer_documents_set_updated_at on public.customer_documents;
+create trigger customer_documents_set_updated_at
+before update on public.customer_documents
+for each row execute function public.set_updated_at();
+
+alter table public.customer_documents enable row level security;
+
+drop policy if exists "Team can read customer documents" on public.customer_documents;
+create policy "Team can read customer documents"
+on public.customer_documents for select
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()));
+
+drop policy if exists "Team can insert customer documents" on public.customer_documents;
+create policy "Team can insert customer documents"
+on public.customer_documents for insert
+to authenticated
+with check (company_id = public.current_company_id() and created_by = auth.uid());
+
+drop policy if exists "Team can update customer documents" on public.customer_documents;
+create policy "Team can update customer documents"
+on public.customer_documents for update
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()))
+with check (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()));
+
+drop policy if exists "Admin can delete customer documents" on public.customer_documents;
+create policy "Admin can delete customer documents"
+on public.customer_documents for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+insert into storage.buckets (id, name, public)
+values ('customer-documents', 'customer-documents', false)
+on conflict (id) do nothing;
+
+update storage.buckets
+set allowed_mime_types = array['image/*', 'application/pdf'], file_size_limit = 20971520
+where id = 'customer-documents';
+
+-- Ver o arquivo: quem pode ver a linha correspondente em customer_documents
+-- (a RLS da tabela decide: equipe de gestão vê todos, vendedor só os dele)
+drop policy if exists "Team can view customer documents" on storage.objects;
+create policy "Team can view customer documents"
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'customer-documents'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+  and exists (select 1 from public.customer_documents d where d.file_path = objects.name)
+);
+
+drop policy if exists "Team can upload customer documents" on storage.objects;
+create policy "Team can upload customer documents"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'customer-documents' and (storage.foldername(name))[1] = public.current_company_id()::text);
+
+drop policy if exists "Admin can delete customer documents" on storage.objects;
+create policy "Admin can delete customer documents"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'customer-documents' and (storage.foldername(name))[1] = public.current_company_id()::text and public.is_company_admin());
+
+-- Transferência do veículo e checklist de entrega, na venda
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'sales' and column_name = 'transfer_status'
+  ) then
+    alter table public.sales add column transfer_status text not null default 'pendente';
+    -- Vendas anteriores a este controle ficam como "não informada" (sem gerar
+    -- aviso); a loja atualiza as que ainda estiverem pendentes.
+    update public.sales set transfer_status = 'nao_informada';
+  end if;
+end $$;
+
+alter table public.sales drop constraint if exists sales_transfer_status_check;
+alter table public.sales add constraint sales_transfer_status_check
+  check (transfer_status in ('pendente', 'em_andamento', 'concluida', 'nao_informada'));
+
+alter table public.sales add column if not exists transfer_responsible text not null default 'comprador';
+alter table public.sales drop constraint if exists sales_transfer_responsible_check;
+alter table public.sales add constraint sales_transfer_responsible_check check (transfer_responsible in ('comprador', 'loja'));
+
+-- Prazo da transferência (em branco = 30 dias após a venda) e quando foi concluída
+alter table public.sales add column if not exists transfer_due_date date;
+alter table public.sales add column if not exists transfer_done_on date;
+alter table public.sales add column if not exists transfer_notes text not null default '';
+
+-- Checklist: [{ "item": "Chave reserva", "status": "ok" | "nao_possui" | null }]
+alter table public.sales add column if not exists checklist jsonb not null default '[]';
+alter table public.sales drop constraint if exists sales_checklist_check;
+alter table public.sales add constraint sales_checklist_check check (jsonb_typeof(checklist) = 'array');
+
+create index if not exists sales_transfer_status_idx on public.sales (company_id, transfer_status);
+
+-- Itens do checklist de cada loja (admin e gerente editam)
+alter table public.companies add column if not exists sale_checklist jsonb not null default
+  '["Manual do proprietário", "Chave reserva", "Livro de revisões", "Estepe", "Macaco e chave de roda", "Triângulo", "Tapetes", "CRLV (documento do veículo)"]';
+alter table public.companies drop constraint if exists companies_sale_checklist_check;
+alter table public.companies add constraint companies_sale_checklist_check check (jsonb_typeof(sale_checklist) = 'array');
+
+-- Padrão da loja para multa e juros por atraso das parcelas (cada
+-- financiamento guarda as taxas com que foi feito)
+alter table public.companies add column if not exists late_fee_percent numeric(5, 2) not null default 2;
+alter table public.companies add column if not exists late_interest_percent numeric(5, 2) not null default 1;
+alter table public.companies drop constraint if exists companies_late_fee_percent_check;
+alter table public.companies add constraint companies_late_fee_percent_check check (late_fee_percent between 0 and 100);
+alter table public.companies drop constraint if exists companies_late_interest_percent_check;
+alter table public.companies add constraint companies_late_interest_percent_check check (late_interest_percent between 0 and 100);
+
+grant update (stock_alert_days, sale_checklist) on public.companies to authenticated;
+
+create or replace function public.set_customer_finance_defaults(p_late_fee numeric, p_late_interest numeric)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+begin
+  if v_company is null or not public.can_manage_customer_finance() then
+    raise exception 'Sem permissão';
+  end if;
+  if p_late_fee is null or p_late_fee < 0 or p_late_fee > 100
+     or p_late_interest is null or p_late_interest < 0 or p_late_interest > 100 then
+    raise exception 'Informe taxas entre 0 e 100%%';
+  end if;
+  update public.companies
+  set late_fee_percent = p_late_fee, late_interest_percent = p_late_interest
+  where id = v_company;
+end;
+$$;
+revoke execute on function public.set_customer_finance_defaults(numeric, numeric) from anon, public;
+grant execute on function public.set_customer_finance_defaults(numeric, numeric) to authenticated;
+
+-- Financiamento próprio: um por venda financiada pela loja. Nome do cliente
+-- e descrição do carro ficam guardados no financiamento, para ele continuar
+-- legível mesmo se o cadastro do cliente ou do carro for apagado.
+create table if not exists public.customer_financings (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  customer_id uuid references public.customers(id) on delete set null,
+  car_id uuid references public.cars(id) on delete set null,
+  customer_name text not null,
+  vehicle_label text not null default '',
+  vehicle_plate text not null default '',
+  vehicle_price numeric(12, 2) not null check (vehicle_price >= 0),
+  down_payment numeric(12, 2) not null default 0 check (down_payment >= 0),
+  financed_amount numeric(12, 2) not null check (financed_amount > 0),
+  installments_count integer not null check (installments_count between 1 and 240),
+  installment_amount numeric(12, 2) not null check (installment_amount > 0),
+  interest_rate numeric(6, 3) check (interest_rate is null or interest_rate >= 0),
+  first_due_date date not null,
+  late_fee_percent numeric(5, 2) not null default 2 check (late_fee_percent between 0 and 100),
+  late_interest_percent numeric(5, 2) not null default 1 check (late_interest_percent between 0 and 100),
+  status text not null default 'ativo' check (status in ('ativo', 'cancelado')),
+  notes text not null default '',
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists customer_financings_company_id_idx on public.customer_financings (company_id);
+create index if not exists customer_financings_customer_id_idx on public.customer_financings (customer_id);
+
+drop trigger if exists customer_financings_set_updated_at on public.customer_financings;
+create trigger customer_financings_set_updated_at
+before update on public.customer_financings
+for each row execute function public.set_updated_at();
+
+-- Parcelas. paid_amount = total recebido (parcela + multa/juros - desconto);
+-- late_charges = multa e juros cobrados no pagamento.
+create table if not exists public.financing_installments (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  financing_id uuid not null references public.customer_financings(id) on delete cascade,
+  number integer not null check (number > 0),
+  due_date date not null,
+  amount numeric(12, 2) not null check (amount > 0),
+  paid_on date,
+  paid_amount numeric(12, 2) check (paid_amount is null or paid_amount >= 0),
+  late_charges numeric(12, 2) not null default 0 check (late_charges >= 0),
+  payment_method text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (financing_id, number)
+);
+
+create index if not exists financing_installments_company_due_idx on public.financing_installments (company_id, due_date);
+
+drop trigger if exists financing_installments_set_updated_at on public.financing_installments;
+create trigger financing_installments_set_updated_at
+before update on public.financing_installments
+for each row execute function public.set_updated_at();
+
+alter table public.customer_financings enable row level security;
+alter table public.financing_installments enable row level security;
+
+drop policy if exists "Finance can read customer financings" on public.customer_financings;
+create policy "Finance can read customer financings"
+on public.customer_financings for select
+to authenticated
+using (company_id = public.current_company_id() and public.can_manage_customer_finance());
+
+drop policy if exists "Finance can insert customer financings" on public.customer_financings;
+create policy "Finance can insert customer financings"
+on public.customer_financings for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.can_manage_customer_finance());
+
+drop policy if exists "Finance can update customer financings" on public.customer_financings;
+create policy "Finance can update customer financings"
+on public.customer_financings for update
+to authenticated
+using (company_id = public.current_company_id() and public.can_manage_customer_finance())
+with check (company_id = public.current_company_id() and public.can_manage_customer_finance());
+
+drop policy if exists "Admin can delete customer financings" on public.customer_financings;
+create policy "Admin can delete customer financings"
+on public.customer_financings for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Finance can read installments" on public.financing_installments;
+create policy "Finance can read installments"
+on public.financing_installments for select
+to authenticated
+using (company_id = public.current_company_id() and public.can_manage_customer_finance());
+
+drop policy if exists "Finance can insert installments" on public.financing_installments;
+create policy "Finance can insert installments"
+on public.financing_installments for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.can_manage_customer_finance());
+
+drop policy if exists "Finance can update installments" on public.financing_installments;
+create policy "Finance can update installments"
+on public.financing_installments for update
+to authenticated
+using (company_id = public.current_company_id() and public.can_manage_customer_finance())
+with check (company_id = public.current_company_id() and public.can_manage_customer_finance());
+
+drop policy if exists "Admin can delete installments" on public.financing_installments;
+create policy "Admin can delete installments"
+on public.financing_installments for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Cria o financiamento e todas as parcelas de uma vez (tudo ou nada). Roda
+-- com a permissão de quem chama: as regras acima valem normalmente. As
+-- parcelas vencem todo mês a partir da primeira (dia 31 vira o último dia
+-- dos meses mais curtos).
+create or replace function public.create_customer_financing(p jsonb)
+returns uuid
+language plpgsql security invoker set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_id uuid;
+  v_count integer := (p->>'installments_count')::integer;
+  v_amount numeric(12, 2) := (p->>'installment_amount')::numeric;
+  v_first date := (p->>'first_due_date')::date;
+begin
+  if v_company is null or not public.can_manage_customer_finance() then
+    raise exception 'Sem permissão';
+  end if;
+  if v_count is null or v_count < 1 or v_count > 240 then
+    raise exception 'Número de parcelas inválido (de 1 a 240)';
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Informe o valor da parcela';
+  end if;
+  if v_first is null then
+    raise exception 'Informe o vencimento da primeira parcela';
+  end if;
+
+  insert into public.customer_financings (
+    company_id, customer_id, car_id, customer_name, vehicle_label, vehicle_plate,
+    vehicle_price, down_payment, financed_amount, installments_count, installment_amount,
+    interest_rate, first_due_date, late_fee_percent, late_interest_percent, notes
+  ) values (
+    v_company,
+    nullif(p->>'customer_id', '')::uuid,
+    nullif(p->>'car_id', '')::uuid,
+    coalesce(nullif(trim(p->>'customer_name'), ''), 'Cliente'),
+    coalesce(p->>'vehicle_label', ''),
+    coalesce(p->>'vehicle_plate', ''),
+    coalesce((p->>'vehicle_price')::numeric, 0),
+    coalesce((p->>'down_payment')::numeric, 0),
+    (p->>'financed_amount')::numeric,
+    v_count,
+    v_amount,
+    nullif(p->>'interest_rate', '')::numeric,
+    v_first,
+    coalesce((p->>'late_fee_percent')::numeric, 2),
+    coalesce((p->>'late_interest_percent')::numeric, 1),
+    coalesce(p->>'notes', '')
+  )
+  returning id into v_id;
+
+  insert into public.financing_installments (company_id, financing_id, number, due_date, amount)
+  select v_company, v_id, g, (v_first + make_interval(months => g - 1))::date, v_amount
+  from generate_series(1, v_count) g;
+
+  return v_id;
+end;
+$$;
+revoke execute on function public.create_customer_financing(jsonb) from anon, public;
+grant execute on function public.create_customer_financing(jsonb) to authenticated;
+
+-- Registro de atividades: rótulos dos novos registros (sem valores nos
+-- rótulos de financiamento e parcela)
+create or replace function public.log_activity()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb;
+  old_rec jsonb;
+  v_company uuid;
+  v_label text;
+  v_details text;
+  v_email text;
+  v_changed text[];
+begin
+  begin
+    if current_setting('app.skip_activity_log', true) = '1' then return null; end if;
+    if tg_op = 'DELETE' then rec := to_jsonb(old); else rec := to_jsonb(new); end if;
+    v_company := (rec->>'company_id')::uuid;
+    -- Sem usuário = SQL Editor ou Edge Function (que grava o próprio log).
+    if v_company is null or auth.uid() is null then return null; end if;
+
+    if tg_op = 'UPDATE' then
+      old_rec := to_jsonb(old);
+      select array_agg(n.key order by n.key) into v_changed
+      from jsonb_each(rec) n
+      where n.key not in ('updated_at') and n.value is distinct from old_rec->n.key;
+      if v_changed is null then return null; end if;
+      v_details := array_to_string(v_changed, ', ');
+      if 'status' = any(v_changed) then
+        v_details := format('status: %s → %s', old_rec->>'status', rec->>'status');
+      end if;
+    end if;
+
+    v_label := case tg_table_name
+      when 'cars' then concat_ws(' ', rec->>'brand', rec->>'model', rec->>'version')
+      when 'customers' then rec->>'name'
+      when 'suppliers' then rec->>'name'
+      when 'sellers' then rec->>'name'
+      when 'contract_templates' then rec->>'name'
+      when 'contracts' then concat(case rec->>'document_type' when 'recibo' then 'Recibo' else 'Contrato' end, ' — ', rec->>'buyer_name')
+      when 'car_expenses' then concat(coalesce(nullif(rec->>'description', ''), rec->>'category'), ' — R$ ', rec->>'amount')
+      when 'sales' then (select concat(c.brand, ' ', c.model, ' — R$ ', rec->>'sale_price') from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'customer_documents' then concat(
+        coalesce(nullif(rec->>'title', ''), nullif(rec->>'file_name', ''), 'Documento'), ' — ',
+        (select cu.name from public.customers cu where cu.id = (rec->>'customer_id')::uuid))
+      when 'customer_financings' then concat('Financiamento — ', rec->>'customer_name')
+      when 'financing_installments' then (
+        select concat('Parcela ', rec->>'number', '/', f.installments_count, ' — ', f.customer_name)
+        from public.customer_financings f where f.id = (rec->>'financing_id')::uuid)
+      else null
+    end;
+
+    select email into v_email from auth.users where id = auth.uid();
+
+    insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label, details)
+    values (v_company, auth.uid(), v_email, lower(tg_op), tg_table_name, (rec->>'id')::uuid, v_label, v_details);
+  exception when others then
+    -- O log nunca pode impedir a operação principal
+    null;
+  end;
+  return null;
+end;
+$$;
+
+drop trigger if exists customer_documents_log_activity on public.customer_documents;
+create trigger customer_documents_log_activity after insert or update or delete on public.customer_documents
+for each row execute function public.log_activity();
+
+drop trigger if exists customer_financings_log_activity on public.customer_financings;
+create trigger customer_financings_log_activity after insert or update or delete on public.customer_financings
+for each row execute function public.log_activity();
+
+-- Parcelas: só pagamentos e ajustes (criar 48 parcelas não vira 48 registros)
+drop trigger if exists financing_installments_log_activity on public.financing_installments;
+create trigger financing_installments_log_activity after update on public.financing_installments
+for each row execute function public.log_activity();
+
+-- Registro de atividades: gerente sem "Vê valores das vendas" não vê os
+-- registros de financiamento e parcelas
+drop policy if exists "Admin can read activity log" on public.activity_log;
+create policy "Admin can read activity log"
+on public.activity_log for select
+to authenticated
+using (
+  company_id = public.current_company_id()
+  and (
+    public.is_company_admin()
+    or (
+      public.is_company_staff()
+      and (entity <> 'car_expenses' or user_id = auth.uid())
+      and (entity not in ('customer_financings', 'financing_installments') or public.can_manage_customer_finance())
+    )
+  )
+);
+
+-- 27) Segurança: papel só na loja atual, referências da mesma loja e carros ocultos
+--
+-- * is_company_admin() / is_company_staff() / can_manage_customer_finance() /
+--   current_seller_id() olhavam o papel do usuário em QUALQUER loja: um login
+--   que era vendedor na loja A e admin na loja B tinha poderes de admin na A.
+--   Agora valem só para a loja atual (current_company_id()).
+-- * Até esta versão, rodar o schema.sql de novo ligava todo usuário do projeto
+--   como admin da Dom Motors (seção 11, já corrigida). Se isso aconteceu, a
+--   consulta no fim deste arquivo lista os logins ligados a mais de uma loja
+--   para você conferir e apagar os vínculos que não deveriam existir.
+-- * Carro, cliente, fornecedor e financiamento referenciados num registro
+--   precisam ser da mesma loja do registro. Antes, os ids dos carros são
+--   públicos (o site mostra) e uma loja conseguia registrar "venda" de um carro
+--   de outra loja — o que travava a venda de verdade dela.
+-- * O site público só enxerga carros não ocultos (antes, ocultos saíam pela API).
+
+create or replace function public.is_company_admin()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.user_company
+    where user_id = auth.uid() and company_id = public.current_company_id() and role = 'admin'
+  )
+$$;
+
+create or replace function public.is_company_staff()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.user_company
+    where user_id = auth.uid() and company_id = public.current_company_id() and role in ('admin', 'manager')
+  )
+$$;
+
+create or replace function public.can_manage_customer_finance()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select public.is_company_admin()
+    or exists (
+      select 1
+      from public.user_company uc
+      join public.sellers s on s.user_id = uc.user_id and s.company_id = uc.company_id
+      where uc.user_id = auth.uid() and uc.company_id = public.current_company_id()
+        and uc.role = 'manager' and s.active and s.finance_access = 'values'
+    )
+$$;
+
+create or replace function public.current_seller_id()
+returns uuid
+language sql stable security definer set search_path = public
+as $$
+  select id from public.sellers
+  where user_id = auth.uid() and company_id = public.current_company_id() and active
+  limit 1
+$$;
+
+drop policy if exists "Public can read cars" on public.cars;
+create policy "Public can read cars"
+on public.cars for select
+to anon
+using (not hidden);
+
+-- Referências da mesma loja (só confere o que foi informado ou mudou)
+create or replace function public.check_company_refs()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb := to_jsonb(new);
+  old_rec jsonb := case when tg_op = 'UPDATE' then to_jsonb(old) else '{}'::jsonb end;
+  v_company uuid := (rec->>'company_id')::uuid;
+  v_ref record;
+  v_ok boolean;
+begin
+  for v_ref in
+    select * from (values
+      ('car_id', 'cars', 'Carro'),
+      ('customer_id', 'customers', 'Cliente'),
+      ('supplier_id', 'suppliers', 'Fornecedor'),
+      ('financing_id', 'customer_financings', 'Financiamento')
+    ) r (col, tbl, label)
+  loop
+    continue when not rec ? v_ref.col or rec->>v_ref.col is null;
+    continue when tg_op = 'UPDATE'
+      and rec->v_ref.col is not distinct from old_rec->v_ref.col
+      and rec->'company_id' is not distinct from old_rec->'company_id';
+    execute format('select exists (select 1 from public.%I where id = $1 and company_id = $2)', v_ref.tbl)
+      into v_ok using (rec->>v_ref.col)::uuid, v_company;
+    if not v_ok then
+      raise exception '% não encontrado nesta loja', v_ref.label using errcode = '23503';
+    end if;
+  end loop;
+  return new;
+end;
+$$;
+
+drop trigger if exists cars_check_company_refs on public.cars;
+create trigger cars_check_company_refs before insert or update on public.cars
+for each row execute function public.check_company_refs();
+
+drop trigger if exists sales_check_company_refs on public.sales;
+create trigger sales_check_company_refs before insert or update on public.sales
+for each row execute function public.check_company_refs();
+
+drop trigger if exists car_expenses_check_company_refs on public.car_expenses;
+create trigger car_expenses_check_company_refs before insert or update on public.car_expenses
+for each row execute function public.check_company_refs();
+
+drop trigger if exists contracts_check_company_refs on public.contracts;
+create trigger contracts_check_company_refs before insert or update on public.contracts
+for each row execute function public.check_company_refs();
+
+drop trigger if exists customer_documents_check_company_refs on public.customer_documents;
+create trigger customer_documents_check_company_refs before insert or update on public.customer_documents
+for each row execute function public.check_company_refs();
+
+drop trigger if exists customer_financings_check_company_refs on public.customer_financings;
+create trigger customer_financings_check_company_refs before insert or update on public.customer_financings
+for each row execute function public.check_company_refs();
+
+drop trigger if exists financing_installments_check_company_refs on public.financing_installments;
+create trigger financing_installments_check_company_refs before insert or update on public.financing_installments
+for each row execute function public.check_company_refs();
+
+-- Limpa os vínculos criados por aquela falha que são inequívocos: admin da
+-- Dom Motors para quem é vendedor ou gerente de OUTRA loja (a Edge Function da
+-- Equipe nunca cria esse vínculo). Admins de outras lojas não são apagados
+-- aqui: aparecem na conferência abaixo para você decidir.
+delete from public.user_company uc
+using public.companies dm
+where dm.slug = 'dom-motors'
+  and uc.company_id = dm.id
+  and uc.role = 'admin'
+  and exists (select 1 from public.sellers s where s.user_id = uc.user_id and s.company_id <> dm.id)
+  and not exists (select 1 from public.sellers s where s.user_id = uc.user_id and s.company_id = dm.id);
+
+-- 28) Conferência: passou para a seção 30, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 29) Estoque pelo vendedor, checklists do carro, forma de pagamento, reserva,
+--     carro na troca, financiamento externo e comissões pagas
+--
+-- * Vendedor ativo também cadastra e edita carros (sem custo de compra e sem
+--   excluir), muda o status, lança gastos (sem ler os lançados), anexa
+--   documentos do carro e envia fotos (api/fotos.php usa can_edit_stock()).
+--   Venda e reserva feitas por ele ficam no nome dele; depois disso, só admin
+--   e gerente mudam o status do carro.
+-- * Carro: observações internas (não aparecem no site), itens que vieram com
+--   o carro e vistoria de entrada (listas de cada loja, preenchimento opcional).
+-- * Venda: forma de pagamento, banco (lista de cada loja), entrada e valor
+--   financiado (opcionais), carro recebido na troca e data em que a comissão
+--   foi paga.
+-- * Reserva com sinal (status "reservado"), financiamento externo (cliente
+--   comprou o carro fora e só financiou pela loja) e comissão de financiamento
+--   externo configurável por vendedor.
+
+-- Qualquer pessoa ativa da loja atual: admin, gerente ou vendedor ativo
+-- (current_company_id() já devolve null para vendedor desativado).
+create or replace function public.can_edit_stock()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select public.current_company_id() is not null
+$$;
+revoke execute on function public.can_edit_stock() from anon, public;
+grant execute on function public.can_edit_stock() to authenticated;
+
+-- Carro -------------------------------------------------------------------------
+alter table public.cars add column if not exists internal_notes text not null default '';
+alter table public.cars add column if not exists intake_items jsonb not null default '[]';
+alter table public.cars add column if not exists inspection jsonb not null default '[]';
+alter table public.cars drop constraint if exists cars_intake_items_check;
+alter table public.cars add constraint cars_intake_items_check check (jsonb_typeof(intake_items) = 'array');
+alter table public.cars drop constraint if exists cars_inspection_check;
+alter table public.cars add constraint cars_inspection_check check (jsonb_typeof(inspection) = 'array');
+
+alter table public.cars drop constraint if exists cars_status_check;
+alter table public.cars add constraint cars_status_check
+  check (status in ('disponivel', 'manutencao', 'reservado', 'vendido'));
+
+-- Estoque da equipe (admin, gerente e vendedor): tudo menos o custo de compra.
+drop view if exists public.staff_cars;
+create view public.staff_cars as
+select
+  id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
+  category, condition, price, original_price, badge, status, highlights, description, images,
+  featured, hidden, sold_at, plate, chassis, renavam, documents, customer_id, stock_alert_days,
+  company_id, created_at, updated_at, internal_notes, intake_items, inspection
+from public.cars
+where company_id = public.current_company_id() and public.can_edit_stock()
+with local check option;
+
+revoke all on public.staff_cars from anon, authenticated, public;
+grant select, insert, update on public.staff_cars to authenticated;
+
+-- Carro vendido ou reservado: só admin e gerente mudam o status
+create or replace function public.cars_guard_seller_changes()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null or public.is_company_staff() then return new; end if;
+  if old.status in ('vendido', 'reservado') and new.status is distinct from old.status then
+    raise exception 'Só o administrador ou o gerente podem mudar o status de um carro vendido ou reservado';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists cars_guard_seller_changes on public.cars;
+create trigger cars_guard_seller_changes before update on public.cars
+for each row execute function public.cars_guard_seller_changes();
+
+-- Listas de cada loja (admin e gerente editam) ---------------------------------
+alter table public.companies add column if not exists bank_list jsonb not null default
+  '["Banco do Brasil", "Caixa", "Bradesco", "Itaú", "Santander", "BV", "Banco Pan", "Safra", "Omni", "C6 Bank", "Sicredi", "Sicoob", "Banco Toyota", "Banco Honda", "Banco Volkswagen"]';
+alter table public.companies add column if not exists intake_checklist jsonb not null default
+  '["Manual do proprietário", "Chave reserva", "Livro de revisões", "Estepe", "Macaco e chave de roda", "Triângulo", "Tapetes", "CRLV (documento do veículo)"]';
+alter table public.companies add column if not exists inspection_checklist jsonb not null default
+  '["Lataria e pintura", "Pneus", "Vidros e retrovisores", "Faróis e lanternas", "Motor", "Câmbio", "Suspensão", "Freios", "Ar-condicionado", "Parte elétrica", "Painel e luzes de alerta", "Bancos e acabamento interno"]';
+alter table public.companies drop constraint if exists companies_bank_list_check;
+alter table public.companies add constraint companies_bank_list_check check (jsonb_typeof(bank_list) = 'array');
+alter table public.companies drop constraint if exists companies_intake_checklist_check;
+alter table public.companies add constraint companies_intake_checklist_check check (jsonb_typeof(intake_checklist) = 'array');
+alter table public.companies drop constraint if exists companies_inspection_checklist_check;
+alter table public.companies add constraint companies_inspection_checklist_check check (jsonb_typeof(inspection_checklist) = 'array');
+
+grant update (stock_alert_days, sale_checklist, bank_list, intake_checklist, inspection_checklist) on public.companies to authenticated;
+
+-- Venda: forma de pagamento, banco, troca e comissão paga ------------------------
+alter table public.sales add column if not exists payment_method text not null default '';
+alter table public.sales drop constraint if exists sales_payment_method_check;
+alter table public.sales add constraint sales_payment_method_check
+  check (payment_method in ('', 'a_vista', 'financiado', 'financiamento_proprio', 'consorcio', 'outro'));
+alter table public.sales add column if not exists bank text not null default '';
+alter table public.sales add column if not exists down_payment numeric(12, 2) check (down_payment is null or down_payment >= 0);
+alter table public.sales add column if not exists financed_amount numeric(12, 2) check (financed_amount is null or financed_amount >= 0);
+alter table public.sales add column if not exists trade_in_car_id uuid references public.cars(id) on delete set null;
+alter table public.sales add column if not exists trade_in_value numeric(12, 2) check (trade_in_value is null or trade_in_value >= 0);
+alter table public.sales add column if not exists commission_paid_on date;
+
+-- O vendedor registra venda só no nome dele (editar e excluir: admin e gerente)
+drop policy if exists "Admin can insert sales" on public.sales;
+create policy "Admin can insert sales"
+on public.sales for insert
+to authenticated
+with check (
+  company_id = public.current_company_id()
+  and (public.is_company_staff() or (seller_id is not null and seller_id = public.current_seller_id()))
+);
+
+-- Gastos, documentos do carro e fornecedores: o vendedor também lança e anexa
+drop policy if exists "Authenticated can insert expenses" on public.car_expenses;
+create policy "Authenticated can insert expenses"
+on public.car_expenses for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Authenticated can upload expense attachments" on storage.objects;
+create policy "Authenticated can upload expense attachments"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text and public.can_edit_stock());
+
+drop policy if exists "Authenticated can view car documents" on storage.objects;
+create policy "Authenticated can view car documents"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'car-documents' and (storage.foldername(name))[1] = public.current_company_id()::text and public.can_edit_stock());
+
+drop policy if exists "Authenticated can upload car documents" on storage.objects;
+create policy "Authenticated can upload car documents"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'car-documents' and (storage.foldername(name))[1] = public.current_company_id()::text and public.can_edit_stock());
+
+drop policy if exists "Authenticated can read suppliers" on public.suppliers;
+create policy "Authenticated can read suppliers"
+on public.suppliers for select
+to authenticated
+using (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Authenticated can insert suppliers" on public.suppliers;
+create policy "Authenticated can insert suppliers"
+on public.suppliers for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.can_edit_stock());
+
+-- Carro recebido na troca: entra no estoque "em manutenção" e oculto do site,
+-- com o custo de compra = valor da troca (o vendedor não informa custo pelo
+-- cadastro, mas o valor da troca foi ele quem negociou).
+create or replace function public.register_trade_in(p jsonb)
+returns uuid
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_id uuid;
+  v_brand text := nullif(trim(p->>'brand'), '');
+  v_model text := nullif(trim(p->>'model'), '');
+  v_version text := coalesce(trim(p->>'version'), '');
+  v_year integer := nullif(p->>'year', '')::integer;
+  v_slug text;
+begin
+  if v_company is null or not public.can_edit_stock() then
+    raise exception 'Sem permissão';
+  end if;
+  if v_brand is null or v_model is null or v_year is null then
+    raise exception 'Informe marca, modelo e ano do carro da troca';
+  end if;
+  v_slug := trim(both '-' from lower(regexp_replace(
+    translate(concat_ws('-', v_brand, v_model, v_version, v_year::text),
+      'áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC'),
+    '[^a-zA-Z0-9]+', '-', 'g'))) || '-troca-' || substr(md5(random()::text), 1, 6);
+
+  insert into public.cars (
+    company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color,
+    doors, category, condition, price, badge, status, hidden, plate, description,
+    purchase_price, purchase_date, internal_notes
+  ) values (
+    v_company, v_slug, v_brand, v_model, v_version, v_year,
+    coalesce(nullif(trim(p->>'model_year'), ''), v_year::text),
+    coalesce(nullif(p->>'km', '')::integer, 0),
+    coalesce(nullif(trim(p->>'transmission'), ''), 'Manual'),
+    coalesce(nullif(trim(p->>'fuel'), ''), 'Flex'),
+    coalesce(nullif(trim(p->>'color'), ''), 'Não informada'),
+    4,
+    coalesce(nullif(trim(p->>'category'), ''), 'hatch'),
+    coalesce(nullif(trim(p->>'condition'), ''), 'Segundo dono'),
+    null, 'Disponível', 'manutencao', true,
+    nullif(upper(trim(p->>'plate')), ''), '',
+    nullif(p->>'value', '')::numeric::integer,
+    coalesce(nullif(p->>'date', '')::date, current_date),
+    coalesce(p->>'notes', 'Recebido na troca')
+  )
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+revoke execute on function public.register_trade_in(jsonb) from anon, public;
+grant execute on function public.register_trade_in(jsonb) to authenticated;
+
+-- Reserva com sinal -------------------------------------------------------------
+create table if not exists public.car_reservations (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  car_id uuid not null references public.cars(id) on delete cascade,
+  customer_id uuid references public.customers(id) on delete set null,
+  customer_name text not null default '',
+  seller_id uuid references public.sellers(id) on delete set null,
+  deposit_amount numeric(12, 2) check (deposit_amount is null or deposit_amount >= 0),
+  reserved_on date not null default current_date,
+  reserved_until date,
+  notes text not null default '',
+  status text not null default 'ativa' check (status in ('ativa', 'convertida', 'cancelada')),
+  closed_on date,
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists car_reservations_company_id_idx on public.car_reservations (company_id, status);
+create unique index if not exists car_reservations_one_active_idx on public.car_reservations (car_id) where status = 'ativa';
+
+drop trigger if exists car_reservations_set_updated_at on public.car_reservations;
+create trigger car_reservations_set_updated_at
+before update on public.car_reservations
+for each row execute function public.set_updated_at();
+
+alter table public.car_reservations enable row level security;
+
+drop policy if exists "Team can read reservations" on public.car_reservations;
+create policy "Team can read reservations"
+on public.car_reservations for select
+to authenticated
+using (
+  company_id = public.current_company_id()
+  and (public.is_company_staff() or seller_id = public.current_seller_id() or created_by = auth.uid())
+);
+
+drop policy if exists "Staff can update reservations" on public.car_reservations;
+create policy "Staff can update reservations"
+on public.car_reservations for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff())
+with check (company_id = public.current_company_id() and public.is_company_staff());
+
+drop policy if exists "Admin can delete reservations" on public.car_reservations;
+create policy "Admin can delete reservations"
+on public.car_reservations for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Reservar: grava a reserva e muda o carro para "reservado" juntos. O vendedor
+-- só reserva no nome dele.
+create or replace function public.reserve_car(p jsonb)
+returns uuid
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_car uuid := (p->>'car_id')::uuid;
+  v_seller uuid := nullif(p->>'seller_id', '')::uuid;
+  v_status text;
+  v_customer uuid := nullif(p->>'customer_id', '')::uuid;
+  v_id uuid;
+begin
+  if v_company is null or not public.can_edit_stock() then
+    raise exception 'Sem permissão';
+  end if;
+  if not public.is_company_staff() then
+    v_seller := public.current_seller_id();
+  end if;
+  select status into v_status from public.cars where id = v_car and company_id = v_company for update;
+  if not found then
+    raise exception 'Carro não encontrado';
+  end if;
+  if v_status not in ('disponivel', 'manutencao') then
+    raise exception 'Só dá para reservar um carro disponível ou em manutenção';
+  end if;
+  if v_customer is not null and not exists (select 1 from public.customers where id = v_customer and company_id = v_company) then
+    raise exception 'Cliente não encontrado nesta loja';
+  end if;
+  if v_seller is not null and not exists (select 1 from public.sellers where id = v_seller and company_id = v_company) then
+    raise exception 'Vendedor não encontrado nesta loja';
+  end if;
+
+  insert into public.car_reservations (company_id, car_id, customer_id, customer_name, seller_id, deposit_amount, reserved_on, reserved_until, notes)
+  values (
+    v_company, v_car, v_customer,
+    coalesce((select name from public.customers where id = v_customer), nullif(trim(p->>'customer_name'), ''), ''),
+    v_seller,
+    nullif(p->>'deposit_amount', '')::numeric,
+    coalesce(nullif(p->>'reserved_on', '')::date, current_date),
+    nullif(p->>'reserved_until', '')::date,
+    coalesce(p->>'notes', '')
+  )
+  returning id into v_id;
+
+  update public.cars set status = 'reservado', sold_at = null where id = v_car;
+  return v_id;
+end;
+$$;
+revoke execute on function public.reserve_car(jsonb) from anon, public;
+grant execute on function public.reserve_car(jsonb) to authenticated;
+
+-- Encerrar reserva (admin e gerente): "convertida" (virou venda — o status do
+-- carro é mudado pela venda) ou "cancelada" (carro volta a ficar disponível)
+create or replace function public.close_reservation(p_id uuid, p_result text)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_car uuid;
+begin
+  if v_company is null or not public.is_company_staff() then
+    raise exception 'Só o administrador ou o gerente podem encerrar uma reserva';
+  end if;
+  if p_result not in ('convertida', 'cancelada') then
+    raise exception 'Resultado inválido';
+  end if;
+  update public.car_reservations
+  set status = p_result, closed_on = current_date
+  where id = p_id and company_id = v_company and status = 'ativa'
+  returning car_id into v_car;
+  if v_car is null then
+    raise exception 'Reserva não encontrada ou já encerrada';
+  end if;
+  if p_result = 'cancelada' then
+    update public.cars set status = 'disponivel' where id = v_car and status = 'reservado';
+  end if;
+end;
+$$;
+revoke execute on function public.close_reservation(uuid, text) from anon, public;
+grant execute on function public.close_reservation(uuid, text) to authenticated;
+
+-- Comissão de financiamento externo, por vendedor --------------------------------
+alter table public.sellers add column if not exists ext_commission_type text not null default 'none';
+alter table public.sellers drop constraint if exists sellers_ext_commission_type_check;
+alter table public.sellers add constraint sellers_ext_commission_type_check
+  check (ext_commission_type in ('none', 'percent_financed', 'percent_return', 'fixed'));
+alter table public.sellers add column if not exists ext_commission_value numeric(12, 2) not null default 0 check (ext_commission_value >= 0);
+
+-- Financiamento externo: o cliente achou o carro fora e só fez o financiamento
+-- pela loja. A loja recebe um retorno do banco quando o financiamento é pago.
+create table if not exists public.external_financings (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  customer_id uuid references public.customers(id) on delete set null,
+  customer_name text not null,
+  vehicle_label text not null default '',
+  vehicle_plate text not null default '',
+  vehicle_year text not null default '',
+  vehicle_price numeric(12, 2) check (vehicle_price is null or vehicle_price >= 0),
+  vehicle_source text not null default 'particular' check (vehicle_source in ('loja', 'particular')),
+  vehicle_source_name text not null default '',
+  bank text not null default '',
+  down_payment numeric(12, 2) check (down_payment is null or down_payment >= 0),
+  financed_amount numeric(12, 2) check (financed_amount is null or financed_amount >= 0),
+  installments_count integer check (installments_count is null or installments_count between 1 and 240),
+  installment_amount numeric(12, 2) check (installment_amount is null or installment_amount >= 0),
+  seller_id uuid references public.sellers(id) on delete set null,
+  status text not null default 'em_analise' check (status in ('em_analise', 'aprovado', 'pago', 'recusado', 'cancelado')),
+  submitted_on date not null default current_date,
+  approved_on date,
+  paid_on date,
+  closed_on date,
+  store_return numeric(12, 2) check (store_return is null or store_return >= 0),
+  commission_type text,
+  commission_value numeric(12, 2),
+  commission_amount numeric(12, 2) not null default 0,
+  commission_paid_on date,
+  notes text not null default '',
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists external_financings_company_id_idx on public.external_financings (company_id, status);
+create index if not exists external_financings_seller_id_idx on public.external_financings (seller_id);
+
+drop trigger if exists external_financings_set_updated_at on public.external_financings;
+create trigger external_financings_set_updated_at
+before update on public.external_financings
+for each row execute function public.set_updated_at();
+
+-- Vendedor: não marca como pago, não informa o retorno da loja, não troca o
+-- vendedor nem mexe em financiamento já pago (os gatilhos rodam em ordem
+-- alfabética: 1_guard antes de 2_commission)
+create or replace function public.external_financings_guard()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null or public.is_company_staff() then return new; end if;
+  if tg_op = 'INSERT' then
+    new.seller_id := public.current_seller_id();
+    new.store_return := null;
+    new.commission_paid_on := null;
+    new.paid_on := null;
+    if new.status = 'pago' then new.status := 'aprovado'; end if;
+    return new;
+  end if;
+  if old.status = 'pago'
+     or new.status = 'pago'
+     or new.seller_id is distinct from old.seller_id
+     or new.store_return is distinct from old.store_return
+     or new.commission_paid_on is distinct from old.commission_paid_on then
+    raise exception 'Só o administrador ou o gerente podem alterar isso';
+  end if;
+  return new;
+end;
+$$;
+
+-- Comissão (gravada, como nas vendas) e datas de cada situação
+create or replace function public.external_financings_compute()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  s public.sellers%rowtype;
+begin
+  if new.status is distinct from (case when tg_op = 'UPDATE' then old.status end) then
+    if new.status = 'aprovado' and new.approved_on is null then new.approved_on := current_date; end if;
+    if new.status = 'pago' and new.paid_on is null then new.paid_on := current_date; end if;
+    if new.status in ('recusado', 'cancelado') and new.closed_on is null then new.closed_on := current_date; end if;
+  end if;
+
+  if new.seller_id is null then
+    new.commission_type := null;
+    new.commission_value := null;
+    new.commission_amount := 0;
+    return new;
+  end if;
+  -- Comissão já paga não muda mais
+  if tg_op = 'UPDATE' and old.commission_paid_on is not null then
+    new.commission_type := old.commission_type;
+    new.commission_value := old.commission_value;
+    new.commission_amount := old.commission_amount;
+    return new;
+  end if;
+  -- Mesmo vendedor: mantém a regra da época e só recalcula o valor
+  if tg_op = 'INSERT' or new.seller_id is distinct from old.seller_id then
+    select * into s from public.sellers where id = new.seller_id and company_id = new.company_id;
+    if not found then
+      raise exception 'Vendedor inválido para esta empresa';
+    end if;
+    new.commission_type := s.ext_commission_type;
+    new.commission_value := s.ext_commission_value;
+  end if;
+  new.commission_amount := case new.commission_type
+    when 'percent_financed' then round(coalesce(new.financed_amount, 0) * new.commission_value / 100, 2)
+    when 'percent_return' then round(coalesce(new.store_return, 0) * new.commission_value / 100, 2)
+    when 'fixed' then coalesce(new.commission_value, 0)
+    else 0
+  end;
+  return new;
+end;
+$$;
+
+drop trigger if exists external_financings_1_guard on public.external_financings;
+create trigger external_financings_1_guard before insert or update on public.external_financings
+for each row execute function public.external_financings_guard();
+
+drop trigger if exists external_financings_2_compute on public.external_financings;
+create trigger external_financings_2_compute before insert or update on public.external_financings
+for each row execute function public.external_financings_compute();
+
+alter table public.external_financings enable row level security;
+
+drop policy if exists "Team can read external financings" on public.external_financings;
+create policy "Team can read external financings"
+on public.external_financings for select
+to authenticated
+using (
+  company_id = public.current_company_id()
+  and (public.is_company_staff() or seller_id = public.current_seller_id() or created_by = auth.uid())
+);
+
+drop policy if exists "Team can insert external financings" on public.external_financings;
+create policy "Team can insert external financings"
+on public.external_financings for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Team can update external financings" on public.external_financings;
+create policy "Team can update external financings"
+on public.external_financings for update
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or seller_id = public.current_seller_id()))
+with check (company_id = public.current_company_id() and (public.is_company_staff() or seller_id = public.current_seller_id()));
+
+drop policy if exists "Admin can delete external financings" on public.external_financings;
+create policy "Admin can delete external financings"
+on public.external_financings for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Documentos do financiamento externo ficam na ficha do cliente
+alter table public.customer_documents add column if not exists external_financing_id uuid
+  references public.external_financings(id) on delete set null;
+create index if not exists customer_documents_external_financing_idx on public.customer_documents (external_financing_id);
+
+-- Comissões pagas (admin): marca ou desmarca de uma vez vendas e
+-- financiamentos externos, com um único registro de atividade
+create or replace function public.mark_commissions_paid(p_sale_ids uuid[], p_external_ids uuid[], p_paid_on date)
+returns integer
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_count integer := 0;
+  v_rows integer;
+begin
+  if v_company is null or not public.is_company_admin() then
+    raise exception 'Só o administrador marca comissões como pagas';
+  end if;
+  perform set_config('app.skip_activity_log', '1', true);
+  update public.sales set commission_paid_on = p_paid_on
+  where company_id = v_company and id = any(coalesce(p_sale_ids, '{}'));
+  get diagnostics v_rows = row_count;
+  v_count := v_count + v_rows;
+  update public.external_financings set commission_paid_on = p_paid_on
+  where company_id = v_company and id = any(coalesce(p_external_ids, '{}'));
+  get diagnostics v_rows = row_count;
+  v_count := v_count + v_rows;
+  perform set_config('app.skip_activity_log', '0', true);
+
+  insert into public.activity_log (company_id, user_id, user_email, action, entity, label, details)
+  values (
+    v_company, auth.uid(), (select email from auth.users where id = auth.uid()), 'update', 'sellers', 'Comissões',
+    case when p_paid_on is null
+      then format('Desmarcou %s %s como paga(s)', v_count, case when v_count = 1 then 'comissão' else 'comissões' end)
+      else format('Marcou %s %s como paga(s) em %s', v_count, case when v_count = 1 then 'comissão' else 'comissões' end, to_char(p_paid_on, 'DD/MM/YYYY'))
+    end
+  );
+  return v_count;
+end;
+$$;
+revoke execute on function public.mark_commissions_paid(uuid[], uuid[], date) from anon, public;
+grant execute on function public.mark_commissions_paid(uuid[], uuid[], date) to authenticated;
+
+-- Referências da mesma loja: acrescenta o carro da troca e o financiamento externo
+create or replace function public.check_company_refs()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb := to_jsonb(new);
+  old_rec jsonb := case when tg_op = 'UPDATE' then to_jsonb(old) else '{}'::jsonb end;
+  v_company uuid := (rec->>'company_id')::uuid;
+  v_ref record;
+  v_ok boolean;
+begin
+  for v_ref in
+    select * from (values
+      ('car_id', 'cars', 'Carro'),
+      ('customer_id', 'customers', 'Cliente'),
+      ('supplier_id', 'suppliers', 'Fornecedor'),
+      ('financing_id', 'customer_financings', 'Financiamento'),
+      ('trade_in_car_id', 'cars', 'Carro da troca'),
+      ('external_financing_id', 'external_financings', 'Financiamento externo')
+    ) r (col, tbl, label)
+  loop
+    continue when not rec ? v_ref.col or rec->>v_ref.col is null;
+    continue when tg_op = 'UPDATE'
+      and rec->v_ref.col is not distinct from old_rec->v_ref.col
+      and rec->'company_id' is not distinct from old_rec->'company_id';
+    execute format('select exists (select 1 from public.%I where id = $1 and company_id = $2)', v_ref.tbl)
+      into v_ok using (rec->>v_ref.col)::uuid, v_company;
+    if not v_ok then
+      raise exception '% não encontrado nesta loja', v_ref.label using errcode = '23503';
+    end if;
+  end loop;
+  return new;
+end;
+$$;
+
+drop trigger if exists car_reservations_check_company_refs on public.car_reservations;
+create trigger car_reservations_check_company_refs before insert or update on public.car_reservations
+for each row execute function public.check_company_refs();
+
+drop trigger if exists external_financings_check_company_refs on public.external_financings;
+create trigger external_financings_check_company_refs before insert or update on public.external_financings
+for each row execute function public.check_company_refs();
+
+-- Registro de atividades: rótulos das tabelas novas
+create or replace function public.log_activity()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb;
+  old_rec jsonb;
+  v_company uuid;
+  v_label text;
+  v_details text;
+  v_email text;
+  v_changed text[];
+begin
+  begin
+    if current_setting('app.skip_activity_log', true) = '1' then return null; end if;
+    if tg_op = 'DELETE' then rec := to_jsonb(old); else rec := to_jsonb(new); end if;
+    v_company := (rec->>'company_id')::uuid;
+    -- Sem usuário = SQL Editor ou Edge Function (que grava o próprio log).
+    if v_company is null or auth.uid() is null then return null; end if;
+
+    if tg_op = 'UPDATE' then
+      old_rec := to_jsonb(old);
+      select array_agg(n.key order by n.key) into v_changed
+      from jsonb_each(rec) n
+      where n.key not in ('updated_at') and n.value is distinct from old_rec->n.key;
+      if v_changed is null then return null; end if;
+      v_details := array_to_string(v_changed, ', ');
+      if 'status' = any(v_changed) then
+        v_details := format('status: %s → %s', old_rec->>'status', rec->>'status');
+      end if;
+    end if;
+
+    v_label := case tg_table_name
+      when 'cars' then concat_ws(' ', rec->>'brand', rec->>'model', rec->>'version')
+      when 'customers' then rec->>'name'
+      when 'suppliers' then rec->>'name'
+      when 'sellers' then rec->>'name'
+      when 'contract_templates' then rec->>'name'
+      when 'contracts' then concat(case rec->>'document_type' when 'recibo' then 'Recibo' else 'Contrato' end, ' — ', rec->>'buyer_name')
+      when 'car_expenses' then concat(coalesce(nullif(rec->>'description', ''), rec->>'category'), ' — R$ ', rec->>'amount')
+      when 'sales' then (select concat(c.brand, ' ', c.model, ' — R$ ', rec->>'sale_price') from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'customer_documents' then concat(
+        coalesce(nullif(rec->>'title', ''), nullif(rec->>'file_name', ''), 'Documento'), ' — ',
+        (select cu.name from public.customers cu where cu.id = (rec->>'customer_id')::uuid))
+      when 'customer_financings' then concat('Financiamento — ', rec->>'customer_name')
+      when 'financing_installments' then (
+        select concat('Parcela ', rec->>'number', '/', f.installments_count, ' — ', f.customer_name)
+        from public.customer_financings f where f.id = (rec->>'financing_id')::uuid)
+      when 'car_reservations' then (
+        select concat('Reserva — ', c.brand, ' ', c.model, coalesce(' — ' || nullif(rec->>'customer_name', ''), ''))
+        from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'external_financings' then concat('Financiamento externo — ', rec->>'customer_name')
+      else null
+    end;
+
+    select email into v_email from auth.users where id = auth.uid();
+
+    insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label, details)
+    values (v_company, auth.uid(), v_email, lower(tg_op), tg_table_name, (rec->>'id')::uuid, v_label, v_details);
+  exception when others then
+    -- O log nunca pode impedir a operação principal
+    null;
+  end;
+  return null;
+end;
+$$;
+
+drop trigger if exists car_reservations_log_activity on public.car_reservations;
+create trigger car_reservations_log_activity after insert or update or delete on public.car_reservations
+for each row execute function public.log_activity();
+
+drop trigger if exists external_financings_log_activity on public.external_financings;
+create trigger external_financings_log_activity after insert or update or delete on public.external_financings
+for each row execute function public.log_activity();
+
+-- 30) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
+-- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
+-- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e
+-- deve ser apagado:
+--   delete from public.user_company
+--   where user_id = '<id do login>' and company_id = (select id from public.companies where slug = 'dom-motors');
+-- Sem linhas no resultado = tudo certo.
+select
+  uc.user_id as "id do login",
+  u.email as "login",
+  string_agg(c.name || ' (' || uc.role || ')', ', ' order by c.name) as "acessos (confira: cada login deve ser de uma loja só)"
+from public.user_company uc
+join public.companies c on c.id = uc.company_id
+left join auth.users u on u.id = uc.user_id
+group by uc.user_id, u.email
+having count(*) > 1
+order by u.email;

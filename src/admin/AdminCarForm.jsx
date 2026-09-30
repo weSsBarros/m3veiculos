@@ -1,20 +1,27 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, Trash2, Receipt } from 'lucide-react'
+import { ChevronLeft, Trash2, Receipt, Lock } from 'lucide-react'
 import { fetchCarById, createCar, updateCar, deleteCar, uploadCarDocument, updateCarDocuments } from '../lib/carsApi.js'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
 import { fetchSaleByCar, saveSaleForCar, deleteSaleForCar } from '../lib/salesApi.js'
+import { fetchReservations, closeReservation } from '../lib/reservationsApi.js'
 import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS, CAR_STATUSES, parseIntBR, todayISO } from '../utils/carFormat.js'
 import ImageUploader from './ImageUploader.jsx'
 import CarDocumentUploader from './CarDocumentUploader.jsx'
 import CustomerPicker from './CustomerPicker.jsx'
+import PaymentFields, { paymentFromSale, EMPTY_PAYMENT } from './PaymentFields.jsx'
+import { IntakeChecklist, InspectionChecklist } from './CarChecklists.jsx'
+import { buildIntake, buildInspection, compactChecklist } from '../utils/carChecklists.js'
+import { parseMoneyBR } from '../utils/financing.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import FipeLookup from '../components/FipeLookup.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { fetchStockAlertDefault, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
+import { fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
+import { DEFAULT_INTAKE_CHECKLIST, DEFAULT_INSPECTION_CHECKLIST } from '../utils/carChecklists.js'
+import { DEFAULT_BANKS } from '../utils/payment.js'
 
 const EMPTY_CAR = {
   brand: '',
@@ -46,17 +53,29 @@ const EMPTY_CAR = {
   renavam: '',
   documents: [],
   customerId: '',
+  internalNotes: '',
+  intakeItems: [],
+  inspection: [],
 }
 
 export default function AdminCarForm() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, canSeeCosts } = useAuth()
+  const { isAdmin, isStaff, isSeller, seller: me, canSeeCosts } = useAuth()
   const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
   // Documentos escolhidos antes de o carro existir: sobem logo após o cadastro
   const [pendingDocs, setPendingDocs] = useState([])
+  // Listas da loja (itens que vêm com o carro, vistoria e bancos)
+  const [lists, setLists] = useState({ intake: DEFAULT_INTAKE_CHECKLIST, inspection: DEFAULT_INSPECTION_CHECKLIST, banks: DEFAULT_BANKS })
+  const [intake, setIntake] = useState(() => buildIntake(DEFAULT_INTAKE_CHECKLIST))
+  const [inspection, setInspection] = useState(() => buildInspection(DEFAULT_INSPECTION_CHECKLIST))
+  const [payment, setPayment] = useState(EMPTY_PAYMENT)
+  const [activeReservation, setActiveReservation] = useState(null)
 
   useEffect(() => {
-    fetchStockAlertDefault().then(setAlertDefault)
+    fetchCompanySettings().then((settings) => {
+      setAlertDefault(settings.stockAlertDays)
+      setLists({ intake: settings.intakeChecklist, inspection: settings.inspectionChecklist, banks: settings.bankList })
+    })
   }, [])
   const { id } = useParams()
   const isEditing = Boolean(id)
@@ -84,7 +103,10 @@ export default function AdminCarForm() {
     fetchSaleByCar(id)
       .then((found) => {
         setExistingSale(found)
-        if (found) setSale({ sellerId: found.sellerId || '', price: String(found.salePrice), date: found.saleDate })
+        if (found) {
+          setSale({ sellerId: found.sellerId || '', price: String(found.salePrice), date: found.saleDate })
+          setPayment(paymentFromSale(found))
+        }
       })
       .catch(() => {})
   }, [id, isEditing])
@@ -99,6 +121,11 @@ export default function AdminCarForm() {
       if (found) {
         setCar({ ...found, customerId: found.customerId || '' })
         setOriginalStatus(found.status)
+        if (found.status === 'reservado') {
+          fetchReservations()
+            .then((list) => setActiveReservation(list.find((r) => r.carId === found.id) || null))
+            .catch(() => {})
+        }
         setHighlightsText(found.highlights.join('\n'))
         setNoPrice(found.price == null)
       } else {
@@ -107,6 +134,13 @@ export default function AdminCarForm() {
       setLoading(false)
     })
   }, [id, isEditing])
+
+  useEffect(() => {
+    setIntake(buildIntake(lists.intake, car.intakeItems))
+    setInspection(buildInspection(lists.inspection, car.inspection))
+    // Só quando o carro gravado ou as listas da loja chegam
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lists, car.id])
 
   function update(field, value) {
     setCar((prev) => ({ ...prev, [field]: value }))
@@ -131,6 +165,22 @@ export default function AdminCarForm() {
     }
     if (!isSold && existingSale && !isAdmin) {
       setError('Esse carro tem uma venda registrada. Só o administrador pode desfazer uma venda.')
+      setSaving(false)
+      return
+    }
+    // Vendedor não muda carro vendido ou reservado (nem o que já estava assim)
+    if (!isStaff && (originalStatus === 'vendido' || originalStatus === 'reservado') && car.status !== originalStatus) {
+      setError('Só o administrador ou o gerente mudam o status de um carro vendido ou reservado.')
+      setSaving(false)
+      return
+    }
+    if (car.status === 'reservado' && originalStatus !== 'reservado') {
+      setError('Para reservar, use o status "Reservado" no Estoque (a janela pede o cliente e o sinal).')
+      setSaving(false)
+      return
+    }
+    if (originalStatus === 'reservado' && car.status !== 'reservado' && activeReservation
+      && !(await confirm(`Esse carro está reservado${activeReservation.customerName ? ` para ${activeReservation.customerName}` : ''}. Ao mudar o status, a reserva ${car.status === 'vendido' ? 'vira venda' : 'é cancelada'}. Continuar?`))) {
       setSaving(false)
       return
     }
@@ -163,6 +213,9 @@ export default function AdminCarForm() {
       customerId,
       stockAlertDays: car.stockAlertDays ? Number.parseInt(car.stockAlertDays, 10) || null : null,
       soldAt,
+      internalNotes: (car.internalNotes || '').trim(),
+      intakeItems: compactChecklist(intake),
+      inspection: compactChecklist(inspection),
       highlights: highlightsText.split('\n').map((h) => h.trim()).filter(Boolean),
     }
 
@@ -179,9 +232,23 @@ export default function AdminCarForm() {
         }
       }
       if (isSold) {
-        await saveSaleForCar(saved.id, { sellerId: sale.sellerId || null, salePrice, saleDate: sale.date })
+        await saveSaleForCar(saved.id, {
+          sellerId: isSeller ? me?.id || null : sale.sellerId || null,
+          salePrice,
+          saleDate: sale.date,
+          payment: {
+            method: payment.method,
+            bank: payment.bank.trim(),
+            downPayment: payment.method === 'financiado' ? parseMoneyBR(payment.downPayment) : null,
+            financedAmount: payment.method === 'financiado' ? parseMoneyBR(payment.financedAmount) : null,
+          },
+          insertOnly: isSeller && !existingSale,
+        })
       } else if (existingSale) {
         await deleteSaleForCar(saved.id)
+      }
+      if (originalStatus === 'reservado' && car.status !== 'reservado' && activeReservation) {
+        await closeReservation(activeReservation.id, isSold ? 'convertida' : 'cancelada').catch(() => {})
       }
       if (docError) {
         // O carro já foi cadastrado: abre a edição dele para anexar de novo
@@ -212,8 +279,11 @@ export default function AdminCarForm() {
 
   if (loading) return <p className="admin-muted">Carregando…</p>
 
-  // Gerente informa o custo só no cadastro; na edição o campo nem aparece
-  const showPurchase = canSeeCosts || !isEditing
+  // Gerente informa o custo só no cadastro; na edição o campo nem aparece.
+  // O vendedor não informa custo.
+  const showPurchase = canSeeCosts || (isStaff && !isEditing)
+  // Status que o vendedor não pode mudar
+  const statusLocked = !isStaff && (originalStatus === 'vendido' || originalStatus === 'reservado')
 
   return (
     <div className="admin-page admin-form-page">
@@ -382,8 +452,10 @@ export default function AdminCarForm() {
             </label>
             <label>
               Status
-              <select required value={car.status} onChange={(e) => update('status', e.target.value)}>
-                {CAR_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              <select required value={car.status} onChange={(e) => update('status', e.target.value)} disabled={statusLocked}>
+                {CAR_STATUSES.filter((s) => s.value !== 'reservado' || originalStatus === 'reservado').map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
               </select>
             </label>
           </div>
@@ -394,7 +466,7 @@ export default function AdminCarForm() {
               <div className="admin-form-grid">
                 <label>
                   Vendedor
-                  <select value={sale.sellerId} onChange={(e) => updateSale('sellerId', e.target.value)}>
+                  <select value={isSeller ? me?.id || '' : sale.sellerId} onChange={(e) => updateSale('sellerId', e.target.value)} disabled={isSeller}>
                     <option value="">Sem vendedor (venda direta da loja)</option>
                     {sellers
                       .filter((s) => s.active || s.id === sale.sellerId)
@@ -422,7 +494,16 @@ export default function AdminCarForm() {
                   disabled={saving}
                 />
               </div>
+              <PaymentFields value={payment} onChange={setPayment} banks={lists.banks} disabled={saving} />
             </div>
+          )}
+
+          {originalStatus === 'reservado' && activeReservation && (
+            <p className="admin-form-note">
+              Reservado{activeReservation.customerName ? ` para ${activeReservation.customerName}` : ''}
+              {activeReservation.reservedUntil ? ` até ${activeReservation.reservedUntil.split('-').reverse().join('/')}` : ''}.
+              A reserva é gerenciada em Vendas → Reservas.
+            </p>
           )}
 
           <label className="admin-checkbox">
@@ -508,13 +589,35 @@ export default function AdminCarForm() {
 
         <section className="admin-form-section">
           <h2>Documentos do carro</h2>
-          <p className="admin-form-hint">CRLV, laudo cautelar, nota fiscal etc. Ficam visíveis só no painel (admin e gerente), nunca no site.</p>
+          <p className="admin-form-hint">CRLV, laudo cautelar, nota fiscal etc. Ficam visíveis só no painel da equipe, nunca no site.</p>
           <CarDocumentUploader
             carId={id}
             documents={car.documents}
             onChange={(documents) => update('documents', documents)}
             pendingFiles={pendingDocs}
             onPendingChange={setPendingDocs}
+          />
+        </section>
+
+        <section className="admin-form-section">
+          <h2>Entrada do carro</h2>
+          <p className="admin-form-hint">
+            Opcional. O que veio com o carro já aparece marcado no checklist de entrega quando ele for vendido.
+          </p>
+          <IntakeChecklist value={intake} onChange={setIntake} disabled={saving} />
+          <InspectionChecklist value={inspection} onChange={setInspection} disabled={saving} />
+        </section>
+
+        <section className="admin-form-section">
+          <h2>Observações internas</h2>
+          <p className="internal-notes-hint">
+            <Lock size={13} /> Só a equipe vê; não aparece no site.
+          </p>
+          <textarea
+            rows={3}
+            value={car.internalNotes || ''}
+            onChange={(e) => update('internalNotes', e.target.value)}
+            placeholder="Ex: pneu dianteiro para trocar, dono anterior mora no bairro X, aceita troca por moto..."
           />
         </section>
 

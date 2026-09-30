@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { RefreshCcw, Pencil, Trash2, Search } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { RefreshCcw, Pencil, Trash2, Search, FolderOpen } from 'lucide-react'
 import { fetchAllCustomers, createCustomer, updateCustomer, deleteCustomer } from '../lib/customersApi.js'
 import { fetchAllCarsAdmin, fetchSellerCars } from '../lib/carsApi.js'
+import { fetchSales } from '../lib/salesApi.js'
+import { fetchSellers } from '../lib/sellersApi.js'
+import { removeCustomerDocumentFiles } from '../lib/customerDocumentsApi.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { maskCPF, maskPhoneBR } from '../utils/masks.js'
+import { matchesCarSearch } from '../utils/carFormat.js'
+import CustomerFileDialog from './CustomerFileDialog.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 
@@ -23,9 +28,12 @@ function PurchaseLink({ car, isAdmin }) {
 
 export default function AdminCustomers() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, isStaff } = useAuth()
+  const { isAdmin, isStaff, canEditStock, canSeeSaleValues, canManageCustomerFinance } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [customers, setCustomers] = useState([])
   const [cars, setCars] = useState([])
+  const [sales, setSales] = useState([])
+  const [sellers, setSellers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [form, setForm] = useState(emptyCustomer)
@@ -37,9 +45,17 @@ export default function AdminCustomers() {
     setLoading(true)
     setError('')
     try {
-      const [customersData, carsData] = await Promise.all([fetchAllCustomers(), isStaff ? fetchAllCarsAdmin() : fetchSellerCars()])
+      const [customersData, carsData, salesData, sellersData] = await Promise.all([
+        fetchAllCustomers(),
+        isStaff ? fetchAllCarsAdmin() : fetchSellerCars(),
+        // Quem vendeu cada carro (o vendedor recebe só as vendas dele)
+        fetchSales().catch(() => []),
+        fetchSellers().catch(() => []),
+      ])
       setCustomers(customersData)
       setCars(carsData)
+      setSales(salesData)
+      setSellers(sellersData)
     } catch (err) {
       setError(err.message || 'Erro ao carregar os clientes.')
     } finally {
@@ -61,11 +77,40 @@ export default function AdminCustomers() {
     return map
   }, [cars])
 
+  const salesByCar = useMemo(() => {
+    const map = {}
+    for (const sale of sales) map[sale.carId] = sale
+    return map
+  }, [sales])
+
+  const sellersById = useMemo(() => {
+    const map = {}
+    for (const seller of sellers) map[seller.id] = seller
+    return map
+  }, [sellers])
+
+  // Busca também pelo carro comprado (modelo ou placa)
   const filteredCustomers = useMemo(() => {
     const query = search.trim().toLowerCase()
     if (!query) return customers
-    return customers.filter((c) => `${c.name} ${c.document} ${c.phone} ${c.email}`.toLowerCase().includes(query))
-  }, [customers, search])
+    return customers.filter(
+      (c) =>
+        `${c.name} ${c.document} ${c.phone} ${c.email}`.toLowerCase().includes(query) ||
+        (carsByCustomer[c.id] || []).some((car) => matchesCarSearch(car, query))
+    )
+  }, [customers, search, carsByCustomer])
+
+  // Ficha aberta: ?cliente=<id> (links vindos de Vendas e do Financeiro)
+  const fileCustomerId = searchParams.get('cliente')
+  const fileCustomer = fileCustomerId ? customers.find((c) => c.id === fileCustomerId) : null
+
+  function openFile(customer) {
+    setSearchParams({ cliente: customer.id })
+  }
+
+  function closeFile() {
+    setSearchParams({})
+  }
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -114,8 +159,10 @@ export default function AdminCustomers() {
     const warning = purchases.length
       ? ` Esse cliente está vinculado a ${purchases.length} ${purchases.length === 1 ? 'carro' : 'carros'} — o vínculo será removido, mas os carros continuam cadastrados.`
       : ''
-    if (!(await confirm(`Excluir o cliente "${customer.name}"?${warning}`))) return
+    if (!(await confirm(`Excluir o cliente "${customer.name}"?${warning} Os contratos e documentos anexados a ele também serão excluídos.`))) return
     try {
+      // Arquivos anexados: se não der para apagar, o cliente sai mesmo assim
+      await removeCustomerDocumentFiles(customer.id).catch(() => {})
       await deleteCustomer(customer.id)
       setCustomers((prev) => prev.filter((c) => c.id !== customer.id))
       if (editingId === customer.id) cancelEdit()
@@ -192,7 +239,7 @@ export default function AdminCustomers() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nome, CPF, telefone ou e-mail…"
+              placeholder="Buscar por nome, CPF, telefone, e-mail, carro ou placa…"
             />
           </label>
         </div>
@@ -229,13 +276,16 @@ export default function AdminCustomers() {
                         ) : (
                           <div className="expense-attachments-list">
                             {purchases.map((car) => (
-                              <PurchaseLink key={car.id} car={car} isAdmin={isStaff} />
+                              <PurchaseLink key={car.id} car={car} isAdmin={canEditStock} />
                             ))}
                           </div>
                         )}
                       </td>
                       <td>
                         <div className="admin-action-group">
+                          <button type="button" className="admin-action-btn" onClick={() => openFile(c)}>
+                            <FolderOpen size={15} /> Ficha e contratos
+                          </button>
                           <button type="button" className="admin-action-btn" onClick={() => startEdit(c)}>
                             <Pencil size={15} /> Editar
                           </button>
@@ -270,12 +320,15 @@ export default function AdminCustomers() {
                   {purchases.length > 0 && (
                     <div className="expense-attachments-list">
                       {purchases.map((car) => (
-                        <PurchaseLink key={car.id} car={car} isAdmin={isStaff} />
+                        <PurchaseLink key={car.id} car={car} isAdmin={canEditStock} />
                       ))}
                     </div>
                   )}
 
                   <div className="admin-card-actions">
+                    <button type="button" onClick={() => openFile(c)}>
+                      <FolderOpen size={14} /> Ficha e contratos
+                    </button>
                     <button type="button" onClick={() => startEdit(c)}>
                       <Pencil size={14} /> Editar
                     </button>
@@ -290,6 +343,19 @@ export default function AdminCustomers() {
             })}
           </div>
         </>
+      )}
+      {fileCustomer && (
+        <CustomerFileDialog
+          customer={fileCustomer}
+          purchases={carsByCustomer[fileCustomer.id] || []}
+          salesByCar={salesByCar}
+          sellersById={sellersById}
+          isAdmin={isAdmin}
+          isStaff={isStaff}
+          canSeeSaleValues={canSeeSaleValues}
+          canManageCustomerFinance={canManageCustomerFinance}
+          onClose={closeFile}
+        />
       )}
       {confirmDialog}
     </div>

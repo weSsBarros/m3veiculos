@@ -1,4 +1,5 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
+import { scopeSellers } from './viewScope.js'
 
 function fromRow(row) {
   return {
@@ -13,6 +14,10 @@ function fromRow(row) {
     active: row.active,
     // Gerente: 'values' (vê valores das vendas) ou 'counts' (só quantidades)
     financeAccess: row.finance_access || 'counts',
+    // Comissão de financiamento externo: 'none', 'percent_financed',
+    // 'percent_return' ou 'fixed'
+    extCommissionType: row.ext_commission_type || 'none',
+    extCommissionValue: Number(row.ext_commission_value) || 0,
     // Excluído da equipe: some da lista, mas o cadastro fica para as vendas
     // antigas e o registro de atividades (formerUserId = login que ele usava)
     deletedAt: row.deleted_at || null,
@@ -33,7 +38,7 @@ export async function fetchSellers() {
     .eq('company_id', COMPANY_ID)
     .order('name', { ascending: true })
   if (error) throw error
-  return data.map(fromRow)
+  return scopeSellers(data.map(fromRow))
 }
 
 export async function fetchMySeller(userId) {
@@ -54,6 +59,9 @@ export async function updateSeller(id, seller) {
       commission_value: seller.commissionValue,
       active: seller.active,
       finance_access: seller.financeAccess === 'values' ? 'values' : 'counts',
+      ...(seller.extCommissionType !== undefined
+        ? { ext_commission_type: seller.extCommissionType || 'none', ext_commission_value: seller.extCommissionValue || 0 }
+        : {}),
     })
     .eq('id', id)
     .eq('company_id', COMPANY_ID)
@@ -94,10 +102,18 @@ export async function createSeller(seller) {
     commissionValue: seller.commissionValue,
   })
   const created = fromRow(data.seller)
-  // O que o gerente vê das vendas é gravado logo em seguida (a Edge Function
-  // cria com o padrão mais restrito, "só quantidades").
-  if (created.role === 'manager' && seller.financeAccess === 'values') {
-    return updateSeller(created.id, { ...created, financeAccess: 'values' })
+  // O que o gerente vê das vendas e a comissão de financiamento externo são
+  // gravados logo em seguida (a Edge Function cria com o padrão mais restrito:
+  // "só quantidades" e sem comissão de financiamento externo).
+  const financeAccess = created.role === 'manager' && seller.financeAccess === 'values' ? 'values' : created.financeAccess
+  const hasExtCommission = seller.extCommissionType && seller.extCommissionType !== 'none'
+  if (financeAccess !== created.financeAccess || hasExtCommission) {
+    return updateSeller(created.id, {
+      ...created,
+      financeAccess,
+      extCommissionType: seller.extCommissionType || 'none',
+      extCommissionValue: seller.extCommissionValue || 0,
+    })
   }
   return created
 }

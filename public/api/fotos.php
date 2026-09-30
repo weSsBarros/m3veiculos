@@ -3,9 +3,9 @@
 // Supabase Storage. O painel comprime a foto no navegador e envia a foto e a
 // miniatura para cá, com o token do login no cabeçalho X-Auth-Token.
 //
-// Só grava ou apaga se o Supabase confirmar que o login é de admin ou gerente
+// Só grava ou apaga se o Supabase confirmar que o login é da equipe ativa
 // DESTA loja — a mesma regra que protegia as fotos no Storage
-// (current_company_id() = loja e is_company_staff()). Quem confere é o próprio
+// (current_company_id() = loja e can_edit_stock(): admin, gerente ou vendedor ativo). Quem confere é o próprio
 // Supabase: aqui fica só a chave pública, gerada no build em
 // api/fotos-config.php (ver vite.config.js).
 //
@@ -88,7 +88,7 @@ $token = isset($_SERVER['HTTP_X_AUTH_TOKEN']) ? $_SERVER['HTTP_X_AUTH_TOKEN'] : 
 if (strlen($token) > 4096 || !preg_match('/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/', $token)) {
     fail(401, 'Sua sessão expirou. Entre de novo no painel.');
 }
-if (rpc($config, $token, 'current_company_id') !== $config['company_id'] || rpc($config, $token, 'is_company_staff') !== true) {
+if (rpc($config, $token, 'current_company_id') !== $config['company_id'] || rpc($config, $token, 'can_edit_stock') !== true) {
     fail(403, 'Este login não pode alterar as fotos desta loja.');
 }
 

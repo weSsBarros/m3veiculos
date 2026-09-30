@@ -1,4 +1,5 @@
 import { supabase, publicSupabase, COMPANY_ID } from './supabaseClient.js'
+import { scopeCars, assertCanWrite } from './viewScope.js'
 import { slugify } from '../utils/carFormat.js'
 import { compressCarPhoto, hasThumb, thumbUrl } from '../utils/carPhotos.js'
 import { friendlyUploadError } from './storageErrors.js'
@@ -44,19 +45,28 @@ function fromRow(row) {
     documents: row.documents || [],
     customerId: row.customer_id || null,
     stockAlertDays: row.stock_alert_days ?? null,
+    // Controle interno (não vão para o site): observações, itens que vieram
+    // com o carro e vistoria de entrada
+    internalNotes: row.internal_notes || '',
+    intakeItems: Array.isArray(row.intake_items) ? row.intake_items : [],
+    inspection: Array.isArray(row.inspection) ? row.inspection : [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
-// O admin lê e grava a tabela "cars" direto. O gerente usa a view
+// O admin lê e grava a tabela "cars" direto. Gerente e vendedor usam a view
 // "staff_cars", que não tem o custo de aquisição (purchase_price e
-// purchase_date) — ele informa o custo só ao cadastrar, via setCarPurchase.
+// purchase_date) — o gerente informa o custo só ao cadastrar, via
+// setCarPurchase; o vendedor não informa custo.
 // O AuthContext define o papel assim que o login é carregado.
 let staffTable = 'cars'
 
+let canSetPurchase = true
+
 export function setCarsAccess(role) {
   staffTable = role === 'admin' ? 'cars' : 'staff_cars'
+  canSetPurchase = role === 'admin' || role === 'manager'
 }
 
 function toRow(car) {
@@ -92,6 +102,9 @@ function toRow(car) {
     documents: car.documents || [],
     customer_id: car.customerId || null,
     stock_alert_days: car.stockAlertDays || null,
+    internal_notes: car.internalNotes || '',
+    intake_items: car.intakeItems || [],
+    inspection: car.inspection || [],
   }
   if (staffTable !== 'cars') {
     delete row.purchase_price
@@ -170,26 +183,20 @@ export async function fetchAllCarsAdmin() {
     .eq('company_id', COMPANY_ID)
     .order('created_at', { ascending: false })
   if (error) throw error
-  return data.map(fromRow)
+  return scopeCars(data.map(fromRow))
 }
 
-// Estoque do vendedor: view "seller_cars" (sem custo de compra nem documentos).
+// Estoque visto pelo vendedor: o mesmo da equipe (view "staff_cars", sem
+// custo de compra). Mantido com este nome porque várias telas já usam.
 export async function fetchSellerCars() {
-  requireSupabase()
-  const { data, error } = await supabase
-    .from('seller_cars')
-    .select('*')
-    .eq('company_id', COMPANY_ID)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data.map(fromRow)
+  return fetchAllCarsAdmin()
 }
 
 export async function fetchCarById(id) {
   requireSupabase()
   const { data, error } = await supabase.from(staffTable).select('*').eq('id', id).eq('company_id', COMPANY_ID).maybeSingle()
   if (error) throw error
-  return data ? fromRow(data) : null
+  return data ? scopeCars([fromRow(data)])[0] : null
 }
 
 async function uniqueSlug(base, ignoreId) {
@@ -216,8 +223,9 @@ export async function createCar(car) {
     .select()
     .single()
   if (error) throw error
-  // Gerente: o custo de aquisição vai pela função do banco (a view não tem essas colunas)
-  if (staffTable !== 'cars' && (car.purchasePrice || car.purchaseDate)) {
+  // Gerente: o custo de aquisição vai pela função do banco (a view não tem
+  // essas colunas). O vendedor não informa custo (a tela nem mostra o campo).
+  if (staffTable !== 'cars' && canSetPurchase && (car.purchasePrice || car.purchaseDate)) {
     await setCarPurchase(data.id, car.purchasePrice, car.purchaseDate)
   }
   return fromRow(data)
@@ -282,6 +290,29 @@ export async function setCarPurchase(id, purchasePrice, purchaseDate) {
   if (error) throw error
 }
 
+// Carro recebido na troca: entra no estoque "em manutenção" e oculto do site,
+// com custo de compra = valor da troca. Devolve o id do carro novo.
+export async function registerTradeIn(tradeIn) {
+  requireSupabase()
+  const { data, error } = await supabase.rpc('register_trade_in', {
+    p: {
+      brand: tradeIn.brand,
+      model: tradeIn.model,
+      version: tradeIn.version || '',
+      year: tradeIn.year,
+      model_year: tradeIn.modelYear || '',
+      km: tradeIn.km ?? '',
+      color: tradeIn.color || '',
+      plate: tradeIn.plate || '',
+      value: tradeIn.value ?? '',
+      date: tradeIn.date || '',
+      notes: tradeIn.notes || '',
+    },
+  })
+  if (error) throw error
+  return data
+}
+
 export async function deleteCar(id) {
   requireSupabase()
   const { error } = await supabase.from('cars').delete().eq('id', id).eq('company_id', COMPANY_ID)
@@ -300,6 +331,7 @@ const PHOTO_API = '/api/fotos.php'
 const SITE_PHOTO = /^\/uploads\/carros\//
 
 async function callPhotoApi(form) {
+  assertCanWrite()
   if (import.meta.env.DEV) {
     throw new Error('O envio de fotos só funciona no site publicado (o api/fotos.php roda na Hostinger).')
   }

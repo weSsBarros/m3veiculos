@@ -32,13 +32,24 @@ Deno.serve(async (req) => {
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } })
 
+  // A loja é a mesma que o banco usa nas regras (current_company_id), e o
+  // papel precisa ser admin NESSA loja — ser admin em outra loja não vale aqui.
+  const { data: companyId } = await userClient.rpc('current_company_id')
+  if (!companyId) return json({ error: 'Apenas administradores podem gerenciar vendedores' }, 403)
   const { data: link } = await admin
     .from('user_company')
-    .select('company_id, role')
+    .select('role')
     .eq('user_id', userData.user.id)
+    .eq('company_id', companyId)
     .maybeSingle()
   if (!link || link.role !== 'admin') return json({ error: 'Apenas administradores podem gerenciar vendedores' }, 403)
-  const companyId = link.company_id
+
+  // O login só pertence a esta loja (sem acesso de admin aqui nem vínculo com
+  // outra loja)? Só então o admin daqui pode redefinir a senha ou apagá-lo.
+  async function loginOnlyHere(userId: string) {
+    const { data: links } = await admin.from('user_company').select('company_id, role').eq('user_id', userId)
+    return (links ?? []).every((l) => l.company_id === companyId && l.role !== 'admin')
+  }
 
   let body: Record<string, unknown>
   try {
@@ -127,6 +138,11 @@ Deno.serve(async (req) => {
       .eq('company_id', companyId)
       .maybeSingle()
     if (!seller?.user_id) return json({ error: 'Vendedor não encontrado' }, 404)
+    // Um login que também acessa outra loja não pode ter a senha trocada por
+    // aqui (senão o admin desta loja entraria com esse login na outra)
+    if (!(await loginOnlyHere(seller.user_id))) {
+      return json({ error: 'Esse login também tem acesso a outra loja. A senha só pode ser trocada pela própria pessoa.' }, 403)
+    }
 
     const { error } = await admin.auth.admin.updateUserById(seller.user_id, { password })
     if (error) return json({ error: 'Não foi possível redefinir a senha' }, 500)
@@ -172,8 +188,7 @@ Deno.serve(async (req) => {
       // Só apaga o login se ele for apenas vendedor/gerente desta loja. Se a
       // mesma conta tiver outro acesso (admin aqui ou em outra loja), só tira o
       // vínculo com a equipe desta loja.
-      const { data: links } = await admin.from('user_company').select('company_id, role').eq('user_id', seller.user_id)
-      const onlyHere = (links ?? []).every((l) => l.company_id === companyId && l.role !== 'admin')
+      const onlyHere = await loginOnlyHere(seller.user_id)
       const { error: accessError } = onlyHere
         ? await admin.auth.admin.deleteUser(seller.user_id)
         : await admin.from('user_company').delete().eq('user_id', seller.user_id).eq('company_id', companyId).neq('role', 'admin')

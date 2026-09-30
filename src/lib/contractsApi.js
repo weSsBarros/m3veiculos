@@ -1,9 +1,11 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
+import { scopeByCreator } from './viewScope.js'
 
 function fromRow(row) {
   return {
     id: row.id,
     carId: row.car_id,
+    customerId: row.customer_id || null,
     company: {
       name: row.company_name,
       document: row.company_document,
@@ -27,6 +29,7 @@ function fromRow(row) {
     saleCity: row.sale_city || '',
     notes: row.notes || '',
     documentType: row.document_type || 'contrato',
+    createdBy: row.created_by || null,
     createdAt: row.created_at,
   }
 }
@@ -34,6 +37,7 @@ function fromRow(row) {
 function toRow(contract) {
   return {
     car_id: contract.carId || null,
+    customer_id: contract.customerId || null,
     company_id: COMPANY_ID,
     company_name: contract.company.name,
     company_document: contract.company.document,
@@ -73,7 +77,20 @@ export async function fetchContractsAdmin() {
     .eq('company_id', COMPANY_ID)
     .order('created_at', { ascending: false })
   if (error) throw error
-  return data.map(fromRow)
+  return scopeByCreator(data.map(fromRow))
+}
+
+// Contratos gerados para um cliente (o vendedor recebe só os que ele gerou)
+export async function fetchContractsForCustomer(customerId) {
+  requireSupabase()
+  const { data, error } = await supabase
+    .from('contracts')
+    .select('*')
+    .eq('company_id', COMPANY_ID)
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return scopeByCreator(data.map(fromRow))
 }
 
 export async function createContract(contract) {

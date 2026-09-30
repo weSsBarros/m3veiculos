@@ -2039,3 +2039,946 @@ a.admin-form-note {
   font-weight: 700;
   color: var(--color-danger);
 }
+
+/* Placa do carro (estoque, vendas, clientes) */
+span.car-plate {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 1px 7px;
+  border: 1.5px solid var(--color-text);
+  border-top-width: 4px;
+  border-top-color: #1f4fbf;
+  border-radius: 4px;
+  background: #fff;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--color-text);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.admin-table td > span.car-plate {
+  margin-top: 4px;
+}
+
+/* Checklist de entrega (janela de venda e detalhes da venda) */
+.sale-dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sale-checklist {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: #fff;
+}
+
+.sale-checklist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-bg-alt);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.sale-checklist-head .is-pending {
+  color: #b87408;
+}
+
+.sale-checklist-head .is-done {
+  color: var(--color-success);
+}
+
+.sale-checklist-head button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.sale-checklist ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sale-checklist li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.sale-checklist-item {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+@media (max-width: 400px) {
+  .sale-checklist li {
+    flex-wrap: wrap;
+  }
+}
+
+.sale-checklist li.is-pending .sale-checklist-item {
+  color: var(--color-text-muted);
+}
+
+.sale-checklist-options {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.sale-checklist-options button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.sale-checklist-options button.is-ok {
+  background: rgba(28, 155, 86, 0.12);
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.sale-checklist-options button.is-missing {
+  background: var(--color-bg-alt);
+  border-color: var(--color-text-muted);
+  color: var(--color-text);
+}
+
+/* Etiquetas de situação (transferência, financiamento, documentos) */
+.admin-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  font-size: 11.5px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  background: var(--color-bg-alt);
+  color: var(--color-text-muted);
+}
+
+.admin-pill.is-success {
+  background: rgba(28, 155, 86, 0.12);
+  color: var(--color-success);
+}
+
+.admin-pill.is-warning {
+  background: rgba(245, 166, 35, 0.16);
+  color: #a86a06;
+}
+
+.admin-pill.is-danger {
+  background: rgba(224, 57, 44, 0.12);
+  color: var(--color-danger);
+}
+
+.admin-pill.is-info {
+  background: var(--color-primary-light);
+  color: var(--color-primary-dark);
+}
+
+/* Janelas maiores (detalhes da venda, ficha do cliente, financiamento) */
+.confirm-dialog.admin-dialog-wide {
+  max-width: 820px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.confirm-dialog.admin-dialog-wide h2 {
+  margin-bottom: 4px;
+}
+
+.confirm-dialog.admin-dialog-wide p {
+  margin-bottom: 0;
+}
+
+.admin-dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.admin-dialog-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-dialog-section h3 {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.admin-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px 16px;
+}
+
+.admin-detail-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-detail-grid span {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.admin-detail-grid strong {
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  .confirm-dialog.admin-dialog-wide {
+    padding: 20px 16px;
+  }
+}
+
+/* Abas (Financeiro da loja / dos clientes) */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.admin-tabs a {
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.admin-tabs a.is-active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* Número de avisos no menu lateral */
+.admin-nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  margin-left: auto;
+  border-radius: var(--radius-pill);
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.admin-shell.is-collapsed:not(.is-mobile-open) .admin-nav-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+/* Avisos do pós-venda no topo do Dashboard */
+.admin-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.admin-alert-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(245, 166, 35, 0.45);
+  background: rgba(245, 166, 35, 0.1);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.admin-alert-item.is-danger {
+  border-color: rgba(224, 57, 44, 0.35);
+  background: rgba(224, 57, 44, 0.07);
+}
+
+.admin-alert-item svg {
+  flex-shrink: 0;
+  color: #b87408;
+}
+
+.admin-alert-item.is-danger svg {
+  color: var(--color-danger);
+}
+
+.admin-alert-item span {
+  flex: 1;
+}
+
+.admin-alert-item strong {
+  white-space: nowrap;
+  color: var(--color-primary);
+}
+
+/* Filtros em "chips" (Vendas, Financeiro dos clientes) */
+.admin-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.admin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.admin-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.admin-chip.is-active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.admin-chip.is-danger:not(.is-active) {
+  color: var(--color-danger);
+}
+
+/* Contratos e documentos do cliente */
+.customer-documents {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.customer-documents > .doc-list,
+.customer-documents > .doc-upload {
+  align-self: stretch;
+}
+.doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.doc-list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.doc-list-main strong {
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.doc-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.doc-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-alt);
+}
+
+.doc-upload .admin-form-grid {
+  gap: 12px;
+}
+
+.doc-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.doc-upload label.doc-upload-file {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* Parcelas do financiamento */
+.installment-row-overdue td {
+  background: rgba(224, 57, 44, 0.04);
+}
+
+.installment-charges {
+  display: block;
+  font-size: 11.5px;
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.financing-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  justify-content: space-between;
+  background: var(--color-primary-light);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13.5px;
+}
+
+.financing-preview strong {
+  color: var(--color-primary-dark);
+}
+
+.admin-card.installment-card-overdue {
+  border-color: rgba(224, 57, 44, 0.35);
+  background: rgba(224, 57, 44, 0.03);
+}
+
+/* Seletor de status do carro: etiqueta colorida que abre um menu ----------- */
+.status-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.stock-card .status-menu,
+.stock-card .status-pill {
+  width: 100%;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  line-height: 1.1;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.status-pill:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(10, 14, 23, 0.12);
+  transform: translateY(-1px);
+}
+
+.status-pill:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.status-pill:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.status-pill[title] {
+  cursor: default;
+}
+
+.status-pill-caret {
+  margin-left: auto;
+}
+
+.status-pill.status-disponivel,
+.status-menu-option.status-disponivel svg {
+  color: #13743f;
+}
+.status-pill.status-disponivel {
+  background: #e3f5ea;
+  border-color: #8fd3ad;
+}
+
+.status-pill.status-manutencao,
+.status-menu-option.status-manutencao svg {
+  color: #8a5500;
+}
+.status-pill.status-manutencao {
+  background: #fdf0d5;
+  border-color: #f0c46f;
+}
+
+.status-pill.status-reservado,
+.status-menu-option.status-reservado svg {
+  color: #5b36c9;
+}
+.status-pill.status-reservado {
+  background: #eee8fd;
+  border-color: #b9a4f3;
+}
+
+.status-pill.status-vendido,
+.status-menu-option.status-vendido svg {
+  color: #334155;
+}
+.status-pill.status-vendido {
+  background: #e7ecf2;
+  border-color: #b3c0cf;
+}
+
+.status-menu-list {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(10, 14, 23, 0.18);
+}
+
+.status-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.status-menu-option:hover,
+.status-menu-option:focus-visible {
+  background: var(--color-bg-alt);
+}
+
+.status-menu-option.is-current {
+  font-weight: 800;
+}
+
+.status-menu-check {
+  margin-left: auto;
+  color: var(--color-primary);
+}
+
+/* "Ver como" ------------------------------------------------------------ */
+.viewas-bar {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.viewas-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.viewas-toggle:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-muted);
+}
+
+.viewas-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+}
+
+.viewas-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(300px, calc(100vw - 32px));
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(10, 14, 23, 0.18);
+}
+
+.viewas-menu button {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.viewas-menu button:hover {
+  background: var(--color-bg-alt);
+}
+
+.viewas-menu-note {
+  margin: 2px 4px 8px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.viewas-menu-group {
+  display: block;
+  margin: 8px 6px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.viewas-banner {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #fff4d6;
+  border: 1px solid #f0c46f;
+  color: #6b4500;
+  font-size: 14px;
+}
+
+.viewas-banner span {
+  flex: 1 1 260px;
+}
+
+/* Venda: pagamento e carro na troca ---------------------------------------- */
+.payment-fields,
+.trade-in-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.trade-in-fields .admin-form-grid {
+  margin-top: 4px;
+}
+
+/* Checklists do cadastro do carro ------------------------------------------ */
+.car-checklist-details {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-top: 10px;
+  background: #fff;
+}
+
+.car-checklist-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.car-checklist-details summary span {
+  margin-left: 6px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.car-checklist-details[open] summary {
+  margin-bottom: 10px;
+}
+
+.inspection-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.inspection-list li {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.inspection-list li input {
+  grid-column: 1 / -1;
+}
+
+.inspection-options {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.inspection-options button {
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inspection-options button.is-ok[aria-pressed='true'] {
+  background: #e3f5ea;
+  border-color: #8fd3ad;
+  color: #13743f;
+}
+
+.inspection-options button.is-atencao[aria-pressed='true'] {
+  background: #fdf0d5;
+  border-color: #f0c46f;
+  color: #8a5500;
+}
+
+.inspection-options button.is-ruim[aria-pressed='true'] {
+  background: #fde4e2;
+  border-color: #f2a39c;
+  color: #a1261b;
+}
+
+.internal-notes-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* Pílulas de situação (financiamento externo, reservas) -------------------- */
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.state-pill.tone-info {
+  background: #e4efff;
+  color: #1d4ed8;
+}
+
+.state-pill.tone-warn {
+  background: #fdf0d5;
+  color: #8a5500;
+}
+
+.state-pill.tone-ok {
+  background: #e3f5ea;
+  color: #13743f;
+}
+
+.state-pill.tone-muted {
+  background: #eef1f5;
+  color: #475569;
+}
+
+.state-pill.tone-danger {
+  background: #fde4e2;
+  color: #a1261b;
+}
+
+/* Relatórios -------------------------------------------------------------- */
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.report-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+}
+
+.report-card h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.report-card p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  flex: 1;
+}
+
+.report-card-period {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.report-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.report-card-actions .btn {
+  flex: 1;
+  justify-content: center;
+}
+
+/* Comissões em aberto ------------------------------------------------------ */
+.commission-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 45vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.commission-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.commission-list .admin-checkbox {
+  margin: 0;
+}
+
+.admin-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-link-btn:hover {
+  text-decoration: underline;
+}
+
+.admin-pendencies {
+  margin-bottom: 18px;
+}

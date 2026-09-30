@@ -100,7 +100,9 @@ export default function CarDetail() {
     )
   }
 
-  const isSold = car.status === 'vendido'
+  // Reservado conta como indisponível (sem WhatsApp nem simulação), com o selo "Reservado"
+  const isSold = car.status === 'vendido' || car.status === 'reservado'
+  const soldLabel = car.status === 'reservado' ? 'Reservado' : 'Vendido'
   const hasPrice = car.price != null
   const off = !isSold && hasPrice && discountPercent(car.price, car.originalPrice)
 
@@ -131,7 +133,7 @@ export default function CarDetail() {
         <div className="car-detail-grid">
           <div className="car-gallery">
             <div className="car-gallery-main">
-              {isSold && <span className="pill pill-dark car-gallery-badge">Vendido</span>}
+              {isSold && <span className="pill pill-dark car-gallery-badge">{soldLabel}</span>}
               {off && <span className="pill pill-danger car-gallery-badge">{off}% OFF</span>}
               {car.images[activeImage] && (
                 <img src={car.images[activeImage]} alt={`${car.brand} ${car.model}`} />
@@ -155,7 +157,7 @@ export default function CarDetail() {
 
           <div className="car-info">
             <span className={`pill ${isSold ? 'pill-dark' : 'pill-outline'} car-info-stock`}>
-              {isSold ? 'Vendido' : car.badge}
+              {isSold ? soldLabel : car.badge}
             </span>
             <h1>{car.brand} {car.model} <span>{car.version}</span></h1>
             <p className="car-info-quick">

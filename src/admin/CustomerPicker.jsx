@@ -6,7 +6,7 @@ import { maskCPF, maskPhoneBR } from '../utils/masks.js'
 // Cliente comprador (opcional) na hora da venda: escolhe da lista ou cadastra
 // na hora (nome, CPF e telefone). Fica dentro de outros <form>, então o
 // cadastro rápido usa um <div> com botões, não um form próprio.
-export default function CustomerPicker({ customers, value, onChange, onCreated, disabled }) {
+export default function CustomerPicker({ customers, value, onChange, onCreated, disabled, label = 'Cliente comprador (opcional)' }) {
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState({ name: '', document: '', phone: '' })
   const [saving, setSaving] = useState(false)
@@ -52,7 +52,7 @@ export default function CustomerPicker({ customers, value, onChange, onCreated, 
   return (
     <div className="customer-picker">
       <label>
-        Cliente comprador (opcional)
+        {label}
         <select value={value || ''} onChange={(e) => onChange(e.target.value)} disabled={disabled || creating}>
           <option value="">— Nenhum —</option>
           {customers.map((c) => (

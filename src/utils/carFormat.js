@@ -21,6 +21,7 @@ export const CONDITIONS = ['Único dono', 'Segundo dono', 'Terceiro dono ou mais
 export const CAR_STATUSES = [
   { value: 'disponivel', label: 'Disponível' },
   { value: 'manutencao', label: 'Em manutenção' },
+  { value: 'reservado', label: 'Reservado' },
   { value: 'vendido', label: 'Vendido' },
 ]
 
@@ -68,6 +69,20 @@ export function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// Soma dias a uma data ISO (yyyy-mm-dd) sem passar por UTC
+export function addDaysISO(isoDate, days) {
+  const [y, m, d] = isoDate.split('-').map(Number)
+  const date = new Date(y, m - 1, d + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// Dias de uma data ISO até outra (negativo se "to" for antes de "from")
+export function daysBetweenISO(fromISO, toISO) {
+  const [y1, m1, d1] = fromISO.split('-').map(Number)
+  const [y2, m2, d2] = toISO.split('-').map(Number)
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000)
+}
+
 // Aceita números digitados no padrão brasileiro: "." separa milhar, ","
 // separa decimal (ex: "119.900" ou "95.000,00"). Nenhum valor deste sistema
 // (preço, km, gastos) tem centavos, então a parte depois da vírgula é
@@ -79,6 +94,20 @@ export function parseIntBR(value) {
   const integerPart = str.split(',')[0].replace(/\./g, '')
   const digits = integerPart.replace(/\D/g, '')
   return digits ? parseInt(digits, 10) : null
+}
+
+// Placa só com letras e números, em maiúsculas: "abc-1d23" e "ABC1D23" batem
+export function normalizePlate(plate) {
+  return String(plate || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+// Busca que também encontra pela placa, digitada com ou sem hífen
+export function matchesCarSearch(car, query) {
+  const text = query.trim().toLowerCase()
+  if (!text) return true
+  if (`${car.brand} ${car.model} ${car.version}`.toLowerCase().includes(text)) return true
+  const plateQuery = normalizePlate(text)
+  return plateQuery.length >= 2 && normalizePlate(car.plate).includes(plateQuery)
 }
 
 export function formatDateBR(isoDate) {

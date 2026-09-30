@@ -1,4 +1,5 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
+import { scopeExpenses } from './viewScope.js'
 import { friendlyUploadError } from './storageErrors.js'
 
 function fromRow(row) {
@@ -46,7 +47,7 @@ export async function fetchExpensesByCar(carId) {
     .eq('company_id', COMPANY_ID)
     .order('expense_date', { ascending: false })
   if (error) throw error
-  return data.map(fromRow)
+  return scopeExpenses(data.map(fromRow))
 }
 
 export async function fetchAllExpensesAdmin() {
@@ -57,7 +58,7 @@ export async function fetchAllExpensesAdmin() {
     .eq('company_id', COMPANY_ID)
     .order('expense_date', { ascending: false })
   if (error) throw error
-  return data.map(fromRow)
+  return scopeExpenses(data.map(fromRow))
 }
 
 export async function createExpense(expense) {

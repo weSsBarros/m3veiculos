@@ -3,6 +3,7 @@ import { supabase, isSupabaseConfigured, COMPANY_ID } from '../lib/supabaseClien
 import { fetchMySeller } from '../lib/sellersApi.js'
 import { setCarsAccess } from '../lib/carsApi.js'
 import { logLogin } from '../lib/activityApi.js'
+import { setViewScope } from '../lib/viewScope.js'
 
 const AuthContext = createContext(null)
 
@@ -26,8 +27,10 @@ async function loadRole(userId) {
     .eq('user_id', userId)
     .eq('company_id', COMPANY_ID)
     .maybeSingle()
-  if (error || !data) return 'admin'
-  return data.role || 'admin'
+  // Sem conseguir ler o papel, o painel abre com o menor acesso (o banco
+  // bloqueia de qualquer jeito, mas a tela não deve oferecer o que não pode)
+  if (error || !data?.role) return 'seller'
+  return data.role
 }
 
 export function AuthProvider({ children }) {
@@ -35,6 +38,8 @@ export function AuthProvider({ children }) {
   const [role, setRole] = useState(null)
   const [seller, setSeller] = useState(null)
   const [loading, setLoading] = useState(isSupabaseConfigured)
+  // "Ver como" (só admin): { name, role, sellerId, userId, financeAccess, seller }
+  const [viewAs, setViewAs] = useState(null)
 
   useEffect(() => {
     if (!isSupabaseConfigured) return
@@ -46,6 +51,8 @@ export function AuthProvider({ children }) {
           setUser(null)
           setRole(null)
           setSeller(null)
+          setViewAs(null)
+          setViewScope(null)
           setLoading(false)
         }
         return
@@ -99,22 +106,77 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    setViewAs(null)
+    setViewScope(null)
     await supabase.auth.signOut()
   }
 
-  const isAdmin = role === 'admin'
-  const isManager = role === 'manager'
+  // "Ver como": o admin vê o painel exatamente como uma pessoa da equipe (ou
+  // como vendedor/gerente genérico). person: registro da Equipe ou
+  // { role, name } para a visão genérica. Só visualização: as gravações ficam
+  // bloqueadas enquanto simula (lib/supabaseClient.js).
+  function startViewAs(person) {
+    if (role !== 'admin' || !person) return
+    const next = {
+      name: person.name,
+      role: person.role === 'manager' ? 'manager' : 'seller',
+      sellerId: person.id || null,
+      userId: person.userId || person.formerUserId || null,
+      financeAccess: person.financeAccess === 'values' ? 'values' : 'counts',
+      seller: person.id ? person : null,
+    }
+    setViewScope(next)
+    setViewAs(next)
+  }
+
+  function stopViewAs() {
+    setViewScope(null)
+    setViewAs(null)
+  }
+
+  // Papel efetivo nas telas: o simulado, se o admin estiver "vendo como"
+  const simulating = role === 'admin' && viewAs !== null
+  const effectiveRole = simulating ? viewAs.role : role
+  const effectiveSeller = simulating ? viewAs.seller || { id: null, financeAccess: viewAs.financeAccess } : seller
+
+  const isAdmin = effectiveRole === 'admin'
+  const isManager = effectiveRole === 'manager'
+  const isSeller = effectiveRole === 'seller'
   // "Equipe de gestão": admin ou gerente (o gerente só não exclui nada)
   const isStaff = isAdmin || isManager
+  // Estoque: todos da equipe cadastram e editam carros, fotos, status, gastos
+  // e documentos (sem custo de compra e sem excluir, fora o admin)
+  const canEditStock = Boolean(effectiveRole)
   // Custo de aquisição, gastos, margem e lucro: só o admin (o banco também bloqueia)
   const canSeeCosts = isAdmin
   // Valores das vendas (faturamento, comissões): admin, ou gerente que o admin
   // liberou para ver valores. O gerente em "só quantidades" vê só contagens.
-  const canSeeSaleValues = isAdmin || (isManager && seller?.financeAccess === 'values')
+  const canSeeSaleValues = isAdmin || (isManager && effectiveSeller?.financeAccess === 'values')
+  // Financeiro dos clientes (financiamento próprio): mesma regra dos valores das vendas
+  const canManageCustomerFinance = canSeeSaleValues
 
   return (
     <AuthContext.Provider
-      value={{ user, role, isAdmin, isManager, isStaff, canSeeCosts, canSeeSaleValues, seller, loading, signIn, signOut }}
+      value={{
+        user,
+        role: effectiveRole,
+        realRole: role,
+        isAdmin,
+        isManager,
+        isSeller,
+        isStaff,
+        canEditStock,
+        canSeeCosts,
+        canSeeSaleValues,
+        canManageCustomerFinance,
+        seller: effectiveSeller,
+        viewAs: simulating ? viewAs : null,
+        startViewAs,
+        stopViewAs,
+        loading,
+        signIn,
+        signOut,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,4 +1,5 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
+import { scopeActivity } from './viewScope.js'
 
 function fromRow(row) {
   return {
@@ -28,7 +29,7 @@ export async function fetchActivity({ userId, start, end, limit = 300 } = {}) {
   if (end) query = query.lte('created_at', new Date(`${end}T23:59:59.999`).toISOString())
   const { data, error } = await query
   if (error) throw error
-  return data.map(fromRow)
+  return scopeActivity(data.map(fromRow))
 }
 
 export async function logLogin() {
@@ -45,6 +46,11 @@ const ENTITY_LABELS = {
   contract_templates: 'Modelo de contrato',
   sellers: 'Equipe',
   sales: 'Venda',
+  customer_documents: 'Documento do cliente',
+  customer_financings: 'Financiamento',
+  car_reservations: 'Reserva',
+  external_financings: 'Financiamento externo',
+  financing_installments: 'Parcela',
   auth: 'Acesso',
 }
 

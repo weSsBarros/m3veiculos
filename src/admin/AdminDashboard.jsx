@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCcw } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { RefreshCcw, AlertTriangle, Clock, Wallet, ImageOff, FileWarning, ClipboardList, Landmark, HandCoins, Bookmark, BellRing, CircleDollarSign } from 'lucide-react'
+import { fetchOverdueInstallments, fetchUpcomingInstallments } from '../lib/financingApi.js'
+import { fetchContractsAdmin } from '../lib/contractsApi.js'
+import { fetchCustomerDocuments } from '../lib/customerDocumentsApi.js'
+import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
+import { fetchReservations } from '../lib/reservationsApi.js'
+import { stockGaps, saleGaps, externalGaps, unpaidCommissions, reservationGaps, RECENT_SALES_DAYS } from '../utils/dashboardAlerts.js'
+import { transferAlert } from '../utils/transfer.js'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchAllSuppliers } from '../lib/suppliersApi.js'
@@ -22,7 +30,7 @@ const CATEGORY_COLORS = ['#0ea0db', '#1c9b56', '#f5a623', '#e0392c', '#7b61ff', 
 // valores das vendas (faturamento, comissões) só se o admin liberou — senão
 // o Dashboard dele mostra só quantidades.
 export default function AdminDashboard() {
-  const { canSeeCosts, canSeeSaleValues } = useAuth()
+  const { isAdmin, canSeeCosts, canSeeSaleValues, canManageCustomerFinance } = useAuth()
   const [cars, setCars] = useState([])
   const [expenses, setExpenses] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -36,6 +44,13 @@ export default function AdminDashboard() {
   const [dailyVisits, setDailyVisits] = useState([])
   const [visitTotals, setVisitTotals] = useState({ visits: 0, visitors: 0 })
   const [carViews, setCarViews] = useState({})
+  const [overdueInstallments, setOverdueInstallments] = useState([])
+  // Pendências: carregadas à parte (se falharem, o resto do Dashboard continua)
+  const [contracts, setContracts] = useState([])
+  const [customerDocs, setCustomerDocs] = useState([])
+  const [externals, setExternals] = useState([])
+  const [reservations, setReservations] = useState([])
+  const [upcomingInstallments, setUpcomingInstallments] = useState([])
 
   async function load() {
     setLoading(true)
@@ -55,6 +70,14 @@ export default function AdminDashboard() {
       setSellers(sellersData)
       // Visitas: se falhar, o resto do Dashboard continua funcionando
       fetchDailyVisits(14).then(setDailyVisits).catch(() => setDailyVisits([]))
+      if (canManageCustomerFinance) {
+        fetchOverdueInstallments().then(setOverdueInstallments).catch(() => setOverdueInstallments([]))
+        fetchUpcomingInstallments(7).then(setUpcomingInstallments).catch(() => setUpcomingInstallments([]))
+      }
+      fetchContractsAdmin().then(setContracts).catch(() => setContracts([]))
+      fetchCustomerDocuments().then(setCustomerDocs).catch(() => setCustomerDocs([]))
+      fetchExternalFinancings().then(setExternals).catch(() => setExternals([]))
+      fetchReservations().then(setReservations).catch(() => setReservations([]))
     } catch (err) {
       setError(err.message || 'Erro ao carregar o dashboard.')
     } finally {
@@ -218,6 +241,34 @@ export default function AdminDashboard() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 8)
 
+  // Pós-venda: transferências para acompanhar e parcelas de clientes em atraso
+  const overdueTransfers = sales.filter((s) => transferAlert(s) === 'atrasada').length
+  const dueSoonTransfers = sales.filter((s) => transferAlert(s) === 'vence_logo').length
+  const overdueInstallmentsTotal = overdueInstallments.reduce((sum, i) => sum + i.amount, 0)
+
+  const pendencies = (() => {
+    const stock = stockGaps(cars)
+    const salesGap = saleGaps({ sales, cars, contracts, docs: customerDocs })
+    const ext = externalGaps(externals)
+    const unpaid = unpaidCommissions(sales, externals)
+    const res = reservationGaps(reservations)
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
+    const items = []
+    if (res.expired) items.push({ key: 'res-exp', danger: true, icon: Bookmark, to: '/admin/vendas', cta: 'Resolver', text: `${plural(res.expired, 'reserva passou', 'reservas passaram')} do prazo — converta em venda ou cancele.` })
+    if (res.dueSoon) items.push({ key: 'res-soon', icon: Bookmark, to: '/admin/vendas', cta: 'Ver', text: `${plural(res.dueSoon, 'reserva vence', 'reservas vencem')} em até 2 dias.` })
+    if (upcomingInstallments.length) items.push({ key: 'inst-soon', icon: BellRing, to: '/admin/financeiro/clientes', cta: 'Lembrar', text: `${plural(upcomingInstallments.length, 'parcela de cliente vence', 'parcelas de clientes vencem')} nos próximos 7 dias.` })
+    if (ext.staleAnalysis) items.push({ key: 'ext-stale', icon: Landmark, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.staleAnalysis, 'financiamento externo está', 'financiamentos externos estão')} em análise há mais de 7 dias.` })
+    if (ext.approvedUnpaid) items.push({ key: 'ext-approved', icon: CircleDollarSign, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.approvedUnpaid, 'financiamento externo aprovado aguarda', 'financiamentos externos aprovados aguardam')} o pagamento do banco.` })
+    if (isAdmin && unpaid.count) items.push({ key: 'commissions', icon: HandCoins, to: '/admin/equipe', cta: 'Pagar', text: `Comissões a pagar: ${formatCurrencyCents(unpaid.amount)} (${plural(unpaid.count, 'venda ou financiamento', 'vendas ou financiamentos')}).` })
+    if (salesGap.noCustomer) items.push({ key: 'sale-customer', icon: ClipboardList, to: '/admin/vendas', cta: 'Completar', text: `${plural(salesGap.noCustomer, 'venda', 'vendas')} dos últimos ${RECENT_SALES_DAYS} dias sem cliente vinculado.` })
+    if (salesGap.noContract) items.push({ key: 'sale-contract', icon: FileWarning, to: '/admin/vendas', cta: 'Completar', text: `${plural(salesGap.noContract, 'venda', 'vendas')} dos últimos ${RECENT_SALES_DAYS} dias sem contrato ou documento anexado.` })
+    if (salesGap.checklistIncomplete) items.push({ key: 'sale-checklist', icon: ClipboardList, to: '/admin/vendas', cta: 'Conferir', text: `${plural(salesGap.checklistIncomplete, 'venda', 'vendas')} com checklist de entrega incompleto.` })
+    if (stock.noPhoto) items.push({ key: 'car-photo', icon: ImageOff, to: '/admin/estoque', cta: 'Completar', text: `${plural(stock.noPhoto, 'carro em estoque', 'carros em estoque')} sem foto.` })
+    if (stock.noPrice) items.push({ key: 'car-price', icon: CircleDollarSign, to: '/admin/estoque', cta: 'Ver', text: `${plural(stock.noPrice, 'carro em estoque', 'carros em estoque')} sem preço (aparece "Consulte o valor").` })
+    if (stock.noDocs) items.push({ key: 'car-docs', icon: FileWarning, to: '/admin/estoque', cta: 'Anexar', text: `${plural(stock.noDocs, 'carro em estoque', 'carros em estoque')} sem documento anexado (CRLV, laudo).` })
+    return items
+  })()
+
   if (loading) return <p className="admin-muted">Carregando…</p>
 
   return (
@@ -243,6 +294,55 @@ export default function AdminDashboard() {
       </div>
 
       {error && <p className="admin-error">{error}</p>}
+
+      {(overdueTransfers > 0 || dueSoonTransfers > 0 || overdueInstallments.length > 0) && (
+        <div className="admin-alert-list">
+          {overdueTransfers > 0 && (
+            <Link to="/admin/vendas?filtro=atrasadas" className="admin-alert-item is-danger">
+              <AlertTriangle size={18} />
+              <span>
+                {overdueTransfers} {overdueTransfers === 1 ? 'transferência de veículo passou' : 'transferências de veículo passaram'} do
+                prazo — o carro pode continuar no nome da loja.
+              </span>
+              <strong>Acompanhar</strong>
+            </Link>
+          )}
+          {dueSoonTransfers > 0 && (
+            <Link to="/admin/vendas?filtro=pendentes" className="admin-alert-item">
+              <Clock size={18} />
+              <span>
+                {dueSoonTransfers} {dueSoonTransfers === 1 ? 'transferência vence' : 'transferências vencem'} nos próximos 7 dias.
+              </span>
+              <strong>Ver</strong>
+            </Link>
+          )}
+          {overdueInstallments.length > 0 && (
+            <Link to="/admin/financeiro/clientes?filtro=em_atraso" className="admin-alert-item is-danger">
+              <Wallet size={18} />
+              <span>
+                {overdueInstallments.length} {overdueInstallments.length === 1 ? 'parcela de cliente em atraso' : 'parcelas de clientes em atraso'} (
+                {formatCurrencyCents(overdueInstallmentsTotal)} sem multa e juros).
+              </span>
+              <strong>Cobrar</strong>
+            </Link>
+          )}
+        </div>
+      )}
+
+      {pendencies.length > 0 && (
+        <section className="admin-pendencies">
+          <h2 className="admin-section-title">Pendências ({pendencies.length})</h2>
+          <div className="admin-alert-list">
+            {pendencies.map(({ key, icon: Icon, text, to, cta, danger }) => (
+              <Link key={key} to={to} className={`admin-alert-item ${danger ? 'is-danger' : 'is-warn'}`}>
+                <Icon size={18} />
+                <span>{text}</span>
+                <strong>{cta}</strong>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="expense-summary">
         {canSeeSaleValues && (

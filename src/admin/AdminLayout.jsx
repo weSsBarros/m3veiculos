@@ -16,8 +16,15 @@ import {
   X,
   LogOut,
   ExternalLink,
+  Handshake,
+  Landmark,
+  FileChartColumn,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
+import ViewAsBar from './ViewAsBar.jsx'
+import { fetchOpenTransfers } from '../lib/salesApi.js'
+import { fetchOverdueInstallments } from '../lib/financingApi.js'
+import { transferAlert } from '../utils/transfer.js'
 import './admin.css'
 
 const SIDEBAR_KEY = 'admin_sidebar_expanded'
@@ -26,7 +33,10 @@ const ADMIN_NAV = [
   { to: '/admin', end: true, icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/admin/estoque', icon: Car, label: 'Estoque' },
   { to: '/admin/carros/novo', icon: PlusCircle, label: 'Novo carro' },
-  { to: '/admin/financeiro', icon: Wallet, label: 'Financeiro' },
+  { to: '/admin/vendas', icon: Handshake, label: 'Vendas', alert: 'transfers' },
+  { to: '/admin/financeiro', icon: Wallet, label: 'Financeiro', alert: 'installments' },
+  { to: '/admin/financiamentos-externos', icon: Landmark, label: 'Financ. externos' },
+  { to: '/admin/relatorios', icon: FileChartColumn, label: 'Relatórios' },
   { to: '/admin/historico', icon: History, label: 'Histórico' },
   { to: '/admin/contratos', icon: FileText, label: 'Contratos' },
   { to: '/admin/clientes', icon: Users, label: 'Clientes' },
@@ -35,15 +45,50 @@ const ADMIN_NAV = [
   { to: '/admin/atividades', icon: ScrollText, label: 'Atividades' },
 ]
 
-// Gerente: as abas do admin menos o Financeiro (custos, margem e lucro são só
-// do admin); as demais telas escondem o que ele não pode ver ou fazer.
-const MANAGER_NAV = ADMIN_NAV.filter((item) => item.to !== '/admin/financeiro')
+// Gerente: as abas do admin, mas o Financeiro só com o "Financeiro dos
+// clientes" e só se ele vê os valores das vendas (custos, margem e lucro são
+// só do admin); as demais telas escondem o que ele não pode ver ou fazer.
+function managerNav(canManageCustomerFinance) {
+  return ADMIN_NAV.flatMap((item) => {
+    if (item.to !== '/admin/financeiro') return [item]
+    return canManageCustomerFinance ? [{ ...item, to: '/admin/financeiro/clientes' }] : []
+  })
+}
+
+const ALERT_TOOLTIPS = {
+  transfers: (n) => `${n} ${n === 1 ? 'transferência' : 'transferências'} de veículo para acompanhar`,
+  installments: (n) => `${n} ${n === 1 ? 'parcela' : 'parcelas'} de clientes em atraso`,
+}
+
+// Números no menu: transferências atrasadas ou vencendo em até 7 dias e
+// parcelas de clientes em atraso. Recarrega a cada troca de tela.
+function usePostSaleAlerts(isStaff, canManageCustomerFinance, pathname) {
+  const [alerts, setAlerts] = useState({ transfers: 0, installments: 0 })
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      isStaff ? fetchOpenTransfers().catch(() => []) : [],
+      canManageCustomerFinance ? fetchOverdueInstallments().catch(() => []) : [],
+    ]).then(([transfers, installments]) => {
+      if (cancelled) return
+      setAlerts({ transfers: transfers.filter((sale) => transferAlert(sale)).length, installments: installments.length })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isStaff, canManageCustomerFinance, pathname])
+  return alerts
+}
 
 const SELLER_NAV = [
   { to: '/admin', end: true, icon: TrendingUp, label: 'Minhas vendas' },
   { to: '/admin/estoque', icon: Car, label: 'Estoque' },
+  { to: '/admin/carros/novo', icon: PlusCircle, label: 'Novo carro' },
+  { to: '/admin/vendas', icon: Handshake, label: 'Vendas' },
+  { to: '/admin/financiamentos-externos', icon: Landmark, label: 'Financ. externos' },
   { to: '/admin/contratos', icon: FileText, label: 'Contratos' },
   { to: '/admin/clientes', icon: Users, label: 'Clientes' },
+  { to: '/admin/relatorios', icon: FileChartColumn, label: 'Relatórios' },
 ]
 
 function readExpanded() {
@@ -55,10 +100,11 @@ function readExpanded() {
 }
 
 export default function AdminLayout() {
-  const { user, isAdmin, isManager, isStaff, seller, signOut } = useAuth()
+  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut } = useAuth()
   const [expanded, setExpanded] = useState(readExpanded)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
+  const alerts = usePostSaleAlerts(isStaff, canManageCustomerFinance, pathname)
 
   useEffect(() => {
     setMobileOpen(false)
@@ -76,7 +122,7 @@ export default function AdminLayout() {
     })
   }
 
-  const nav = isAdmin ? ADMIN_NAV : isManager ? MANAGER_NAV : SELLER_NAV
+  const nav = isAdmin ? ADMIN_NAV : isManager ? managerNav(canManageCustomerFinance) : SELLER_NAV
   const showLabels = expanded || mobileOpen
 
   return (
@@ -125,19 +171,28 @@ export default function AdminLayout() {
         </div>
 
         <nav className="admin-sidenav">
-          {nav.map(({ to, end, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) => (isActive ? 'is-active' : '')}
-              data-tooltip={showLabels ? undefined : label}
-              aria-label={label}
-            >
-              <Icon size={19} />
-              <span className="admin-sidenav-label">{label}</span>
-            </NavLink>
-          ))}
+          {nav.map(({ to, end, icon: Icon, label, alert }) => {
+            const count = alert ? alerts[alert] : 0
+            const fullLabel = count ? `${label} (${ALERT_TOOLTIPS[alert](count)})` : label
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) => (isActive ? 'is-active' : '')}
+                data-tooltip={showLabels ? undefined : fullLabel}
+                aria-label={fullLabel}
+              >
+                <Icon size={19} />
+                <span className="admin-sidenav-label">{label}</span>
+                {count > 0 && (
+                  <span className="admin-nav-badge" title={ALERT_TOOLTIPS[alert](count)}>
+                    {count > 99 ? '99+' : count}
+                  </span>
+                )}
+              </NavLink>
+            )
+          })}
         </nav>
 
         <div className="admin-sidebar-bottom">
@@ -166,7 +221,9 @@ export default function AdminLayout() {
       </aside>
 
       <main className="admin-main">
-        <Outlet />
+        <ViewAsBar />
+        {/* Trocar a visão remonta a tela, que busca os dados de novo */}
+        <Outlet key={viewAs ? `${viewAs.role}-${viewAs.sellerId || 'generico'}` : 'normal'} />
       </main>
     </div>
   )

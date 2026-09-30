@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCcw } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { RefreshCcw, Bookmark, Landmark } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchSales } from '../lib/salesApi.js'
 import { fetchSellerCars } from '../lib/carsApi.js'
 import { describeCommission } from '../lib/sellersApi.js'
+import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
+import { fetchReservations, reservationAlert } from '../lib/reservationsApi.js'
+import { externalGaps, unpaidCommissions } from '../utils/dashboardAlerts.js'
 import { formatCurrency, formatCurrencyCents, formatDateBR } from '../utils/carFormat.js'
 import { periodRange, inRange } from '../utils/period.js'
 import PeriodFilter from './PeriodFilter.jsx'
@@ -14,6 +18,8 @@ export default function SellerSales() {
   const { seller } = useAuth()
   const [sales, setSales] = useState([])
   const [cars, setCars] = useState([])
+  const [externals, setExternals] = useState([])
+  const [reservations, setReservations] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [period, setPeriod] = useState('mes')
@@ -24,9 +30,16 @@ export default function SellerSales() {
     setLoading(true)
     setError('')
     try {
-      const [salesData, carsData] = await Promise.all([fetchSales(), fetchSellerCars()])
+      const [salesData, carsData, externalsData, reservationsData] = await Promise.all([
+        fetchSales(),
+        fetchSellerCars(),
+        fetchExternalFinancings().catch(() => []),
+        fetchReservations().catch(() => []),
+      ])
       setSales(salesData)
       setCars(carsData)
+      setExternals(externalsData)
+      setReservations(reservationsData)
     } catch (err) {
       setError(err.message || 'Erro ao carregar suas vendas.')
     } finally {
@@ -47,7 +60,12 @@ export default function SellerSales() {
   const range = periodRange(period, customStart, customEnd)
   const periodSales = sales.filter((s) => inRange(s.saleDate, range))
   const revenue = periodSales.reduce((sum, s) => sum + s.salePrice, 0)
-  const commission = periodSales.reduce((sum, s) => sum + s.commissionAmount, 0)
+  const paidExternals = externals.filter((e) => e.status === 'pago' && inRange(e.paidOn || e.submittedOn, range))
+  const commission =
+    periodSales.reduce((sum, s) => sum + s.commissionAmount, 0) + paidExternals.reduce((sum, e) => sum + e.commissionAmount, 0)
+  const unpaid = unpaidCommissions(sales, externals)
+  const extGaps = externalGaps(externals)
+  const activeReservations = reservations.filter((r) => r.status === 'ativa')
 
   if (loading) return <p className="admin-muted">Carregando…</p>
 
@@ -84,11 +102,54 @@ export default function SellerSales() {
           <span>Total vendido</span>
           <strong>{formatCurrency(revenue)}</strong>
         </div>
+        <div className="expense-summary-card">
+          <span>Financ. externos pagos</span>
+          <strong>{paidExternals.length}</strong>
+        </div>
         <div className="expense-summary-card is-positive">
-          <span>Sua comissão</span>
+          <span>Sua comissão no período</span>
           <strong>{formatCurrencyCents(commission)}</strong>
         </div>
+        <div className="expense-summary-card">
+          <span>Comissão a receber</span>
+          <strong>{formatCurrencyCents(unpaid.amount)}</strong>
+        </div>
       </div>
+
+      {(activeReservations.length > 0 || extGaps.staleAnalysis > 0 || extGaps.approvedUnpaid > 0) && (
+        <div className="admin-alert-list">
+          {activeReservations.map((r) => {
+            const car = carsById[r.carId]
+            const alert = reservationAlert(r)
+            return (
+              <Link key={r.id} to="/admin/vendas" className={`admin-alert-item ${alert === 'vencida' ? 'is-danger' : ''}`}>
+                <Bookmark size={18} />
+                <span>
+                  Reserva: {car ? `${car.brand} ${car.model}` : 'carro'}
+                  {r.customerName ? ` para ${r.customerName}` : ''}
+                  {r.reservedUntil ? ` até ${formatDateBR(r.reservedUntil)}` : ''}
+                  {alert === 'vencida' ? ' — prazo vencido' : alert === 'vence_logo' ? ' — vence logo' : ''}
+                </span>
+                <strong>Ver</strong>
+              </Link>
+            )
+          })}
+          {extGaps.staleAnalysis > 0 && (
+            <Link to="/admin/financiamentos-externos" className="admin-alert-item">
+              <Landmark size={18} />
+              <span>{extGaps.staleAnalysis} financiamento(s) externo(s) seu(s) em análise há mais de 7 dias.</span>
+              <strong>Ver</strong>
+            </Link>
+          )}
+          {extGaps.approvedUnpaid > 0 && (
+            <Link to="/admin/financiamentos-externos" className="admin-alert-item">
+              <Landmark size={18} />
+              <span>{extGaps.approvedUnpaid} financiamento(s) externo(s) seu(s) aprovado(s), aguardando o banco pagar.</span>
+              <strong>Ver</strong>
+            </Link>
+          )}
+        </div>
+      )}
 
       <h2 className="admin-section-title">Vendas no período</h2>
       {periodSales.length === 0 ? (
@@ -116,7 +177,10 @@ export default function SellerSales() {
                         {car && <span className="admin-table-sub">{car.version} · {car.modelYear}</span>}
                       </td>
                       <td>{formatCurrency(sale.salePrice)}</td>
-                      <td>{formatCurrencyCents(sale.commissionAmount)}</td>
+                      <td>
+                        {formatCurrencyCents(sale.commissionAmount)}
+                        {sale.commissionPaidOn && <span className="admin-table-sub">paga em {formatDateBR(sale.commissionPaidOn)}</span>}
+                      </td>
                     </tr>
                   )
                 })}

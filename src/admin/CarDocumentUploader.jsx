@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { X, Upload, Paperclip, Clock } from 'lucide-react'
+import { downloadStorageFile } from '../lib/storageDownload.js'
+import { X, Upload, Paperclip, Clock, Download } from 'lucide-react'
 import { uploadCarDocument, deleteCarDocument, getCarDocumentSignedUrl } from '../lib/carsApi.js'
 
 // Com carId (carro já salvo), o arquivo sobe na hora. Sem carId (carro novo),
@@ -52,6 +53,14 @@ export default function CarDocumentUploader({ carId, documents, onChange, pendin
     }
   }
 
+  async function handleDownload(doc) {
+    try {
+      await downloadStorageFile('car-documents', doc.path, doc.name)
+    } catch (err) {
+      alert('Não foi possível baixar o documento: ' + err.message)
+    }
+  }
+
   return (
     <div className="attachment-uploader">
       {documents.length > 0 && (
@@ -60,6 +69,9 @@ export default function CarDocumentUploader({ carId, documents, onChange, pendin
             <li key={doc.path}>
               <button type="button" className="expense-attachment-link" onClick={() => handleOpen(doc)}>
                 <Paperclip size={13} /> {doc.name}
+              </button>
+              <button type="button" onClick={() => handleDownload(doc)} aria-label="Baixar documento" title="Baixar">
+                <Download size={13} />
               </button>
               <button type="button" onClick={() => handleRemove(doc)} aria-label="Remover documento">
                 <X size={13} />

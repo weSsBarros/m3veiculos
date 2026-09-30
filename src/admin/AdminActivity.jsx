@@ -18,6 +18,11 @@ const ENTITY_FILTERS = [
   { value: 'suppliers', label: 'Fornecedores' },
   { value: 'sellers', label: 'Equipe' },
   { value: 'contract_templates', label: 'Modelos de contrato' },
+  { value: 'customer_documents', label: 'Documentos dos clientes' },
+  { value: 'customer_financings', label: 'Financiamentos dos clientes', finance: true },
+  { value: 'external_financings', label: 'Financiamentos externos' },
+  { value: 'car_reservations', label: 'Reservas' },
+  { value: 'financing_installments', label: 'Parcelas dos clientes', finance: true },
 ]
 
 function formatDateTime(iso) {
@@ -51,6 +56,37 @@ const FIELD_LABELS = {
   purchase_date: 'data da compra',
   documents: 'documentos',
   finance_access: 'acesso aos valores das vendas',
+  transfer_status: 'situação da transferência',
+  transfer_responsible: 'quem faz a transferência',
+  transfer_due_date: 'prazo da transferência',
+  transfer_done_on: 'transferência concluída em',
+  transfer_notes: 'observações da transferência',
+  checklist: 'checklist de entrega',
+  paid_on: 'data do pagamento',
+  paid_amount: 'valor pago',
+  late_charges: 'multa e juros',
+  payment_method: 'forma de pagamento',
+  due_date: 'vencimento',
+  doc_type: 'tipo de documento',
+  signed_on: 'data da assinatura',
+  title: 'descrição',
+  car_id: 'carro',
+  late_fee_percent: 'multa por atraso',
+  late_interest_percent: 'juros por atraso',
+  internal_notes: 'observações internas',
+  intake_items: 'itens que vieram com o carro',
+  inspection: 'vistoria de entrada',
+  payment_method: 'forma de pagamento',
+  bank: 'banco',
+  down_payment: 'entrada',
+  financed_amount: 'valor financiado',
+  trade_in_car_id: 'carro da troca',
+  trade_in_value: 'valor da troca',
+  commission_paid_on: 'comissão paga em',
+  store_return: 'retorno da loja',
+  reserved_until: 'prazo da reserva',
+  deposit_amount: 'sinal',
+  approved_on: 'aprovado em',
 }
 
 const STATUS_LABELS = { disponivel: 'Disponível', manutencao: 'Em manutenção', vendido: 'Vendido' }
@@ -158,7 +194,7 @@ export default function AdminActivity() {
           ))}
         </select>
         <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} aria-label="Tipo">
-          {ENTITY_FILTERS.map((f) => (
+          {ENTITY_FILTERS.filter((f) => !f.finance || canSeeSaleValues).map((f) => (
             <option key={f.value} value={f.value}>{f.label}</option>
           ))}
         </select>

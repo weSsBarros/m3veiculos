@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { fetchCompanySettings } from '../lib/companyApi.js'
+import { DEFAULT_BANKS, contractPaymentText } from '../utils/payment.js'
+import BankSelect from './BankSelect.jsx'
 import { Link, useSearchParams } from 'react-router-dom'
 import { RefreshCcw, FileDown, FileText, Settings } from 'lucide-react'
 import { fetchAllCarsAdmin, fetchSellerCars } from '../lib/carsApi.js'
@@ -6,7 +9,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchContractsAdmin, createContract } from '../lib/contractsApi.js'
 import { fetchAllContractTemplates, downloadContractTemplateFile } from '../lib/contractTemplatesApi.js'
-import { formatCurrency, carStatusLabel, parseIntBR, formatDateBR as formatDate } from '../utils/carFormat.js'
+import { formatCurrency, carStatusLabel, parseIntBR, formatDateBR as formatDate, slugify } from '../utils/carFormat.js'
 import { buildContractTitle, buildContractParagraphs, buildContractSignatures } from '../utils/contractTemplate.js'
 import { buildReceiptTitle, buildReceiptParagraphs, buildReceiptSignatures } from '../utils/receiptTemplate.js'
 import { buildContractTemplateData } from '../utils/contractTemplateTags.js'
@@ -14,24 +17,14 @@ import { generateContractPdf } from '../utils/contractPdf.js'
 import { generateContractDocx } from '../utils/contractDocx.js'
 import { fillContractTemplate } from '../utils/fillContractTemplate.js'
 import { loadContractLogo } from '../utils/contractLogo.js'
+import { loadStoredCompany, saveStoredCompany } from '../utils/contractCompany.js'
+import { downloadSavedContract } from '../utils/contractDownload.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import './admin.css'
 
-const COMPANY_STORAGE_KEY = 'domveiculos_contract_company'
-
-const EMPTY_COMPANY = { name: '', document: '', address: '', phone: '', email: '' }
 const EMPTY_BUYER = { name: '', document: '', rg: '', address: '', phone: '', email: '' }
 const EMPTY_VEHICLE = { brand: '', model: '', version: '', year: '', modelYear: '', color: '', km: '', plate: '', chassis: '', renavam: '' }
-const EMPTY_SALE = { price: '', paymentMethod: 'À vista', paymentDetails: '', date: new Date().toISOString().slice(0, 10), city: '', notes: '' }
-
-function loadStoredCompany() {
-  try {
-    const raw = localStorage.getItem(COMPANY_STORAGE_KEY)
-    return raw ? { ...EMPTY_COMPANY, ...JSON.parse(raw) } : EMPTY_COMPANY
-  } catch {
-    return EMPTY_COMPANY
-  }
-}
+const EMPTY_SALE = { price: '', paymentMethod: 'À vista', bank: '', paymentDetails: '', date: new Date().toISOString().slice(0, 10), city: '', notes: '' }
 
 export default function AdminContracts() {
   const { isAdmin, isStaff } = useAuth()
@@ -54,10 +47,15 @@ export default function AdminContracts() {
   const [vehicle, setVehicle] = useState(EMPTY_VEHICLE)
   const [sale, setSale] = useState(EMPTY_SALE)
   const [logo, setLogo] = useState(null)
+  const [banks, setBanks] = useState(DEFAULT_BANKS)
 
   useEffect(() => {
     loadContractLogo().then(setLogo)
+    fetchCompanySettings().then((settings) => setBanks(settings.bankList)).catch(() => {})
   }, [])
+
+  // Financiado com banco escolhido: "Financiado pelo Banco do Brasil"
+  const paymentText = contractPaymentText(sale.paymentMethod, sale.bank)
 
   async function load() {
     setLoading(true)
@@ -147,9 +145,9 @@ export default function AdminContracts() {
       company,
       buyer,
       vehicle,
-      sale: { ...sale, price: parseIntBR(sale.price) || 0 },
+      sale: { ...sale, paymentMethod: paymentText, price: parseIntBR(sale.price) || 0 },
     }),
-    [company, buyer, vehicle, sale]
+    [company, buyer, vehicle, sale, paymentText]
   )
 
   const isReceipt = documentType === 'recibo'
@@ -173,15 +171,17 @@ export default function AdminContracts() {
   }
 
   async function saveContractRecord() {
-    localStorage.setItem(COMPANY_STORAGE_KEY, JSON.stringify(company))
+    saveStoredCompany(company)
     const saved = await createContract({
       carId: selectedCarId || null,
+      // Fica na ficha do cliente (Clientes → Ficha e contratos)
+      customerId: selectedCustomerId || null,
       documentType,
       company,
       buyer,
       vehicle,
       salePrice: parseIntBR(sale.price),
-      paymentMethod: sale.paymentMethod,
+      paymentMethod: paymentText,
       paymentDetails: sale.paymentDetails,
       saleDate: sale.date,
       saleCity: sale.city,
@@ -208,7 +208,7 @@ export default function AdminContracts() {
   }
 
   function contractFilename(ext) {
-    const buyerSlug = (buyer.name || 'documento').toLowerCase().replace(/\s+/g, '-')
+    const buyerSlug = slugify(buyer.name || '') || 'documento'
     return `${isReceipt ? 'recibo' : 'contrato'}-${buyerSlug}.${ext}`
   }
 
@@ -242,28 +242,7 @@ export default function AdminContracts() {
   }
 
   async function redownload(contract, format) {
-    const contractIsReceipt = contract.documentType === 'recibo'
-    const saleData = {
-      price: contract.salePrice,
-      paymentMethod: contract.paymentMethod,
-      paymentDetails: contract.paymentDetails,
-      date: contract.saleDate,
-      city: contract.saleCity,
-      notes: contract.notes,
-    }
-    const data = {
-      title: contractIsReceipt ? buildReceiptTitle() : buildContractTitle(),
-      paragraphs: contractIsReceipt
-        ? buildReceiptParagraphs({ company: contract.company, buyer: contract.buyer, vehicle: contract.vehicle, sale: saleData })
-        : buildContractParagraphs({ company: contract.company, buyer: contract.buyer, vehicle: contract.vehicle, sale: saleData }),
-      signatures: contractIsReceipt
-        ? buildReceiptSignatures({ company: contract.company, buyer: contract.buyer })
-        : buildContractSignatures({ company: contract.company, buyer: contract.buyer }),
-      filename: `${contractIsReceipt ? 'recibo' : 'contrato'}-${(contract.buyer.name || 'documento').toLowerCase().replace(/\s+/g, '-')}.${format}`,
-      logo,
-    }
-    if (format === 'pdf') await generateContractPdf(data)
-    else await generateContractDocx(data)
+    await downloadSavedContract(contract, format, logo)
   }
 
   return (
@@ -320,7 +299,7 @@ export default function AdminContracts() {
             <label>
               Cliente cadastrado
               <select value={selectedCustomerId} onChange={(e) => handleSelectCustomer(e.target.value)}>
-                <option value="">Selecione para preencher automaticamente…</option>
+                <option value="">Selecione para preencher e guardar na ficha do cliente…</option>
                 {customers.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -427,6 +406,9 @@ export default function AdminContracts() {
                 <option>Outro</option>
               </select>
             </label>
+            {sale.paymentMethod === 'Financiado' && (
+              <BankSelect value={sale.bank} onChange={(bank) => updateSale('bank', bank)} banks={banks} />
+            )}
             <label>
               Data da venda
               <DateInputBR value={sale.date} onChange={(iso) => updateSale('date', iso)} />
@@ -514,6 +496,11 @@ export default function AdminContracts() {
             </>
           )}
         </div>
+        <p className="admin-form-note">
+          {selectedCustomerId
+            ? 'O documento gerado fica na ficha do cliente. Depois de assinado, anexe a via assinada em Clientes → Ficha e contratos.'
+            : 'Escolha um cliente cadastrado para o documento ficar guardado na ficha dele.'}
+        </p>
       </form>
 
       <h2 className="admin-section-title">{isStaff ? 'Contratos gerados' : 'Seus contratos gerados'}</h2>

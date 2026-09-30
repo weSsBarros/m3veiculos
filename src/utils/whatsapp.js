@@ -7,6 +7,15 @@ export function whatsappLink(message) {
   return `https://wa.me/${WHATSAPP_NUMBER}?text=${text}`
 }
 
+// Conversa com um cliente (telefone do cadastro). Sem DDI, assume Brasil (55).
+// Devolve null se o telefone não tiver DDD + número.
+export function whatsappLinkToPhone(phone, message) {
+  let digits = String(phone || '').replace(/\D/g, '')
+  if (digits.length === 10 || digits.length === 11) digits = `55${digits}`
+  if (digits.length < 12) return null
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
+}
+
 export function carPageUrl(car) {
   const base = import.meta.env.VITE_SITE_URL || window.location.origin
   return `${base}/carro/${car.slug}`

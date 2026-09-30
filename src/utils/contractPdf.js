@@ -1,7 +1,8 @@
 // Import dinâmico: jspdf só é carregado quando o admin gera um PDF, pra não
 // engordar o bundle do site público.
 
-export async function generateContractPdf({ title, paragraphs, signatures, filename, logo }) {
+// headingPrefixes: linhas que começam com um destes textos saem em negrito
+export async function generateContractPdf({ title, paragraphs, signatures, filename, logo, headingPrefixes = ['CLÁUSULA'] }) {
   const { jsPDF } = await import('jspdf')
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
 
@@ -39,7 +40,7 @@ export async function generateContractPdf({ title, paragraphs, signatures, filen
   for (const paragraph of paragraphs) {
     const parts = paragraph.split('\n')
     for (const part of parts) {
-      const isClauseHeading = part.startsWith('CLÁUSULA')
+      const isClauseHeading = headingPrefixes.some((prefix) => part.startsWith(prefix))
       doc.setFont('helvetica', isClauseHeading ? 'bold' : 'normal')
       const lines = doc.splitTextToSize(part, usableWidth)
       for (const line of lines) {

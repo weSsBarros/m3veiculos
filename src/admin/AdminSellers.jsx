@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2 } from 'lucide-react'
+import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2, HandCoins } from 'lucide-react'
 import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, financeAccessLabel } from '../lib/sellersApi.js'
 import { useAuth } from '../context/AuthContext.jsx'
-import { fetchSales } from '../lib/salesApi.js'
+import { fetchSales, markCommissionsPaid } from '../lib/salesApi.js'
+import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
+import { EXT_COMMISSION_TYPES, describeExternalCommission } from '../utils/externalFinancing.js'
+import CommissionsDialog from './CommissionsDialog.jsx'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { formatCurrency, formatCurrencyCents, formatDateBR } from '../utils/carFormat.js'
 import { periodRange, inRange } from '../utils/period.js'
@@ -24,6 +27,9 @@ const EMPTY_FORM = {
   // Só para gerente: 'values' (vê valores das vendas) ou 'counts' (só quantidades)
   financeAccess: 'counts',
   active: true,
+  // Comissão de financiamento externo
+  extCommissionType: 'none',
+  extCommissionValue: '',
 }
 
 // Aceita "1,5", "1.5", "500", "1.000" e "1.000,50"
@@ -56,13 +62,23 @@ export default function AdminSellers() {
   const [resetPassword, setResetPassword] = useState('')
   const [resetError, setResetError] = useState('')
   const [resetSaving, setResetSaving] = useState(false)
+  const [externals, setExternals] = useState([])
+  const [commissionsFor, setCommissionsFor] = useState(null)
+  const [savingCommissions, setSavingCommissions] = useState(false)
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const [sellersData, salesData, carsData] = await Promise.all([fetchSellers(), fetchSales(), fetchAllCarsAdmin()])
+      const [sellersData, salesData, carsData, externalsData] = await Promise.all([
+        fetchSellers(),
+        fetchSales(),
+        fetchAllCarsAdmin(),
+        // Sem a tabela nova no banco, a Equipe abre normalmente
+        fetchExternalFinancings().catch(() => []),
+      ])
       setSellers(sellersData)
+      setExternals(externalsData)
       setSales(salesData)
       setCars(carsData)
     } catch (err) {
@@ -89,19 +105,50 @@ export default function AdminSellers() {
     [sales, range.start, range.end]
   )
 
+  // Financiamento externo conta quando o banco paga a loja
+  const periodExternals = useMemo(
+    () => externals.filter((e) => e.status === 'pago' && inRange(e.paidOn || e.submittedOn, { start: range.start, end: range.end })),
+    [externals, range.start, range.end]
+  )
+
   const statsBySeller = useMemo(() => {
     const map = {}
+    const ensure = (id) => (map[id] ||= { count: 0, revenue: 0, commission: 0, lastSale: null, externals: 0 })
     for (const s of periodSales) {
       if (!s.sellerId) continue
-      if (!map[s.sellerId]) map[s.sellerId] = { count: 0, revenue: 0, commission: 0, lastSale: null }
-      const st = map[s.sellerId]
+      const st = ensure(s.sellerId)
       st.count += 1
       st.revenue += s.salePrice
       st.commission += s.commissionAmount
       if (!st.lastSale || s.saleDate > st.lastSale) st.lastSale = s.saleDate
     }
+    for (const e of periodExternals) {
+      if (!e.sellerId) continue
+      const st = ensure(e.sellerId)
+      st.externals += 1
+      st.commission += e.commissionAmount
+    }
     return map
-  }, [periodSales])
+  }, [periodSales, periodExternals])
+
+  // Comissões em aberto (qualquer data): vendas e financiamentos externos pagos
+  const unpaidBySeller = useMemo(() => {
+    const map = {}
+    const ensure = (id) => (map[id] ||= { sales: [], externals: [], total: 0 })
+    for (const s of sales) {
+      if (!s.sellerId || !s.commissionAmount || s.commissionPaidOn) continue
+      const u = ensure(s.sellerId)
+      u.sales.push(s)
+      u.total += s.commissionAmount
+    }
+    for (const e of externals) {
+      if (!e.sellerId || e.status !== 'pago' || !e.commissionAmount || e.commissionPaidOn) continue
+      const u = ensure(e.sellerId)
+      u.externals.push(e)
+      u.total += e.commissionAmount
+    }
+    return map
+  }, [sales, externals])
 
   // Quem foi excluído só aparece se tiver vendas no período (para os números
   // da tabela baterem com os totais)
@@ -132,6 +179,8 @@ export default function AdminSellers() {
       commissionValue: hasCommission ? String(seller.commissionValue).replace('.', ',') : '',
       financeAccess: seller.financeAccess,
       active: seller.active,
+      extCommissionType: seller.extCommissionType || 'none',
+      extCommissionValue: seller.extCommissionType && seller.extCommissionType !== 'none' ? String(seller.extCommissionValue).replace('.', ',') : '',
     })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -156,6 +205,20 @@ export default function AdminSellers() {
       setFormError('Informe o valor da comissão (ou desmarque "Recebe comissão").')
       return
     }
+    const extCommissionType = form.extCommissionType || 'none'
+    const extCommissionValue = extCommissionType === 'none' || form.extCommissionValue === '' ? 0 : parseCommission(form.extCommissionValue)
+    if (Number.isNaN(extCommissionValue) || extCommissionValue < 0) {
+      setFormError('Valor da comissão de financiamento externo inválido.')
+      return
+    }
+    if (extCommissionType !== 'none' && extCommissionValue === 0) {
+      setFormError('Informe o valor da comissão de financiamento externo (ou escolha "Não recebe").')
+      return
+    }
+    if (extCommissionType.startsWith('percent') && extCommissionValue > 100) {
+      setFormError('A comissão de financiamento externo em % não pode passar de 100.')
+      return
+    }
     if (commissionType === 'percent' && commissionValue > 100) {
       setFormError('A comissão em % não pode passar de 100.')
       return
@@ -168,12 +231,12 @@ export default function AdminSellers() {
     setSaving(true)
     try {
       if (editingId) {
-        const saved = await updateSeller(editingId, { ...form, commissionType, commissionValue })
+        const saved = await updateSeller(editingId, { ...form, commissionType, commissionValue, extCommissionType, extCommissionValue })
         setSellers((prev) => prev.map((s) => (s.id === editingId ? saved : s)))
         setFormSuccess(`${roleLabel(saved.role)} "${saved.name}" atualizado.`)
         cancelEdit()
       } else {
-        const created = await createSeller({ ...form, commissionType, commissionValue })
+        const created = await createSeller({ ...form, commissionType, commissionValue, extCommissionType, extCommissionValue })
         setSellers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
         setFormSuccess(`${roleLabel(created.role)} "${created.name}" cadastrado. Já pode entrar no painel com o e-mail ${created.email}.`)
         setForm(EMPTY_FORM)
@@ -382,6 +445,25 @@ export default function AdminSellers() {
             />
           </label>
           )}
+          <label>
+            Comissão de financiamento externo
+            <select value={form.extCommissionType} onChange={(e) => update('extCommissionType', e.target.value)}>
+              {EXT_COMMISSION_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </label>
+          {form.extCommissionType !== 'none' && (
+            <label>
+              {form.extCommissionType === 'fixed' ? 'Valor por financiamento (R$)' : 'Percentual (%)'}
+              <input
+                inputMode="decimal"
+                value={form.extCommissionValue}
+                onChange={(e) => update('extCommissionValue', e.target.value)}
+                placeholder={form.extCommissionType === 'fixed' ? 'Ex: 300' : 'Ex: 1'}
+              />
+            </label>
+          )}
         </div>
         {form.role === 'manager' && (
           <div className="admin-finance-access">
@@ -451,8 +533,10 @@ export default function AdminSellers() {
                   <th>Cargo</th>
                   {canSeeSaleValues && <th>Comissão</th>}
                   <th>Vendas</th>
+                  <th title="Financiamentos externos pagos no período">Financ. externos</th>
                   {canSeeSaleValues && <th>Faturamento</th>}
-                  {canSeeSaleValues && <th>Comissão a pagar</th>}
+                  {canSeeSaleValues && <th>Comissão no período</th>}
+                  {canSeeSaleValues && <th title="Comissões ainda não pagas, de qualquer data">Em aberto</th>}
                   <th>Última venda</th>
                   <th>Status</th>
                   <th></th>
@@ -460,7 +544,8 @@ export default function AdminSellers() {
               </thead>
               <tbody>
                 {listed.map((s) => {
-                  const st = statsBySeller[s.id] || { count: 0, revenue: 0, commission: 0, lastSale: null }
+                  const st = statsBySeller[s.id] || { count: 0, revenue: 0, commission: 0, lastSale: null, externals: 0 }
+                  const unpaid = unpaidBySeller[s.id]
                   return (
                     <tr key={s.id} className={!s.active ? 'is-hidden-row' : ''}>
                       <td>
@@ -471,10 +556,28 @@ export default function AdminSellers() {
                         <span className={`admin-role-pill role-${s.role}`}>{roleLabel(s.role)}</span>
                         {s.role === 'manager' && isAdmin && <span className="admin-table-sub">{financeAccessLabel(s.financeAccess)}</span>}
                       </td>
-                      {canSeeSaleValues && <td>{describeCommission(s)}</td>}
+                      {canSeeSaleValues && (
+                        <td>
+                          {describeCommission(s)}
+                          {s.extCommissionType !== 'none' && (
+                            <span className="admin-table-sub">Financ. externo: {describeExternalCommission(s.extCommissionType, s.extCommissionValue)}</span>
+                          )}
+                        </td>
+                      )}
                       <td>{st.count}</td>
+                      <td>{st.externals}</td>
                       {canSeeSaleValues && <td>{formatCurrency(st.revenue)}</td>}
                       {canSeeSaleValues && <td>{formatCurrencyCents(st.commission)}</td>}
+                      {canSeeSaleValues && (
+                        <td>
+                          {unpaid ? formatCurrencyCents(unpaid.total) : '—'}
+                          {unpaid && isAdmin && (
+                            <button type="button" className="admin-link-btn" onClick={() => setCommissionsFor(s)}>
+                              <HandCoins size={13} /> Marcar pagas
+                            </button>
+                          )}
+                        </td>
+                      )}
                       <td>{st.lastSale ? formatDateBR(st.lastSale) : '—'}</td>
                       <td>
                         <StatusPill seller={s} />
@@ -500,7 +603,8 @@ export default function AdminSellers() {
 
           <div className="admin-card-list">
             {listed.map((s) => {
-              const st = statsBySeller[s.id] || { count: 0, revenue: 0, commission: 0, lastSale: null }
+              const st = statsBySeller[s.id] || { count: 0, revenue: 0, commission: 0, lastSale: null, externals: 0 }
+              const unpaid = unpaidBySeller[s.id]
               return (
                 <div className={`admin-card ${!s.active ? 'is-hidden-row' : ''}`} key={s.id}>
                   <div className="admin-card-top">
@@ -532,7 +636,18 @@ export default function AdminSellers() {
                         <strong>{formatCurrencyCents(st.commission)}</strong>
                       </div>
                     )}
+                    {canSeeSaleValues && unpaid && (
+                      <div>
+                        <span>Em aberto</span>
+                        <strong>{formatCurrencyCents(unpaid.total)}</strong>
+                      </div>
+                    )}
                   </div>
+                  {canSeeSaleValues && unpaid && isAdmin && (
+                    <button type="button" className="admin-link-btn" onClick={() => setCommissionsFor(s)}>
+                      <HandCoins size={13} /> Marcar comissões como pagas
+                    </button>
+                  )}
                   <SellerActions
                     seller={s}
                     onDetail={() => setDetailId(detailId === s.id ? null : s.id)}
@@ -624,6 +739,30 @@ export default function AdminSellers() {
             </div>
           </form>
         </div>
+      )}
+      {commissionsFor && (
+        <CommissionsDialog
+          seller={commissionsFor}
+          sales={unpaidBySeller[commissionsFor.id]?.sales || []}
+          externals={unpaidBySeller[commissionsFor.id]?.externals || []}
+          carsById={carsById}
+          saving={savingCommissions}
+          onClose={() => setCommissionsFor(null)}
+          onConfirm={async ({ saleIds, externalIds, paidOn }) => {
+            setSavingCommissions(true)
+            try {
+              await markCommissionsPaid({ saleIds, externalIds, paidOn })
+              setSales((prev) => prev.map((x) => (saleIds.includes(x.id) ? { ...x, commissionPaidOn: paidOn } : x)))
+              setExternals((prev) => prev.map((x) => (externalIds.includes(x.id) ? { ...x, commissionPaidOn: paidOn } : x)))
+              setFormSuccess(`Comissões de ${commissionsFor.name} marcadas como pagas.`)
+              setCommissionsFor(null)
+            } catch (err) {
+              alert('Não foi possível marcar as comissões: ' + err.message)
+            } finally {
+              setSavingCommissions(false)
+            }
+          }}
+        />
       )}
       {confirmDialog}
     </div>

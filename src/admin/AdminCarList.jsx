@@ -1,26 +1,34 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Trash2, RefreshCcw, Receipt, Star, Eye, EyeOff, Search, Handshake, LayoutGrid, List, ExternalLink, BellRing } from 'lucide-react'
-import { fetchAllCarsAdmin, updateCarStatus, updateCarCustomer, updateCarFeatured, updateCarHidden, deleteCar } from '../lib/carsApi.js'
+import { Pencil, Trash2, RefreshCcw, Receipt, Star, Eye, EyeOff, Search, Handshake, LayoutGrid, List, ExternalLink, BellRing, Bookmark, ListChecks } from 'lucide-react'
+import { fetchAllCarsAdmin, updateCarStatus, updateCarFeatured, updateCarHidden, deleteCar } from '../lib/carsApi.js'
+import { registerSaleFromDialog } from '../lib/saleFlow.js'
+import { fetchReservations, reserveCar, closeReservation } from '../lib/reservationsApi.js'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchCarViewTotals, formatViews } from '../lib/statsApi.js'
 import { thumbUrl } from '../utils/carPhotos.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
-import { fetchSales, saveSaleForCar, deleteSaleForCar } from '../lib/salesApi.js'
+import { fetchSales, deleteSaleForCar } from '../lib/salesApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
-import { formatCurrency, CATEGORIES, CAR_STATUSES, daysInStock, isStockStale, stockAlertThreshold } from '../utils/carFormat.js'
-import { fetchStockAlertDefault, applyStockAlertToAll, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
+import { formatCurrency, CATEGORIES, daysInStock, isStockStale, stockAlertThreshold, matchesCarSearch, formatDateBR } from '../utils/carFormat.js'
+import { DEFAULT_BANKS } from '../utils/payment.js'
+import { applyStockAlertToAll, fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
+import { DEFAULT_SALE_CHECKLIST } from '../utils/saleChecklist.js'
+import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import SaleDialog from './SaleDialog.jsx'
+import ReserveDialog from './ReserveDialog.jsx'
+import ChecklistSettingsDialog from './ChecklistSettingsDialog.jsx'
+import StatusMenu from './StatusMenu.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 
 // Botões de ação com ícone + nome, iguais na tabela (desktop) e nos cards (celular)
-function RowActions({ car, busy, canDelete, canSeeCosts, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
+function RowActions({ car, busy, canDelete, canSeeCosts, canEditSales, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
   return (
     <div className="admin-action-group">
-      {car.status === 'vendido' && (
+      {car.status === 'vendido' && canEditSales && (
         <button type="button" className="admin-action-btn" onClick={() => onEditSale(car)} disabled={busy}>
           <Handshake size={15} /> Venda
         </button>
@@ -69,6 +77,29 @@ function RowActions({ car, busy, canDelete, canSeeCosts, onToggleFeatured, onTog
 
 const VIEW_KEY = 'admin_stock_view'
 
+const SELLER_LOCK = 'Só o administrador ou o gerente mudam o status de um carro vendido ou reservado'
+
+function statusLock(car, canEditSales) {
+  return !canEditSales && (car.status === 'vendido' || car.status === 'reservado') ? SELLER_LOCK : ''
+}
+
+// "Reservado para Fulano até 10/10"
+function ReservationLine({ reservation, className }) {
+  if (!reservation) return null
+  return (
+    <span className={className}>
+      <Bookmark size={12} /> Reservado{reservation.customerName ? ` para ${reservation.customerName}` : ''}
+      {reservation.reservedUntil ? ` até ${formatDateBR(reservation.reservedUntil)}` : ''}
+    </span>
+  )
+}
+
+function soldLabel(sale, sellerName, canEditSales) {
+  if (sale) return `Vendedor: ${sellerName || 'venda direta'}`
+  // O vendedor só enxerga as vendas dele: nas dos outros não mostra nada
+  return canEditSales ? 'Vendedor: não registrado' : ''
+}
+
 function readView() {
   try {
     return localStorage.getItem(VIEW_KEY) === 'tabela' ? 'tabela' : 'cards'
@@ -77,8 +108,8 @@ function readView() {
   }
 }
 
-function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSaleValues, onChangeStatus, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
-  const { car, totalCost, margin, sale, sellerName, views } = row
+function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSaleValues, canEditSales, onChangeStatus, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
+  const { car, totalCost, margin, sale, sellerName, views, reservation } = row
   const days = daysInStock(car)
   const stale = isStockStale(car, alertDefault)
   const hasCost = Boolean(car.purchasePrice)
@@ -106,6 +137,7 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
           <strong>{car.brand} {car.model}</strong>
           <span>{car.version} · {car.modelYear}</span>
           <span><span className="admin-table-capitalize">{car.category}</span> · {car.km.toLocaleString('pt-BR')} km</span>
+          {car.plate && <span className="car-plate">{car.plate.toUpperCase()}</span>}
           <span className="stock-card-views" title="Visualizações da página do carro no site (desde que o contador foi ativado)">
             <Eye size={13} /> {formatViews(views)}
           </span>
@@ -129,25 +161,24 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
           </div>
         )}
 
-        {car.status === 'vendido' && (
-          <span className="stock-card-seller">Vendedor: {sale ? sellerName || 'venda direta' : 'não registrado'}</span>
+        {car.status === 'vendido' && soldLabel(sale, sellerName, canEditSales) && (
+          <span className="stock-card-seller">{soldLabel(sale, sellerName, canEditSales)}</span>
         )}
+        <ReservationLine reservation={reservation} className="stock-card-seller" />
 
-        <select
-          className={`admin-status-select status-${car.status}`}
+        <StatusMenu
           value={car.status}
-          onChange={(e) => onChangeStatus(car, e.target.value)}
+          onChange={(next) => onChangeStatus(car, next)}
           disabled={busy}
-          aria-label="Status do carro"
-        >
-          {CAR_STATUSES.map((st) => <option key={st.value} value={st.value}>{st.label}</option>)}
-        </select>
+          lockedReason={statusLock(car, canEditSales)}
+        />
 
         <RowActions
           car={car}
           busy={busy}
           canDelete={canDelete}
           canSeeCosts={canSeeCosts}
+          canEditSales={canEditSales}
           onToggleFeatured={onToggleFeatured}
           onToggleHidden={onToggleHidden}
           onDelete={onDelete}
@@ -158,7 +189,7 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
   )
 }
 
-function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCosts, canSeeSaleValues, onChangeStatus, onToggleFeatured, onToggleHidden, onDelete, onEditSale, emptyLabel }) {
+function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCosts, canSeeSaleValues, canEditSales, onChangeStatus, onToggleFeatured, onToggleHidden, onDelete, onEditSale, emptyLabel }) {
   if (rows.length === 0) {
     return (
       <section className="admin-car-group">
@@ -182,6 +213,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
               canDelete={canDelete}
               canSeeCosts={canSeeCosts}
               canSeeSaleValues={canSeeSaleValues}
+              canEditSales={canEditSales}
               onChangeStatus={onChangeStatus}
               onToggleFeatured={onToggleFeatured}
               onToggleHidden={onToggleHidden}
@@ -215,7 +247,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ car, totalCost, margin, sale, sellerName, views }) => (
+            {rows.map(({ car, totalCost, margin, sale, sellerName, views, reservation }) => (
               <tr key={car.id} className={`${busyId === car.id ? 'is-busy' : ''} ${car.hidden ? 'is-hidden-row' : ''}`}>
                 <td>
                   <div className="admin-thumb">
@@ -227,10 +259,12 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   <span className="admin-table-sub">
                     {car.version} · {car.modelYear} · <span className="admin-table-capitalize">{car.category}</span>
                   </span>
+                  {car.plate && <span className="car-plate">{car.plate.toUpperCase()}</span>}
                   {car.hidden && <span className="admin-hidden-badge">Oculto</span>}
-                  {car.status === 'vendido' && (
-                    <span className="admin-table-sub">Vendedor: {sale ? sellerName || 'venda direta' : 'não registrado'}</span>
+                  {car.status === 'vendido' && soldLabel(sale, sellerName, canEditSales) && (
+                    <span className="admin-table-sub">{soldLabel(sale, sellerName, canEditSales)}</span>
                   )}
+                  <ReservationLine reservation={reservation} className="admin-table-sub" />
                 </td>
                 <td>{car.km.toLocaleString('pt-BR')} km</td>
                 <td className={isStockStale(car, alertDefault) ? 'stock-days-stale' : ''}>
@@ -248,14 +282,12 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   </td>
                 )}
                 <td>
-                  <select
-                    className={`admin-status-select status-${car.status}`}
+                  <StatusMenu
                     value={car.status}
-                    onChange={(e) => onChangeStatus(car, e.target.value)}
+                    onChange={(next) => onChangeStatus(car, next)}
                     disabled={busyId === car.id}
-                  >
-                    {CAR_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                  </select>
+                    lockedReason={statusLock(car, canEditSales)}
+                  />
                 </td>
                 <td>
                   <RowActions
@@ -263,6 +295,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                     busy={busyId === car.id}
                     canDelete={canDelete}
                     canSeeCosts={canSeeCosts}
+                    canEditSales={canEditSales}
                     onToggleFeatured={onToggleFeatured}
                     onToggleHidden={onToggleHidden}
                     onDelete={onDelete}
@@ -276,7 +309,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
       </div>
 
       <div className="admin-card-list">
-        {rows.map(({ car, totalCost, margin, sale, sellerName, views }) => (
+        {rows.map(({ car, totalCost, margin, sale, sellerName, views, reservation }) => (
           <div className={`admin-card ${car.hidden ? 'is-hidden-row' : ''}`} key={car.id}>
             <div className="admin-card-top">
               <div className="admin-thumb admin-card-thumb">
@@ -284,7 +317,10 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
               </div>
               <div className="admin-card-title">
                 <strong>{car.brand} {car.model}</strong>
-                <span className="admin-table-sub">{car.version} · {car.modelYear}</span>
+                <span className="admin-table-sub">
+                  {car.version} · {car.modelYear}
+                  {car.plate && <> · <span className="car-plate">{car.plate.toUpperCase()}</span></>}
+                </span>
                 <span className="admin-card-meta">
                   <span className="admin-table-capitalize">{car.category}</span> · {car.km.toLocaleString('pt-BR')} km ·{' '}
                   <span className={isStockStale(car, alertDefault) ? 'stock-days-stale' : ''}>
@@ -293,18 +329,17 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   · {formatViews(views)}
                 </span>
                 {car.hidden && <span className="admin-hidden-badge">Oculto</span>}
-                {car.status === 'vendido' && (
-                  <span className="admin-card-meta">Vendedor: {sale ? sellerName || 'venda direta' : 'não registrado'}</span>
+                {car.status === 'vendido' && soldLabel(sale, sellerName, canEditSales) && (
+                  <span className="admin-card-meta">{soldLabel(sale, sellerName, canEditSales)}</span>
                 )}
+                <ReservationLine reservation={reservation} className="admin-card-meta" />
               </div>
-              <select
-                className={`admin-status-select status-${car.status}`}
+              <StatusMenu
                 value={car.status}
-                onChange={(e) => onChangeStatus(car, e.target.value)}
+                onChange={(next) => onChangeStatus(car, next)}
                 disabled={busyId === car.id}
-              >
-                {CAR_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
+                lockedReason={statusLock(car, canEditSales)}
+              />
             </div>
 
             <div className="admin-card-stats">
@@ -331,6 +366,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
               busy={busyId === car.id}
               canDelete={canDelete}
               canSeeCosts={canSeeCosts}
+              canEditSales={canEditSales}
               onToggleFeatured={onToggleFeatured}
               onToggleHidden={onToggleHidden}
               onDelete={onDelete}
@@ -345,7 +381,9 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
 
 export default function AdminCarList() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, canSeeCosts, canSeeSaleValues } = useAuth()
+  const { isAdmin, isStaff, isSeller, seller, canSeeCosts, canSeeSaleValues } = useAuth()
+  // Vendas e reservas: admin e gerente editam e desfazem; o vendedor só registra no nome dele
+  const canEditSales = isStaff
   const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
   const [minDays, setMinDays] = useState('')
   const [onlyAlert, setOnlyAlert] = useState(false)
@@ -368,6 +406,16 @@ export default function AdminCarList() {
   const [saleDialog, setSaleDialog] = useState(null)
   const [savingSale, setSavingSale] = useState(false)
   const [view, setView] = useState(readView)
+  const [checklistItems, setChecklistItems] = useState(DEFAULT_SALE_CHECKLIST)
+  const [banks, setBanks] = useState(DEFAULT_BANKS)
+  const [companyName, setCompanyName] = useState('')
+  const [reservations, setReservations] = useState([])
+  const [reserveDialog, setReserveDialog] = useState(null)
+  const [savingReserve, setSavingReserve] = useState(false)
+  // Listas da loja usadas no cadastro e na venda (admin e gerente editam)
+  const [lists, setLists] = useState({ intake: [], inspection: [] })
+  const [listsChooser, setListsChooser] = useState(false)
+  const [listDialog, setListDialog] = useState(null)
 
   function changeView(next) {
     setView(next)
@@ -382,16 +430,23 @@ export default function AdminCarList() {
     setLoading(true)
     setError('')
     try {
-      const [carsData, expensesData, salesData, sellersData, alertDefaultData, customersData] = await Promise.all([
+      const [carsData, expensesData, salesData, sellersData, settings, customersData, reservationsData] = await Promise.all([
         fetchAllCarsAdmin(),
         // Gastos só entram na conta do admin (o gerente não lê gastos)
         canSeeCosts ? fetchAllExpensesAdmin() : Promise.resolve([]),
         fetchSales(),
         fetchSellers(),
-        fetchStockAlertDefault(),
+        fetchCompanySettings(),
         fetchAllCustomers(),
+        // Reservas: se a loja ainda não tem a tabela, o estoque abre normalmente
+        fetchReservations().catch(() => []),
       ])
-      setAlertDefault(alertDefaultData)
+      setAlertDefault(settings.stockAlertDays)
+      setChecklistItems(settings.saleChecklist)
+      setBanks(settings.bankList)
+      setLists({ intake: settings.intakeChecklist, inspection: settings.inspectionChecklist })
+      setReservations(reservationsData)
+      setCompanyName(settings.name)
       setCars(carsData)
       setExpenses(expensesData)
       setSales(salesData)
@@ -420,9 +475,15 @@ export default function AdminCarList() {
 
   const sellersById = useMemo(() => {
     const map = {}
-    for (const seller of sellers) map[seller.id] = seller
+    for (const s of sellers) map[s.id] = s
     return map
   }, [sellers])
+
+  const reservationsByCar = useMemo(() => {
+    const map = {}
+    for (const r of reservations) if (r.status === 'ativa') map[r.carId] = r
+    return map
+  }, [reservations])
 
   const rows = useMemo(
     () =>
@@ -434,18 +495,18 @@ export default function AdminCarList() {
         const margin = revenue != null ? revenue - totalCost : null
         const sellerName = sale?.sellerId ? sellersById[sale.sellerId]?.name || '' : ''
         const views = carViews[car.id]?.views || 0
-        return { car, totalCost, margin, sale, sellerName, views }
+        const reservation = car.status === 'reservado' ? reservationsByCar[car.id] || null : null
+        return { car, totalCost, margin, sale, sellerName, views, reservation }
       }),
-    [cars, expensesByCar, salesByCar, sellersById, carViews]
+    [cars, expensesByCar, salesByCar, sellersById, carViews, reservationsByCar]
   )
 
   const minDaysValue = Number.parseInt(minDays, 10)
   const hasMinDays = Number.isFinite(minDaysValue) && minDaysValue > 0
 
   const filteredRows = useMemo(() => {
-    const query = search.trim().toLowerCase()
     return rows.filter(({ car }) => {
-      const matchesQuery = !query || `${car.brand} ${car.model} ${car.version}`.toLowerCase().includes(query)
+      const matchesQuery = matchesCarSearch(car, search)
       const matchesCategory = categoryFilter === 'todas' || car.category === categoryFilter
       // Filtros de tempo em estoque só fazem sentido para carros não vendidos
       const matchesDays = !hasMinDays || (car.status !== 'vendido' && daysInStock(car) > minDaysValue)
@@ -458,6 +519,7 @@ export default function AdminCarList() {
 
   const availableRows = filteredRows.filter((r) => r.car.status === 'disponivel')
   const maintenanceRows = filteredRows.filter((r) => r.car.status === 'manutencao')
+  const reservedRows = filteredRows.filter((r) => r.car.status === 'reservado')
   const soldRows = filteredRows.filter((r) => r.car.status === 'vendido')
   const isFiltering = search.trim() !== '' || categoryFilter !== 'todas' || hasMinDays || onlyAlert
 
@@ -485,24 +547,37 @@ export default function AdminCarList() {
     }
   }
 
-  async function confirmSale({ sellerId, customerId, salePrice, saleDate }) {
+  async function confirmSale(data) {
     const { car } = saleDialog
+    const reservation = reservationsByCar[car.id] || null
     setSavingSale(true)
+    let result
     try {
-      if (car.status !== 'vendido') {
-        const updated = await updateCarStatus(car.id, 'vendido', { saleDate, customerId })
-        setCars((prev) => prev.map((c) => (c.id === car.id ? updated : c)))
-      } else if ((car.customerId || null) !== (customerId || null)) {
-        const updated = await updateCarCustomer(car.id, customerId)
-        setCars((prev) => prev.map((c) => (c.id === car.id ? updated : c)))
-      }
-      const saved = await saveSaleForCar(car.id, { sellerId, salePrice, saleDate })
-      setSales((prev) => [...prev.filter((s) => s.carId !== car.id), saved])
+      result = await registerSaleFromDialog(car, data, {
+        reservation,
+        insertOnly: !canEditSales && !salesByCar[car.id],
+      })
+      setSales((prev) => [...prev.filter((s) => s.carId !== car.id), result.sale])
+      setCars((prev) => prev.map((c) => (c.id === car.id ? result.car : c)))
+      if (reservation) setReservations((prev) => prev.filter((r) => r.id !== reservation.id))
       setSaleDialog(null)
     } catch (err) {
       alert('Não foi possível registrar a venda: ' + err.message)
+      if (data.tradeIn) fetchAllCarsAdmin().then(setCars).catch(() => {})
+      return
     } finally {
       setSavingSale(false)
+    }
+    // O carro da troca aparece no estoque
+    if (result.tradeInCarId) fetchAllCarsAdmin().then(setCars).catch(() => {})
+    const { customerId, checklist, generateTerm } = data
+    const soldCar = result.car
+    const saved = result.sale
+    if (generateTerm) {
+      const customer = customers.find((c) => c.id === customerId) || null
+      downloadDeliveryTerm({ car: soldCar, customer, sale: saved, checklist, companyName }).catch((err) =>
+        alert('A venda foi registrada, mas o termo de entrega não foi gerado: ' + err.message)
+      )
     }
   }
 
@@ -512,6 +587,45 @@ export default function AdminCarList() {
     if (nextStatus === 'vendido') {
       setSaleDialog({ car })
       return
+    }
+
+    if (nextStatus === 'reservado') {
+      if (car.status === 'vendido') {
+        await confirm('Um carro vendido não pode ser reservado. Desfaça a venda antes (só o administrador).', {
+          title: 'Carro vendido',
+          confirmLabel: 'Entendi',
+        })
+        return
+      }
+      setReserveDialog({ car })
+      return
+    }
+
+    // Saindo de "reservado" (admin e gerente): a reserva é cancelada
+    if (car.status === 'reservado') {
+      const reservation = reservationsByCar[car.id]
+      if (!(await confirm(`Cancelar a reserva${reservation?.customerName ? ` de ${reservation.customerName}` : ''} e mudar o status? O sinal recebido, se houver, precisa ser tratado com o cliente.`, {
+        title: 'Cancelar reserva',
+        confirmLabel: 'Cancelar reserva',
+        cancelLabel: 'Manter reservado',
+      }))) return
+      setBusyId(car.id)
+      try {
+        if (reservation) {
+          await closeReservation(reservation.id, 'cancelada')
+          setReservations((prev) => prev.filter((r) => r.id !== reservation.id))
+        } else {
+          await updateCarStatus(car.id, 'disponivel')
+        }
+        setCars((prev) => prev.map((c) => (c.id === car.id ? { ...c, status: 'disponivel' } : c)))
+      } catch (err) {
+        alert('Não foi possível cancelar a reserva: ' + err.message)
+        setBusyId(null)
+        return
+      }
+      setBusyId(null)
+      if (nextStatus === 'disponivel') return
+      car = { ...car, status: 'disponivel' }
     }
 
     if (car.status === 'vendido' && salesByCar[car.id] && !isAdmin) {
@@ -542,6 +656,22 @@ export default function AdminCarList() {
     }
 
     await applyStatusChange(car, nextStatus)
+  }
+
+  async function confirmReserve(data) {
+    const { car } = reserveDialog
+    setSavingReserve(true)
+    try {
+      await reserveCar(data)
+      const [carsData, reservationsData] = await Promise.all([fetchAllCarsAdmin(), fetchReservations()])
+      setCars(carsData)
+      setReservations(reservationsData)
+      setReserveDialog(null)
+    } catch (err) {
+      alert(`Não foi possível reservar ${car.brand} ${car.model}: ` + err.message)
+    } finally {
+      setSavingReserve(false)
+    }
   }
 
   async function toggleFeatured(car) {
@@ -616,9 +746,16 @@ export default function AdminCarList() {
           <p>{cars.length} {cars.length === 1 ? 'carro cadastrado' : 'carros cadastrados'}</p>
         </div>
         <div className="admin-row-actions">
-          <button type="button" className="btn btn-outline" onClick={openAlertDialog}>
-            <BellRing size={15} /> Aviso de estoque
-          </button>
+          {isStaff && (
+            <button type="button" className="btn btn-outline" onClick={openAlertDialog}>
+              <BellRing size={15} /> Aviso de estoque
+            </button>
+          )}
+          {isStaff && (
+            <button type="button" className="btn btn-outline" onClick={() => setListsChooser(true)}>
+              <ListChecks size={15} /> Listas do cadastro
+            </button>
+          )}
           <div className="admin-segmented admin-view-toggle" role="radiogroup" aria-label="Modo de visualização">
             <button
               type="button"
@@ -655,7 +792,7 @@ export default function AdminCarList() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por marca, modelo ou versão…"
+              placeholder="Buscar por placa, marca, modelo ou versão…"
             />
           </label>
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
@@ -710,6 +847,7 @@ export default function AdminCarList() {
             canDelete={isAdmin}
             canSeeCosts={canSeeCosts}
             canSeeSaleValues={canSeeSaleValues}
+            canEditSales={canEditSales}
             onChangeStatus={changeStatus}
             onToggleFeatured={toggleFeatured}
             onToggleHidden={toggleHidden}
@@ -726,12 +864,30 @@ export default function AdminCarList() {
             canDelete={isAdmin}
             canSeeCosts={canSeeCosts}
             canSeeSaleValues={canSeeSaleValues}
+            canEditSales={canEditSales}
             onChangeStatus={changeStatus}
             onToggleFeatured={toggleFeatured}
             onToggleHidden={toggleHidden}
             onDelete={handleDelete}
             onEditSale={(car) => setSaleDialog({ car })}
             emptyLabel="Nenhum carro em manutenção."
+          />
+          <CarGroup
+            title="Reservados"
+            rows={reservedRows}
+            busyId={busyId}
+            view={view}
+            alertDefault={alertDefault}
+            canDelete={isAdmin}
+            canSeeCosts={canSeeCosts}
+            canSeeSaleValues={canSeeSaleValues}
+            canEditSales={canEditSales}
+            onChangeStatus={changeStatus}
+            onToggleFeatured={toggleFeatured}
+            onToggleHidden={toggleHidden}
+            onDelete={handleDelete}
+            onEditSale={(car) => setSaleDialog({ car })}
+            emptyLabel="Nenhum carro reservado."
           />
           <CarGroup
             title="Vendidos"
@@ -742,6 +898,7 @@ export default function AdminCarList() {
             canDelete={isAdmin}
             canSeeCosts={canSeeCosts}
             canSeeSaleValues={canSeeSaleValues}
+            canEditSales={canEditSales}
             onChangeStatus={changeStatus}
             onToggleFeatured={toggleFeatured}
             onToggleHidden={toggleHidden}
@@ -794,9 +951,51 @@ export default function AdminCarList() {
           onCustomerCreated={(created) => setCustomers((prev) => [...prev, created].sort((x, y) => x.name.localeCompare(y.name)))}
           showCommission={canSeeSaleValues}
           initialSale={salesByCar[saleDialog.car.id]}
+          checklistItems={checklistItems}
+          banks={banks}
+          lockedSeller={isSeller ? seller : null}
           saving={savingSale}
           onConfirm={confirmSale}
           onClose={() => setSaleDialog(null)}
+        />
+      )}
+
+      {reserveDialog && (
+        <ReserveDialog
+          car={reserveDialog.car}
+          sellers={sellers}
+          customers={customers}
+          onCustomerCreated={(created) => setCustomers((prev) => [...prev, created].sort((x, y) => x.name.localeCompare(y.name)))}
+          lockedSeller={isSeller ? seller : null}
+          saving={savingReserve}
+          onConfirm={confirmReserve}
+          onClose={() => setReserveDialog(null)}
+        />
+      )}
+
+      {listsChooser && (
+        <ConfirmDialog
+          title="Listas do cadastro"
+          message="Qual lista você quer editar? Elas aparecem no cadastro do carro, na venda, no contrato e no financiamento externo."
+          onClose={() => setListsChooser(false)}
+          options={[
+            { label: 'Itens que vêm com o carro', variant: 'primary', onClick: () => { setListsChooser(false); setListDialog('intake') } },
+            { label: 'Vistoria de entrada', onClick: () => { setListsChooser(false); setListDialog('inspection') } },
+            { label: 'Bancos', onClick: () => { setListsChooser(false); setListDialog('banks') } },
+          ]}
+        />
+      )}
+
+      {listDialog && (
+        <ChecklistSettingsDialog
+          kind={listDialog}
+          items={listDialog === 'banks' ? banks : lists[listDialog]}
+          onSaved={(items) => {
+            if (listDialog === 'banks') setBanks(items)
+            else setLists((prev) => ({ ...prev, [listDialog]: items }))
+            setListDialog(null)
+          }}
+          onClose={() => setListDialog(null)}
         />
       )}
 

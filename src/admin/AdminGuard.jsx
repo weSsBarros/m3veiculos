@@ -27,3 +27,10 @@ export function StaffOnly({ children }) {
   if (!isStaff) return <Navigate to="/admin" replace />
   return children
 }
+
+// Financeiro dos clientes: admin ou gerente que vê os valores das vendas
+export function CustomerFinanceOnly({ children }) {
+  const { canManageCustomerFinance } = useAuth()
+  if (!canManageCustomerFinance) return <Navigate to="/admin" replace />
+  return children
+}
