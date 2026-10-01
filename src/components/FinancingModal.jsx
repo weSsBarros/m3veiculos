@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { whatsappLinkForFinancing } from '../utils/whatsapp.js'
 import { maskBirthDate } from '../utils/masks.js'
 import './FinancingModal.css'
+import { openWhatsApp } from '../utils/whatsappRouter.js'
 
 const EMPTY_FORM = {
   fullName: '',
@@ -23,7 +24,7 @@ export default function FinancingModal({ car, onClose }) {
 
   function handleSubmit(e) {
     e.preventDefault()
-    window.open(whatsappLinkForFinancing(car, form), '_blank', 'noreferrer')
+    openWhatsApp(whatsappLinkForFinancing(car, form))
     onClose()
   }
 

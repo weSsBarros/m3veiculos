@@ -402,6 +402,132 @@ select test.check('vendedor B: não enxerga nada da loja A (nem após rodar o sc
 select test.check('vendedor B: continua vendedor (não vê custos da própria loja)', test.count('select * from cars') = 0 and not is_company_admin());
 reset role;
 
+-- ============================== 31) WhatsApp, configurações e atendimento
+-- Preparação (sem RLS): loja A em rodízio com o vendedor A, o desativado, um
+-- número avulso e o vendedor A2 (inativo no rodízio); loja B em modo fixo com
+-- um número no rodízio (que não deve ser usado)
+reset role;
+update public.sellers set phone = '(98) 91111-0004' where id = '5e000000-0000-0000-0000-000000000004';
+update public.sellers set phone = '(98) 91111-0005' where id = '5e000000-0000-0000-0000-000000000005';
+update public.sellers set phone = '(98) 91111-0006' where id = '5e000000-0000-0000-0000-000000000006';
+update public.companies set whatsapp_mode = 'rodizio', whatsapp_main = '(98) 98888-0000', whatsapp_last_entry = null where id = test.company_a();
+update public.companies set whatsapp_mode = 'fixo', whatsapp_main = '98 96666-0000' where slug = 'loja-b';
+insert into public.whatsapp_rotation (id, company_id, seller_id, name, phone, active, position)
+select v.id::uuid, test.company_a(), v.seller::uuid, v.name, v.phone, v.active, v.pos
+from (values
+  ('0a000000-0000-0000-0000-000000000001', '5e000000-0000-0000-0000-000000000004', '', '', true, 1),
+  ('0a000000-0000-0000-0000-000000000002', '5e000000-0000-0000-0000-000000000006', '', '', true, 2),
+  ('0a000000-0000-0000-0000-000000000003', null, 'Recepção', '(98) 3222-0003', true, 3),
+  ('0a000000-0000-0000-0000-000000000004', '5e000000-0000-0000-0000-000000000005', '', '', false, 4)
+) v(id, seller, name, phone, active, pos);
+insert into public.whatsapp_rotation (id, company_id, name, phone, position)
+values ('0b000000-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-00000000000b', 'B', '(98) 97777-0000', 1);
+insert into public.customer_interests (id, company_id, customer_id, kind, brand, model, price_max)
+values ('1a000000-0000-0000-0000-000000000001', test.company_a(), 'c0000000-0000-0000-0000-0000000000a2', 'procura', 'TOYOTA', 'corolla', 120000);
+insert into public.customer_interests (id, company_id, customer_id, kind, brand)
+values ('1b000000-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-00000000000b', 'c0000000-0000-0000-0000-0000000000b1', 'procura', 'Toyota');
+
+-- ======================================================== anônimo (site)
+select test.login(null);
+set role anon;
+select test.check('site: rodízio em sequência, pulando desativado e inativo',
+  (select string_agg(right(p, 4), ',' order by g)
+   from (select g, whatsapp_contact(test.company_a()) ->> 'phone' as p from generate_series(1, 4) g) s) = '0004,0003,0004,0003');
+select test.check('site: o mesmo navegador continua com o mesmo número',
+  whatsapp_contact(test.company_a(), null, '0a000000-0000-0000-0000-000000000003') ->> 'entry_id' = '0a000000-0000-0000-0000-000000000003');
+select test.check('site: quem foi desativado na Equipe não é mantido',
+  whatsapp_contact(test.company_a(), null, '0a000000-0000-0000-0000-000000000002') ->> 'entry_id' = '0a000000-0000-0000-0000-000000000001');
+select test.check('site: modo fixo usa o número principal (mesmo com rodízio cadastrado)',
+  whatsapp_contact('bbbbbbbb-0000-0000-0000-00000000000b') ->> 'phone' = '5598966660000');
+select test.check('site: número principal para o topo e o rodapé', store_contact(test.company_a()) ->> 'main' = '5598988880000');
+select test.check('site: não lê rodízio, contatos, interesses, avisos, atendimentos nem pendências',
+  test.count('select * from whatsapp_rotation') <= 0 and test.count('select * from whatsapp_leads') <= 0
+  and test.count('select * from customer_interests') <= 0 and test.count('select * from customer_interest_matches') <= 0
+  and test.count('select * from customer_contacts') <= 0 and test.count('select * from dashboard_dismissals') <= 0);
+select test.check('site: não grava contato direto nem configurações',
+  test.denied($$insert into whatsapp_leads (company_id) values ('bbbbbbbb-0000-0000-0000-00000000000b')$$)
+  and test.denied($$select save_store_settings('{"whatsapp_mode": "fixo"}')$$)
+  and test.denied($$select * from team_directory()$$));
+reset role;
+
+-- ================================================================= admin A
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: vê o rodízio e os contatos do site só da loja A',
+  test.count('select * from whatsapp_rotation') = 4 and test.count('select * from whatsapp_leads') = 6);
+select test.check('admin A: edita o rodízio',
+  test.allowed($$update whatsapp_rotation set position = 3 where id = '0a000000-0000-0000-0000-000000000003'$$)
+  and test.allowed($$insert into whatsapp_rotation (company_id, name, phone, position) values (current_company_id(), 'Extra', '(98) 95555-0000', 9)$$));
+select test.check('admin A: não põe vendedor de outra loja no rodízio',
+  test.denied($$insert into whatsapp_rotation (company_id, seller_id) values (current_company_id(), '5e000000-0000-0000-0000-0000000000b2')$$));
+select test.check('admin A: salva as configurações pela função',
+  test.allowed($$select save_store_settings('{"panel_settings": {"hiddenTabs": {"all": [], "manager": [], "seller": ["relatorios"]}, "hiddenBlocks": ["visits"]}, "whatsapp_sticky_days": 15}')$$));
+select test.check('admin A: configuração gravada, e não dá para alterar direto na tabela',
+  (select whatsapp_sticky_days from companies) = 15 and test.denied($$update companies set whatsapp_mode = 'fixo'$$));
+select test.check('admin A: dispensa uma pendência só para si',
+  test.allowed($$insert into dashboard_dismissals (company_id, key, dismissed_count) values (current_company_id(), 'car-photo', 3)$$)
+  and test.denied($$insert into dashboard_dismissals (user_id, company_id, key) values ('aaaaaaaa-0000-0000-0000-000000000004', current_company_id(), 'car-photo')$$));
+select test.check('admin A: carro novo que combina gera aviso para o cliente',
+  test.allowed($$insert into cars (company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, category, price, status)
+    values (current_company_id(), 'corolla-combina', 'Toyota', 'Corolla', 'XEi 2.0', 2021, '2021/2022', 30000, 'Automático', 'Flex', 'Prata', 'sedan', 110000, 'disponivel')$$)
+  and test.count($$select * from customer_interest_matches where customer_id = 'c0000000-0000-0000-0000-0000000000a2' and status = 'novo'$$) = 1);
+select test.check('admin A: carro oculto ou acima do preço não gera aviso',
+  test.allowed($$insert into cars (company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, category, price, status)
+    values (current_company_id(), 'corolla-caro', 'Toyota', 'Corolla', 'Altis', 2023, '2023/2023', 10000, 'Automático', 'Flex', 'Preto', 'sedan', 150000, 'disponivel')$$)
+  and test.allowed($$insert into cars (company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, category, price, status, hidden)
+    values (current_company_id(), 'corolla-oculto', 'Toyota', 'Corolla', 'GLi', 2020, '2020/2020', 50000, 'Automático', 'Flex', 'Branco', 'sedan', 90000, 'disponivel', true)$$)
+  and test.count('select * from customer_interest_matches') = 1);
+reset role;
+
+-- ============================================================== vendedor A
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: vê só os próprios contatos do site', test.count('select * from whatsapp_leads') = 3);
+select test.check('vendedor A: lê o rodízio, mas não altera',
+  test.count('select * from whatsapp_rotation') = 5
+  and test.denied($$update whatsapp_rotation set active = false$$) and test.denied($$delete from whatsapp_rotation$$));
+select test.check('vendedor A: não salva configurações nem vê as pendências dispensadas pelo admin',
+  test.denied($$select save_store_settings('{"whatsapp_mode": "fixo"}')$$) and test.count('select * from dashboard_dismissals') = 0);
+select test.check('vendedor A: vê os nomes da equipe (sem comissões)', test.count('select * from team_directory()') >= 6);
+select test.check('vendedor A: cadastra interesse e atendimento (com o nome dele)',
+  test.allowed($$insert into customer_interests (company_id, customer_id, kind, brand) values (current_company_id(), 'c0000000-0000-0000-0000-0000000000a1', 'procura', 'Honda')$$)
+  and test.allowed($$insert into customer_contacts (company_id, customer_id, notes, follow_up_on) values (current_company_id(), 'c0000000-0000-0000-0000-0000000000a1', 'Ligar de novo', current_date)$$)
+  and test.count($$select * from customer_contacts where author_name = 'Vendedor A'$$) = 1);
+select test.check('vendedor A: marca o aviso de carro como avisado',
+  test.allowed($$update customer_interest_matches set status = 'avisado'$$)
+  and test.count($$select * from customer_interest_matches where handled_by = auth.uid() and handled_at is not null$$) = 1);
+reset role;
+
+-- ============================================================= vendedor A2
+select test.login('aaaaaaaa-0000-0000-0000-000000000005');
+set role authenticated;
+select test.check('vendedor A2: não altera nem apaga interesse e atendimento de outro vendedor',
+  test.denied($$update customer_interests set notes = 'x' where brand = 'Honda'$$)
+  and test.denied($$delete from customer_contacts$$));
+reset role;
+
+-- =============================================================== gerente A
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente A: vê todos os contatos do site, edita interesse de vendedor, não salva configurações',
+  test.count('select * from whatsapp_leads') = 6
+  and test.allowed($$update customer_interests set notes = 'ok' where brand = 'Honda'$$)
+  and test.denied($$select save_store_settings('{"whatsapp_mode": "fixo"}')$$));
+reset role;
+
+-- ================================================================= admin B
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê rodízio, contatos, interesses, avisos nem atendimentos da loja A',
+  test.count('select * from whatsapp_rotation') = 1 and test.count('select * from whatsapp_leads') = 1
+  and test.count('select * from customer_interests') = 1 and test.count('select * from customer_interest_matches') = 0
+  and test.count('select * from customer_contacts') = 0);
+select test.check('admin B: não liga interesse a cliente da loja A',
+  test.denied($$insert into customer_interests (company_id, customer_id, brand) values (current_company_id(), 'c0000000-0000-0000-0000-0000000000a1', 'Fiat')$$));
+select test.check('admin B: não põe vendedor da loja A como responsável pelo cliente',
+  test.denied($$update customers set responsible_seller_id = '5e000000-0000-0000-0000-000000000004'$$));
+reset role;
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;

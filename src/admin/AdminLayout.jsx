@@ -19,12 +19,15 @@ import {
   Handshake,
   Landmark,
   FileChartColumn,
+  Settings,
+  EyeOff,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import ViewAsBar from './ViewAsBar.jsx'
 import { fetchOpenTransfers } from '../lib/salesApi.js'
 import { fetchOverdueInstallments } from '../lib/financingApi.js'
 import { transferAlert } from '../utils/transfer.js'
+import { tabForPath } from '../utils/panelSettings.js'
 import './admin.css'
 
 const SIDEBAR_KEY = 'admin_sidebar_expanded'
@@ -43,6 +46,7 @@ const ADMIN_NAV = [
   { to: '/admin/fornecedores', icon: Truck, label: 'Fornecedores' },
   { to: '/admin/equipe', icon: BadgeCheck, label: 'Equipe' },
   { to: '/admin/atividades', icon: ScrollText, label: 'Atividades' },
+  { to: '/admin/configuracoes', icon: Settings, label: 'Configurações' },
 ]
 
 // Gerente: as abas do admin, mas o Financeiro só com o "Financeiro dos
@@ -50,6 +54,7 @@ const ADMIN_NAV = [
 // só do admin); as demais telas escondem o que ele não pode ver ou fazer.
 function managerNav(canManageCustomerFinance) {
   return ADMIN_NAV.flatMap((item) => {
+    if (item.to === '/admin/configuracoes') return []
     if (item.to !== '/admin/financeiro') return [item]
     return canManageCustomerFinance ? [{ ...item, to: '/admin/financeiro/clientes' }] : []
   })
@@ -100,7 +105,7 @@ function readExpanded() {
 }
 
 export default function AdminLayout() {
-  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut } = useAuth()
+  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden } = useAuth()
   const [expanded, setExpanded] = useState(readExpanded)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
@@ -122,7 +127,11 @@ export default function AdminLayout() {
     })
   }
 
-  const nav = isAdmin ? ADMIN_NAV : isManager ? managerNav(canManageCustomerFinance) : SELLER_NAV
+  // Abas escondidas em Configurações somem do menu (o início nunca some)
+  const nav = (isAdmin ? ADMIN_NAV : isManager ? managerNav(canManageCustomerFinance) : SELLER_NAV).filter(
+    (item) => item.end || !isTabHidden(tabForPath(item.to))
+  )
+  const hiddenHere = isTabHidden(tabForPath(pathname))
   const showLabels = expanded || mobileOpen
 
   return (
@@ -223,7 +232,21 @@ export default function AdminLayout() {
       <main className="admin-main">
         <ViewAsBar />
         {/* Trocar a visão remonta a tela, que busca os dados de novo */}
-        <Outlet key={viewAs ? `${viewAs.role}-${viewAs.sellerId || 'generico'}` : 'normal'} />
+        {hiddenHere ? (
+          <div className="admin-page">
+            <div className="admin-hidden-tab">
+              <EyeOff size={28} />
+              <h1>Aba escondida</h1>
+              <p>{isAdmin ? 'Esta aba está escondida em Configurações → Painel.' : 'O administrador escondeu esta aba do painel.'}</p>
+              <div className="admin-row-actions">
+                <Link to="/admin" className="btn btn-primary">Voltar para o início</Link>
+                {isAdmin && !viewAs && <Link to="/admin/configuracoes" className="btn btn-outline">Abrir Configurações</Link>}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Outlet key={viewAs ? `${viewAs.role}-${viewAs.sellerId || 'generico'}` : 'normal'} />
+        )}
       </main>
     </div>
   )

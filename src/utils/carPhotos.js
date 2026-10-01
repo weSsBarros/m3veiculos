@@ -23,6 +23,14 @@ export function thumbUrl(url) {
   return hasThumb(url) ? url.replace(/\/([^/]+)$/, '/thumbs/$1') : url
 }
 
+// Fotos que saíram do cadastro: as que estiveram no formulário (gravadas antes
+// ou enviadas agora) e não ficaram na lista salva. O painel apaga essas do
+// site só depois de salvar o carro.
+export function removedPhotos(seen, kept) {
+  const keep = new Set(kept)
+  return [...new Set(seen)].filter((url) => url && !keep.has(url))
+}
+
 // Atributos de <img>: o navegador escolhe a miniatura ou a foto grande
 // conforme o tamanho em que a imagem aparece na tela.
 export function responsivePhoto(url, sizes) {

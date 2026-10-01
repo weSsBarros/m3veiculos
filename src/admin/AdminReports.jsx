@@ -10,6 +10,7 @@ import { fetchAllSuppliers } from '../lib/suppliersApi.js'
 import { fetchFinancings } from '../lib/financingApi.js'
 import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
 import { fetchCompanySettings } from '../lib/companyApi.js'
+import { fetchLeads, fetchTeamDirectory, fetchRotation } from '../lib/storeSettingsApi.js'
 import { expenseCategoryLabel } from '../utils/carFormat.js'
 import { periodRange } from '../utils/period.js'
 import {
@@ -18,6 +19,7 @@ import {
   buildExpensesReport,
   buildFinancingReport,
   buildCustomersReport,
+  buildLeadsReport,
 } from '../utils/reports/build.js'
 import { exportReportPdf, exportReportExcel } from '../utils/reports/export.js'
 import PeriodFilter from './PeriodFilter.jsx'
@@ -52,6 +54,22 @@ export default function AdminReports() {
           fetchExternalFinancings().catch(() => []),
         ])
         return buildSalesReport({ sales, cars, sellers, customers, externals, range, showValues: canSeeSaleValues || isSeller })
+      },
+    },
+    {
+      id: 'contatos',
+      title: isSeller ? 'Meus contatos pelo WhatsApp' : 'Contatos pelo WhatsApp',
+      description: 'Cliques nos botões de WhatsApp do site: quantos clientes cada vendedor recebeu (novos e que voltaram) e quais carros geraram mais contatos.',
+      usesPeriod: true,
+      show: true,
+      build: async () => {
+        const [leads, team, rotation, cars] = await Promise.all([
+          fetchLeads({ start: range.start, end: range.end }),
+          fetchTeamDirectory().catch(() => []),
+          fetchRotation().catch(() => []),
+          fetchAllCarsAdmin(),
+        ])
+        return buildLeadsReport({ leads, team, rotation, cars, range })
       },
     },
     {

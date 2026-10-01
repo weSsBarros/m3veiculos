@@ -346,3 +346,83 @@ export function buildCustomersReport({ customers, cars = [] }) {
     ],
   }
 }
+
+// Contatos pelo WhatsApp do site (um por clique): por vendedor, por carro e a
+// lista. Quem já tinha falado com o mesmo vendedor conta como "voltou".
+// team: nomes da equipe; rotation: entradas do rodízio (números avulsos).
+export function buildLeadsReport({ leads, team = [], rotation = [], cars = [], range }) {
+  const teamById = byId(team)
+  const rotationById = byId(rotation)
+  const carsById = byId(cars)
+  const who = (lead) => {
+    if (lead.sellerId) return teamById[lead.sellerId]?.name || 'Vendedor removido'
+    if (lead.rotationId) return rotationById[lead.rotationId]?.name || 'Número removido do rodízio'
+    return 'Número principal'
+  }
+  const inPeriod = leads.filter((l) => inRange(l.createdAt.slice(0, 10), range))
+
+  const perPerson = {}
+  for (const lead of inPeriod) {
+    const name = who(lead)
+    const row = (perPerson[name] ||= { name, fresh: 0, returning: 0, total: 0 })
+    if (lead.isReturning) row.returning += 1
+    else row.fresh += 1
+    row.total += 1
+  }
+  const personRows = Object.values(perPerson).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
+
+  const perCar = {}
+  for (const lead of inPeriod) {
+    const key = lead.carId || 'geral'
+    const row = (perCar[key] ||= { car: lead.carId ? carName(carsById[lead.carId]) : 'Sem carro (página geral, contato etc.)', total: 0 })
+    row.total += 1
+  }
+  const carRows = Object.values(perCar).sort((a, b) => b.total - a.total)
+
+  const listRows = inPeriod.map((lead) => ({
+    date: lead.createdAt,
+    time: new Date(lead.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    who: who(lead),
+    car: lead.carId ? carName(carsById[lead.carId]) : '',
+    kind: lead.isReturning ? 'Voltou' : 'Novo',
+  }))
+
+  return {
+    title: 'Contatos pelo WhatsApp',
+    subtitle: `${periodSubtitle(range)} · ${count(inPeriod.length, 'contato', 'contatos')}`,
+    sections: [
+      {
+        title: 'Por vendedor',
+        columns: [
+          { key: 'name', label: 'Vendedor ou número', type: 'text' },
+          { key: 'fresh', label: 'Clientes novos', type: 'int' },
+          { key: 'returning', label: 'Voltaram', type: 'int' },
+          { key: 'total', label: 'Total de cliques', type: 'int' },
+        ],
+        rows: personRows,
+        totals: { name: 'Total', fresh: sum(personRows, 'fresh'), returning: sum(personRows, 'returning'), total: sum(personRows, 'total') },
+      },
+      {
+        title: 'Por carro',
+        columns: [
+          { key: 'car', label: 'Carro', type: 'text' },
+          { key: 'total', label: 'Contatos', type: 'int' },
+        ],
+        rows: carRows,
+        totals: null,
+      },
+      {
+        title: 'Todos os contatos',
+        columns: [
+          { key: 'date', label: 'Data', type: 'date' },
+          { key: 'time', label: 'Hora', type: 'text' },
+          { key: 'who', label: 'Vendedor ou número', type: 'text' },
+          { key: 'car', label: 'Carro', type: 'text' },
+          { key: 'kind', label: 'Cliente', type: 'text' },
+        ],
+        rows: listRows,
+        totals: null,
+      },
+    ],
+  }
+}

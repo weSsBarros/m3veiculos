@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import './Footer.css'
+import MainPhone from './MainPhone.jsx'
 
 export default function Footer() {
   const [email, setEmail] = useState('')
@@ -76,7 +77,7 @@ export default function Footer() {
           <h4>Precisa de atendimento?</h4>
           <p className="footer-hours">Seg. a sex. — 08h às 18h</p>
           <p className="footer-hours">Sáb. — 08h às 14h</p>
-          <p><strong>WhatsApp:</strong> (98) 98189-3675</p>
+          <p><strong>WhatsApp:</strong> <MainPhone fallback="(98) 98189-3675" /></p>
           <p><strong>WhatsApp:</strong> (98) 98888-6144</p>
           <p><strong>E-mail:</strong> contato@m3veiculos.com.br</p>
           <p><strong>Endereço:</strong> Av. dos Holandeses, Qd. 38, nº 25 — São Luís/MA, CEP 65071-380</p>

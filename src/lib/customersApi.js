@@ -10,13 +10,21 @@ function fromRow(row) {
     email: row.email || '',
     address: row.address || '',
     notes: row.notes || '',
+    // Vendedor responsável (recebe os avisos de carro que combina)
+    responsibleSellerId: row.responsible_seller_id || null,
+    // Carro dele para a troca: { model, year, km, expectedValue }
+    tradeIn: obj(row.trade_in),
+    // Como pretende pagar: { method, downPayment, maxInstallment }
+    paymentIntent: obj(row.payment_intent),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
+// Os campos de negociação só vão quando vieram no objeto: quem cadastra pelo
+// seletor rápido (venda, contrato) não apaga o que já estava gravado.
 function toRow(customer) {
-  return {
+  const row = {
     company_id: COMPANY_ID,
     name: customer.name,
     document: customer.document || '',
@@ -26,6 +34,24 @@ function toRow(customer) {
     address: customer.address || '',
     notes: customer.notes || '',
   }
+  if (customer.responsibleSellerId !== undefined) row.responsible_seller_id = customer.responsibleSellerId || null
+  if (customer.tradeIn !== undefined) row.trade_in = cleanObject(customer.tradeIn)
+  if (customer.paymentIntent !== undefined) row.payment_intent = cleanObject(customer.paymentIntent)
+  return row
+}
+
+function obj(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+// Tira campos vazios (o banco guarda só o que foi preenchido)
+function cleanObject(value) {
+  const out = {}
+  for (const [key, v] of Object.entries(obj(value))) {
+    if (v === '' || v == null) continue
+    out[key] = typeof v === 'string' ? v.trim() : v
+  }
+  return out
 }
 
 function requireSupabase() {

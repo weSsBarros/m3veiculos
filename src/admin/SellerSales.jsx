@@ -11,11 +11,14 @@ import { externalGaps, unpaidCommissions } from '../utils/dashboardAlerts.js'
 import { formatCurrency, formatCurrencyCents, formatDateBR } from '../utils/carFormat.js'
 import { periodRange, inRange } from '../utils/period.js'
 import PeriodFilter from './PeriodFilter.jsx'
+import PendencyList from './PendencyList.jsx'
+import useCustomerPendencies from './useCustomerPendencies.js'
+import { PENDENCY_TABS } from '../utils/panelSettings.js'
 import './admin.css'
 
 // Tela inicial do vendedor. A RLS garante que "sales" só devolve as vendas dele.
 export default function SellerSales() {
-  const { seller } = useAuth()
+  const { seller, isTabHidden } = useAuth()
   const [sales, setSales] = useState([])
   const [cars, setCars] = useState([])
   const [externals, setExternals] = useState([])
@@ -66,6 +69,10 @@ export default function SellerSales() {
   const unpaid = unpaidCommissions(sales, externals)
   const extGaps = externalGaps(externals)
   const activeReservations = reservations.filter((r) => r.status === 'ativa')
+  // Avisos dos clientes dele (e dos clientes sem vendedor responsável)
+  const pendencies = useCustomerPendencies(cars, { onlyMine: true, sellerId: seller?.id || null, userId: seller?.userId || null }).filter(
+    (item) => !isTabHidden(PENDENCY_TABS[item.key])
+  )
 
   if (loading) return <p className="admin-muted">Carregando…</p>
 
@@ -92,6 +99,8 @@ export default function SellerSales() {
       </div>
 
       {error && <p className="admin-error">{error}</p>}
+
+      <PendencyList items={pendencies} title="Seus avisos" />
 
       <div className="expense-summary">
         <div className="expense-summary-card">

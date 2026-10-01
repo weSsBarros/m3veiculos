@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { RefreshCcw, Pencil, Trash2, Search, FolderOpen } from 'lucide-react'
+import { RefreshCcw, Pencil, Trash2, Search, FolderOpen, MessageCircle, Sparkles, CalendarClock, AlertTriangle } from 'lucide-react'
 import { fetchAllCustomers, createCustomer, updateCustomer, deleteCustomer } from '../lib/customersApi.js'
 import { fetchAllCarsAdmin, fetchSellerCars } from '../lib/carsApi.js'
 import { fetchSales } from '../lib/salesApi.js'
@@ -8,14 +8,39 @@ import { fetchSellers } from '../lib/sellersApi.js'
 import { removeCustomerDocumentFiles } from '../lib/customerDocumentsApi.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { maskCPF, maskPhoneBR } from '../utils/masks.js'
-import { matchesCarSearch } from '../utils/carFormat.js'
+import { matchesCarSearch, parseIntBR, todayISO } from '../utils/carFormat.js'
+import { fetchTeamDirectory } from '../lib/storeSettingsApi.js'
+import { fetchMatches, fetchContacts, fetchInterests } from '../lib/customerCrmApi.js'
+import { likedCarGone, PAYMENT_INTENTS } from '../utils/customerInterests.js'
 import CustomerFileDialog from './CustomerFileDialog.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 
-function emptyCustomer() {
-  return { name: '', document: '', rg: '', phone: '', email: '', address: '', notes: '' }
+function emptyCustomer(responsibleSellerId = '') {
+  return {
+    name: '',
+    document: '',
+    rg: '',
+    phone: '',
+    email: '',
+    address: '',
+    notes: '',
+    responsibleSellerId,
+    tradeIn: { model: '', year: '', km: '', expectedValue: '' },
+    paymentIntent: { method: '', downPayment: '', maxInstallment: '' },
+  }
 }
+
+const asText = (v) => (v == null ? '' : String(v))
+
+// Filtros da lista (?filtro=): também são os destinos dos avisos do Dashboard
+const FILTERS = [
+  { value: '', label: 'Todos' },
+  { value: 'meus', label: 'Meus clientes' },
+  { value: 'combina', label: 'Carro novo que combina' },
+  { value: 'retorno', label: 'Retorno hoje ou atrasado' },
+  { value: 'carro-vendido', label: 'Carro que gostou foi vendido' },
+]
 
 function PurchaseLink({ car, isAdmin }) {
   if (!isAdmin) return <span className="expense-attachment-link">{car.brand} {car.model}</span>
@@ -28,7 +53,8 @@ function PurchaseLink({ car, isAdmin }) {
 
 export default function AdminCustomers() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, isStaff, canEditStock, canSeeSaleValues, canManageCustomerFinance } = useAuth()
+  const { isAdmin, isStaff, isSeller, seller, canEditStock, canSeeSaleValues, canManageCustomerFinance, viewAs } = useAuth()
+  const mySellerId = seller?.id || ''
   const [searchParams, setSearchParams] = useSearchParams()
   const [customers, setCustomers] = useState([])
   const [cars, setCars] = useState([])
@@ -36,7 +62,9 @@ export default function AdminCustomers() {
   const [sellers, setSellers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [form, setForm] = useState(emptyCustomer)
+  const [form, setForm] = useState(() => emptyCustomer(isSeller ? mySellerId : ''))
+  const [team, setTeam] = useState([])
+  const [crm, setCrm] = useState({ matches: [], followUps: [], interests: [] })
   const [editingId, setEditingId] = useState(null)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
@@ -56,6 +84,8 @@ export default function AdminCustomers() {
       setCars(carsData)
       setSales(salesData)
       setSellers(sellersData)
+      fetchTeamDirectory().then(setTeam).catch(() => setTeam([]))
+      loadCrm()
     } catch (err) {
       setError(err.message || 'Erro ao carregar os clientes.')
     } finally {
@@ -63,9 +93,35 @@ export default function AdminCustomers() {
     }
   }
 
+  // Avisos de carro que combina, retornos e interesses (marcadores e filtros)
+  function loadCrm() {
+    Promise.all([
+      fetchMatches({ status: 'novo' }).catch(() => []),
+      fetchContacts({ openFollowUps: true }).catch(() => []),
+      fetchInterests().catch(() => []),
+    ]).then(([matches, followUps, interests]) => setCrm({ matches, followUps, interests }))
+  }
+
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const teamById = useMemo(() => Object.fromEntries(team.map((t) => [t.id, t])), [team])
+  const carsById = useMemo(() => new Map(cars.map((c) => [c.id, c])), [cars])
+  const today = todayISO()
+  const flags = useMemo(() => {
+    const map = {}
+    const flag = (id) => (map[id] ||= { match: 0, followUp: false, late: false, gone: false })
+    for (const m of crm.matches) flag(m.customerId).match += 1
+    for (const c of crm.followUps) {
+      if (c.followUpOn > today) continue
+      flag(c.customerId).followUp = true
+      if (c.followUpOn < today) flag(c.customerId).late = true
+    }
+    for (const i of crm.interests) if (likedCarGone(i, carsById.get(i.carId))) flag(i.customerId).gone = true
+    return map
+  }, [crm, carsById, today])
 
   const carsByCustomer = useMemo(() => {
     const map = {}
@@ -89,31 +145,81 @@ export default function AdminCustomers() {
     return map
   }, [sellers])
 
+  const filter = searchParams.get('filtro') || ''
+  const filters = FILTERS.filter((f) => f.value !== 'meus' || mySellerId)
+
   // Busca também pelo carro comprado (modelo ou placa)
   const filteredCustomers = useMemo(() => {
     const query = search.trim().toLowerCase()
-    if (!query) return customers
-    return customers.filter(
-      (c) =>
+    return customers.filter((c) => {
+      const f = flags[c.id]
+      if (filter === 'meus' && c.responsibleSellerId !== mySellerId) return false
+      if (filter === 'combina' && !f?.match) return false
+      if (filter === 'retorno' && !f?.followUp) return false
+      if (filter === 'carro-vendido' && !f?.gone) return false
+      if (!query) return true
+      return (
         `${c.name} ${c.document} ${c.phone} ${c.email}`.toLowerCase().includes(query) ||
         (carsByCustomer[c.id] || []).some((car) => matchesCarSearch(car, query))
-    )
-  }, [customers, search, carsByCustomer])
+      )
+    })
+  }, [customers, search, carsByCustomer, filter, flags, mySellerId])
 
-  // Ficha aberta: ?cliente=<id> (links vindos de Vendas e do Financeiro)
+  function setFilter(value) {
+    const next = {}
+    if (value) next.filtro = value
+    setSearchParams(next)
+  }
+
+  function Badges({ customer }) {
+    const f = flags[customer.id]
+    const owner = customer.responsibleSellerId ? teamById[customer.responsibleSellerId]?.name : ''
+    if (!f && !owner) return null
+    return (
+      <div className="crm-badges">
+        {f?.match > 0 && (
+          <span className="admin-pill is-success" title="Entrou um carro que combina com o que ele procura">
+            <Sparkles size={12} /> Carro novo combina
+          </span>
+        )}
+        {f?.followUp && (
+          <span className={`admin-pill ${f.late ? 'is-danger' : 'is-warning'}`}>
+            <CalendarClock size={12} /> {f.late ? 'Retorno atrasado' : 'Retorno hoje'}
+          </span>
+        )}
+        {f?.gone && (
+          <span className="admin-pill is-danger" title="O carro de que ele gostou foi vendido ou reservado para outra pessoa">
+            <AlertTriangle size={12} /> Carro vendido
+          </span>
+        )}
+        {owner && <span className="admin-table-sub">Responsável: {owner}</span>}
+      </div>
+    )
+  }
+
+  // Ficha aberta: ?cliente=<id>&aba=<ficha|interesses|atendimento> (links
+  // vindos de Vendas, do Financeiro e dos avisos)
   const fileCustomerId = searchParams.get('cliente')
   const fileCustomer = fileCustomerId ? customers.find((c) => c.id === fileCustomerId) : null
+  const fileTab = searchParams.get('aba') || (filter === 'combina' || filter === 'carro-vendido' ? 'interesses' : filter === 'retorno' ? 'atendimento' : 'ficha')
 
-  function openFile(customer) {
-    setSearchParams({ cliente: customer.id })
+  function openFile(customer, tab) {
+    const next = { cliente: customer.id }
+    if (filter) next.filtro = filter
+    if (tab) next.aba = tab
+    setSearchParams(next)
   }
 
   function closeFile() {
-    setSearchParams({})
+    setSearchParams(filter ? { filtro: filter } : {})
   }
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  function updateNested(group, field, value) {
+    setForm((prev) => ({ ...prev, [group]: { ...prev[group], [field]: value } }))
   }
 
   function startEdit(customer) {
@@ -126,12 +232,42 @@ export default function AdminCustomers() {
       email: customer.email,
       address: customer.address,
       notes: customer.notes,
+      responsibleSellerId: customer.responsibleSellerId || '',
+      tradeIn: {
+        model: asText(customer.tradeIn?.model),
+        year: asText(customer.tradeIn?.year),
+        km: asText(customer.tradeIn?.km),
+        expectedValue: asText(customer.tradeIn?.expectedValue),
+      },
+      paymentIntent: {
+        method: asText(customer.paymentIntent?.method),
+        downPayment: asText(customer.paymentIntent?.downPayment),
+        maxInstallment: asText(customer.paymentIntent?.maxInstallment),
+      },
     })
   }
 
   function cancelEdit() {
     setEditingId(null)
-    setForm(emptyCustomer())
+    setForm(emptyCustomer(isSeller ? mySellerId : ''))
+  }
+
+  // Valores da negociação viram número (o resto, texto)
+  function formToCustomer() {
+    return {
+      ...form,
+      tradeIn: {
+        model: form.tradeIn.model,
+        year: form.tradeIn.year,
+        km: parseIntBR(form.tradeIn.km),
+        expectedValue: parseIntBR(form.tradeIn.expectedValue),
+      },
+      paymentIntent: {
+        method: form.paymentIntent.method,
+        downPayment: parseIntBR(form.paymentIntent.downPayment),
+        maxInstallment: parseIntBR(form.paymentIntent.maxInstallment),
+      },
+    }
   }
 
   async function handleSubmit(e) {
@@ -140,10 +276,10 @@ export default function AdminCustomers() {
     setError('')
     try {
       if (editingId) {
-        const updated = await updateCustomer(editingId, form)
+        const updated = await updateCustomer(editingId, formToCustomer())
         setCustomers((prev) => prev.map((c) => (c.id === editingId ? updated : c)).sort((a, b) => a.name.localeCompare(b.name)))
       } else {
-        const created = await createCustomer(form)
+        const created = await createCustomer(formToCustomer())
         setCustomers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
       }
       cancelEdit()
@@ -219,6 +355,52 @@ export default function AdminCustomers() {
           Observações
           <textarea rows={3} value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Opcional" />
         </label>
+        <details className="crm-negotiation" open={Boolean(editingId && (form.responsibleSellerId || form.tradeIn.model || form.paymentIntent.method))}>
+          <summary>Negociação (opcional): vendedor responsável, carro para a troca e forma de pagamento</summary>
+          <div className="admin-form-grid">
+            <label>
+              Vendedor responsável
+              <select value={form.responsibleSellerId} onChange={(e) => update('responsibleSellerId', e.target.value)}>
+                <option value="">Sem responsável (avisos para todos)</option>
+                {team
+                  .filter((t) => t.active || t.id === form.responsibleSellerId)
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Como pretende pagar
+              <select value={form.paymentIntent.method} onChange={(e) => updateNested('paymentIntent', 'method', e.target.value)}>
+                {PAYMENT_INTENTS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </label>
+            <label>
+              Entrada disponível (R$)
+              <input inputMode="numeric" value={form.paymentIntent.downPayment} onChange={(e) => updateNested('paymentIntent', 'downPayment', e.target.value)} placeholder="Ex: 20.000" />
+            </label>
+            <label>
+              Parcela que cabe no bolso (R$)
+              <input inputMode="numeric" value={form.paymentIntent.maxInstallment} onChange={(e) => updateNested('paymentIntent', 'maxInstallment', e.target.value)} placeholder="Ex: 1.500" />
+            </label>
+            <label>
+              Carro dele para a troca
+              <input value={form.tradeIn.model} onChange={(e) => updateNested('tradeIn', 'model', e.target.value)} placeholder="Ex: Fiat Argo Drive 1.0" />
+            </label>
+            <label>
+              Ano do carro da troca
+              <input value={form.tradeIn.year} onChange={(e) => updateNested('tradeIn', 'year', e.target.value)} placeholder="Ex: 2019/2020" />
+            </label>
+            <label>
+              Km do carro da troca
+              <input inputMode="numeric" value={form.tradeIn.km} onChange={(e) => updateNested('tradeIn', 'km', e.target.value)} placeholder="Ex: 45.000" />
+            </label>
+            <label>
+              Quanto ele espera pelo carro (R$)
+              <input inputMode="numeric" value={form.tradeIn.expectedValue} onChange={(e) => updateNested('tradeIn', 'expectedValue', e.target.value)} placeholder="Ex: 55.000" />
+            </label>
+          </div>
+        </details>
         <div className="admin-form-actions">
           {editingId && (
             <button type="button" className="btn btn-outline" onClick={cancelEdit}>
@@ -230,6 +412,24 @@ export default function AdminCustomers() {
           </button>
         </div>
       </form>
+
+      {customers.length > 0 && (
+        <div className="admin-chip-row" role="radiogroup" aria-label="Filtrar clientes">
+          {filters.map((f) => {
+            const count =
+              f.value === 'combina' ? customers.filter((c) => flags[c.id]?.match).length
+                : f.value === 'retorno' ? customers.filter((c) => flags[c.id]?.followUp).length
+                  : f.value === 'carro-vendido' ? customers.filter((c) => flags[c.id]?.gone).length
+                    : null
+            return (
+              <button key={f.value} type="button" role="radio" aria-checked={filter === f.value} className={`admin-chip ${filter === f.value ? 'is-active' : ''}`} onClick={() => setFilter(f.value)}>
+                {f.label}
+                {count ? <span className="crm-filter-count">{count}</span> : null}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {customers.length > 0 && (
         <div className="admin-search-bar">
@@ -248,7 +448,7 @@ export default function AdminCustomers() {
       {customers.length === 0 ? (
         <p className="admin-muted">Nenhum cliente cadastrado ainda.</p>
       ) : filteredCustomers.length === 0 ? (
-        <p className="admin-muted">Nenhum cliente encontrado para essa busca.</p>
+        <p className="admin-muted">{filter ? 'Nenhum cliente neste filtro.' : 'Nenhum cliente encontrado para essa busca.'}</p>
       ) : (
         <>
           <div className="admin-table-wrap">
@@ -267,7 +467,10 @@ export default function AdminCustomers() {
                   const purchases = carsByCustomer[c.id] || []
                   return (
                     <tr key={c.id} className={editingId === c.id ? 'is-busy' : ''}>
-                      <td><strong>{c.name}</strong></td>
+                      <td>
+                        <strong>{c.name}</strong>
+                        <Badges customer={c} />
+                      </td>
                       <td>{c.document || '—'}</td>
                       <td>{c.phone || c.email || '—'}</td>
                       <td>
@@ -283,8 +486,13 @@ export default function AdminCustomers() {
                       </td>
                       <td>
                         <div className="admin-action-group">
+                          {c.phone && !viewAs && (
+                            <button type="button" className="admin-action-btn is-whatsapp" onClick={() => openFile(c, 'atendimento')}>
+                              <MessageCircle size={15} /> WhatsApp
+                            </button>
+                          )}
                           <button type="button" className="admin-action-btn" onClick={() => openFile(c)}>
-                            <FolderOpen size={15} /> Ficha e contratos
+                            <FolderOpen size={15} /> Ficha
                           </button>
                           <button type="button" className="admin-action-btn" onClick={() => startEdit(c)}>
                             <Pencil size={15} /> Editar
@@ -312,6 +520,7 @@ export default function AdminCustomers() {
                     <div className="admin-card-title">
                       <strong>{c.name}</strong>
                       <span className="admin-table-sub">{c.document || 'CPF não informado'}</span>
+                      <Badges customer={c} />
                     </div>
                   </div>
 
@@ -326,8 +535,13 @@ export default function AdminCustomers() {
                   )}
 
                   <div className="admin-card-actions">
+                    {c.phone && !viewAs && (
+                      <button type="button" onClick={() => openFile(c, 'atendimento')}>
+                        <MessageCircle size={14} /> WhatsApp
+                      </button>
+                    )}
                     <button type="button" onClick={() => openFile(c)}>
-                      <FolderOpen size={14} /> Ficha e contratos
+                      <FolderOpen size={14} /> Ficha
                     </button>
                     <button type="button" onClick={() => startEdit(c)}>
                       <Pencil size={14} /> Editar
@@ -350,6 +564,10 @@ export default function AdminCustomers() {
           purchases={carsByCustomer[fileCustomer.id] || []}
           salesByCar={salesByCar}
           sellersById={sellersById}
+          cars={cars}
+          teamById={teamById}
+          initialTab={fileTab}
+          onChanged={loadCrm}
           isAdmin={isAdmin}
           isStaff={isStaff}
           canSeeSaleValues={canSeeSaleValues}

@@ -8,6 +8,7 @@ import { reservationAlert } from '../src/utils/reservations.js'
 import { isDueSoon } from '../src/utils/financing.js'
 import { buildSalesReport, buildStockReport, buildCustomersReport } from '../src/utils/reports/build.js'
 import { setViewScope, scopeSales, scopeCars, scopeByCreator, scopeExpenses, scopeSellers, scopeActivity, assertCanWrite } from '../src/lib/viewScope.js'
+import { removedPhotos } from '../src/utils/carPhotos.js'
 
 test('cadastro: itens que vieram com o carro e vistoria juntam a lista da loja com o que foi gravado', () => {
   const intake = buildIntake(['Manual', 'Chave reserva'], [{ item: 'Chave reserva', status: 'ok' }, { item: 'Rádio', status: 'nao_possui' }])
@@ -161,4 +162,17 @@ test('"ver como": filtros de quem está sendo simulado e gravações bloqueadas'
   // Fora da simulação nada é filtrado e gravar é permitido
   assert.equal(scopeSales([{ sellerId: 'v2' }]).length, 1)
   assert.doesNotThrow(() => assertCanWrite())
+})
+
+test('fotos: só as que saíram do cadastro são apagadas, e só depois de salvar', () => {
+  const a = '/uploads/carros/a.webp'
+  const b = '/uploads/carros/b.webp'
+  const nova = '/uploads/carros/nova.webp'
+  // Carro tinha a e b; enviou "nova", removeu b e salvou
+  assert.deepEqual(removedPhotos([a, b, nova, a], [nova, a]), [b])
+  // Enviou uma foto e tirou antes de salvar: ela também sai do site
+  assert.deepEqual(removedPhotos([a, nova], [a]), [nova])
+  // Nada removido
+  assert.deepEqual(removedPhotos([a, b], [b, a]), [])
+  assert.deepEqual(removedPhotos([], []), [])
 })

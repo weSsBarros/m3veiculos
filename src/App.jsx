@@ -30,6 +30,7 @@ import AdminSuppliers from './admin/AdminSuppliers.jsx'
 import AdminCustomers from './admin/AdminCustomers.jsx'
 import AdminSellers from './admin/AdminSellers.jsx'
 import AdminActivity from './admin/AdminActivity.jsx'
+import AdminSettings from './admin/AdminSettings.jsx'
 import SellerSales from './admin/SellerSales.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 import { trackSiteVisit } from './lib/statsApi.js'
@@ -120,6 +121,7 @@ export default function App() {
           <Route element={<AdminOnly><Outlet /></AdminOnly>}>
             <Route path="financeiro" element={<AdminFinance />} />
             <Route path="contratos/modelos" element={<AdminContractTemplates />} />
+            <Route path="configuracoes" element={<AdminSettings />} />
           </Route>
           <Route element={<CustomerFinanceOnly><Outlet /></CustomerFinanceOnly>}>
             <Route path="financeiro/clientes" element={<AdminCustomerFinance />} />

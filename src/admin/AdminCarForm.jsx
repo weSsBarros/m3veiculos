@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, Trash2, Receipt, Lock } from 'lucide-react'
-import { fetchCarById, createCar, updateCar, deleteCar, uploadCarDocument, updateCarDocuments } from '../lib/carsApi.js'
+import { fetchCarById, createCar, updateCar, deleteCar, uploadCarDocument, updateCarDocuments, deleteCarImage } from '../lib/carsApi.js'
+import { removedPhotos } from '../utils/carPhotos.js'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
 import { fetchSaleByCar, saveSaleForCar, deleteSaleForCar } from '../lib/salesApi.js'
@@ -92,6 +93,9 @@ export default function AdminCarForm() {
   const [sellers, setSellers] = useState([])
   const [existingSale, setExistingSale] = useState(null)
   const [sale, setSale] = useState({ sellerId: '', price: '', date: todayISO() })
+  // Todas as fotos que passaram pelo formulário (gravadas ou enviadas agora):
+  // as que não ficarem no carro são apagadas do site depois de salvar
+  const seenImages = useRef(new Set())
 
   useEffect(() => {
     fetchAllCustomers().then(setCustomers).catch(() => {})
@@ -120,6 +124,7 @@ export default function AdminCarForm() {
     fetchCarById(id).then((found) => {
       if (found) {
         setCar({ ...found, customerId: found.customerId || '' })
+        found.images.forEach((url) => seenImages.current.add(url))
         setOriginalStatus(found.status)
         if (found.status === 'reservado') {
           fetchReservations()
@@ -144,6 +149,11 @@ export default function AdminCarForm() {
 
   function update(field, value) {
     setCar((prev) => ({ ...prev, [field]: value }))
+  }
+
+  function updateImages(images) {
+    images.forEach((url) => seenImages.current.add(url))
+    update('images', images)
   }
 
   async function handleSubmit(e) {
@@ -221,6 +231,9 @@ export default function AdminCarForm() {
 
     try {
       const saved = isEditing ? await updateCar(id, payload) : await createCar(payload)
+      // Carro salvo: agora sim tira do site as fotos removidas no formulário
+      for (const url of removedPhotos(seenImages.current, saved.images)) deleteCarImage(url).catch(() => {})
+      seenImages.current = new Set(saved.images)
       let docError = null
       if (!isEditing && pendingDocs.length > 0) {
         try {
@@ -312,7 +325,7 @@ export default function AdminCarForm() {
       <form className="admin-form" onSubmit={handleSubmit}>
         <section className="admin-form-section">
           <h2>Fotos</h2>
-          <ImageUploader images={car.images} onChange={(images) => update('images', images)} />
+          <ImageUploader images={car.images} onChange={updateImages} />
         </section>
 
         <section className="admin-form-section">

@@ -4,6 +4,8 @@ import { fetchMySeller } from '../lib/sellersApi.js'
 import { setCarsAccess } from '../lib/carsApi.js'
 import { logLogin } from '../lib/activityApi.js'
 import { setViewScope } from '../lib/viewScope.js'
+import { fetchStoreSettings } from '../lib/storeSettingsApi.js'
+import { normalizePanelSettings, isTabHidden as tabHiddenFor, isBlockHidden as blockHiddenIn } from '../utils/panelSettings.js'
 
 const AuthContext = createContext(null)
 
@@ -40,6 +42,8 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(isSupabaseConfigured)
   // "Ver como" (só admin): { name, role, sellerId, userId, financeAccess, seller }
   const [viewAs, setViewAs] = useState(null)
+  // Configurações → Painel: abas e blocos do Dashboard escondidos
+  const [panelSettings, setPanelSettings] = useState(() => normalizePanelSettings(null))
 
   useEffect(() => {
     if (!isSupabaseConfigured) return
@@ -72,6 +76,9 @@ export function AuthProvider({ children }) {
       const userRole = await loadRole(session.user.id)
       const sellerRecord = userRole !== 'admin' ? await fetchMySeller(session.user.id).catch(() => null) : null
       if (cancelled) return
+      const store = await fetchStoreSettings().catch(() => null)
+      if (cancelled) return
+      setPanelSettings(store ? store.panel : normalizePanelSettings(null))
       setCarsAccess(userRole)
       setUser(session.user)
       setRole(userRole)
@@ -154,6 +161,9 @@ export function AuthProvider({ children }) {
   const canSeeSaleValues = isAdmin || (isManager && effectiveSeller?.financeAccess === 'values')
   // Financeiro dos clientes (financiamento próprio): mesma regra dos valores das vendas
   const canManageCustomerFinance = canSeeSaleValues
+  // Aba escondida para quem está usando o painel (inclusive no "ver como")
+  const isTabHidden = (key) => tabHiddenFor(panelSettings, key, effectiveRole)
+  const isBlockHidden = (key) => blockHiddenIn(panelSettings, key)
 
   return (
     <AuthContext.Provider
@@ -170,6 +180,10 @@ export function AuthProvider({ children }) {
         canSeeSaleValues,
         canManageCustomerFinance,
         seller: effectiveSeller,
+        panelSettings,
+        setPanelSettings,
+        isTabHidden,
+        isBlockHidden,
         viewAs: simulating ? viewAs : null,
         startViewAs,
         stopViewAs,

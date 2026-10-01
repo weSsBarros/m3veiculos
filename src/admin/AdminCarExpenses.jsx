@@ -220,9 +220,22 @@ export default function AdminCarExpenses() {
             <span>Custo total</span>
             <strong>{formatCurrency(totalCost)}</strong>
           </div>
+          <div className="expense-summary-card">
+            <span>Preço anunciado</span>
+            <strong>{car.price != null ? formatCurrency(car.price) : 'Sem preço'}</strong>
+          </div>
           <div className={`expense-summary-card ${margin == null ? '' : margin < 0 ? 'is-negative' : 'is-positive'}`}>
-            <span>Margem (preço de venda)</span>
+            <span>Margem (preço anunciado − custo)</span>
             <strong>{margin != null ? formatCurrency(margin) : '—'}</strong>
+          </div>
+        </div>
+      )}
+
+      {!canSeeCosts && (
+        <div className="expense-summary">
+          <div className="expense-summary-card">
+            <span>Preço anunciado</span>
+            <strong>{car.price != null ? formatCurrency(car.price) : 'Sem preço'}</strong>
           </div>
         </div>
       )}

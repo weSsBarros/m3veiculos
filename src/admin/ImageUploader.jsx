@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { X, ChevronLeft, ChevronRight, Upload } from 'lucide-react'
-import { uploadCarImage, deleteCarImage } from '../lib/carsApi.js'
+import { uploadCarImage } from '../lib/carsApi.js'
 import { thumbUrl } from '../utils/carPhotos.js'
 
 export default function ImageUploader({ images, onChange }) {
@@ -40,9 +40,10 @@ export default function ImageUploader({ images, onChange }) {
     if (inputRef.current) inputRef.current.value = ''
   }
 
-  async function handleRemove(url) {
+  // Só tira da lista: o arquivo sai do site quando o carro é salvo
+  // (AdminCarForm). Se a pessoa cancelar, o carro continua com a foto.
+  function handleRemove(url) {
     onChange(images.filter((i) => i !== url))
-    deleteCarImage(url).catch(() => {})
   }
 
   function move(index, dir) {

@@ -19,6 +19,9 @@ import BarChart from '../components/charts/BarChart.jsx'
 import DonutChart from '../components/charts/DonutChart.jsx'
 import HBarChart from '../components/charts/HBarChart.jsx'
 import PeriodFilter from './PeriodFilter.jsx'
+import PendencyList from './PendencyList.jsx'
+import useCustomerPendencies from './useCustomerPendencies.js'
+import { PENDENCY_TABS } from '../utils/panelSettings.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchSiteVisitTotals, fetchDailyVisits, fetchCarViewTotals } from '../lib/statsApi.js'
 import './admin.css'
@@ -30,7 +33,8 @@ const CATEGORY_COLORS = ['#0ea0db', '#1c9b56', '#f5a623', '#e0392c', '#7b61ff', 
 // valores das vendas (faturamento, comissões) só se o admin liberou — senão
 // o Dashboard dele mostra só quantidades.
 export default function AdminDashboard() {
-  const { isAdmin, canSeeCosts, canSeeSaleValues, canManageCustomerFinance } = useAuth()
+  const { isAdmin, canSeeCosts, canSeeSaleValues, canManageCustomerFinance, isTabHidden, isBlockHidden } = useAuth()
+  const show = (block) => !isBlockHidden(block)
   const [cars, setCars] = useState([])
   const [expenses, setExpenses] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -151,11 +155,12 @@ export default function AdminDashboard() {
   const periodExpensesTotal = periodExpenses.reduce((sum, e) => sum + e.amount, 0)
 
   const statusData = useMemo(() => {
-    const counts = { disponivel: 0, manutencao: 0, vendido: 0 }
+    const counts = { disponivel: 0, manutencao: 0, reservado: 0, vendido: 0 }
     for (const car of cars) counts[car.status] = (counts[car.status] || 0) + 1
     return [
       { label: 'Disponível', value: counts.disponivel, color: 'var(--color-success)' },
       { label: 'Em manutenção', value: counts.manutencao, color: '#f5a623' },
+      { label: 'Reservado', value: counts.reservado, color: '#7b61ff' },
       { label: 'Vendido', value: counts.vendido, color: 'var(--color-text-muted)' },
     ]
   }, [cars])
@@ -246,6 +251,10 @@ export default function AdminDashboard() {
   const dueSoonTransfers = sales.filter((s) => transferAlert(s) === 'vence_logo').length
   const overdueInstallmentsTotal = overdueInstallments.reduce((sum, i) => sum + i.amount, 0)
 
+  const customerPendencies = useCustomerPendencies(cars)
+
+  // Pendências com a contagem de cada uma (0 = nada pendente). Avisos de abas
+  // escondidas em Configurações não aparecem.
   const pendencies = (() => {
     const stock = stockGaps(cars)
     const salesGap = saleGaps({ sales, cars, contracts, docs: customerDocs })
@@ -253,20 +262,22 @@ export default function AdminDashboard() {
     const unpaid = unpaidCommissions(sales, externals)
     const res = reservationGaps(reservations)
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
-    const items = []
-    if (res.expired) items.push({ key: 'res-exp', danger: true, icon: Bookmark, to: '/admin/vendas', cta: 'Resolver', text: `${plural(res.expired, 'reserva passou', 'reservas passaram')} do prazo — converta em venda ou cancele.` })
-    if (res.dueSoon) items.push({ key: 'res-soon', icon: Bookmark, to: '/admin/vendas', cta: 'Ver', text: `${plural(res.dueSoon, 'reserva vence', 'reservas vencem')} em até 2 dias.` })
-    if (upcomingInstallments.length) items.push({ key: 'inst-soon', icon: BellRing, to: '/admin/financeiro/clientes', cta: 'Lembrar', text: `${plural(upcomingInstallments.length, 'parcela de cliente vence', 'parcelas de clientes vencem')} nos próximos 7 dias.` })
-    if (ext.staleAnalysis) items.push({ key: 'ext-stale', icon: Landmark, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.staleAnalysis, 'financiamento externo está', 'financiamentos externos estão')} em análise há mais de 7 dias.` })
-    if (ext.approvedUnpaid) items.push({ key: 'ext-approved', icon: CircleDollarSign, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.approvedUnpaid, 'financiamento externo aprovado aguarda', 'financiamentos externos aprovados aguardam')} o pagamento do banco.` })
-    if (isAdmin && unpaid.count) items.push({ key: 'commissions', icon: HandCoins, to: '/admin/equipe', cta: 'Pagar', text: `Comissões a pagar: ${formatCurrencyCents(unpaid.amount)} (${plural(unpaid.count, 'venda ou financiamento', 'vendas ou financiamentos')}).` })
-    if (salesGap.noCustomer) items.push({ key: 'sale-customer', icon: ClipboardList, to: '/admin/vendas', cta: 'Completar', text: `${plural(salesGap.noCustomer, 'venda', 'vendas')} dos últimos ${RECENT_SALES_DAYS} dias sem cliente vinculado.` })
-    if (salesGap.noContract) items.push({ key: 'sale-contract', icon: FileWarning, to: '/admin/vendas', cta: 'Completar', text: `${plural(salesGap.noContract, 'venda', 'vendas')} dos últimos ${RECENT_SALES_DAYS} dias sem contrato ou documento anexado.` })
-    if (salesGap.checklistIncomplete) items.push({ key: 'sale-checklist', icon: ClipboardList, to: '/admin/vendas', cta: 'Conferir', text: `${plural(salesGap.checklistIncomplete, 'venda', 'vendas')} com checklist de entrega incompleto.` })
-    if (stock.noPhoto) items.push({ key: 'car-photo', icon: ImageOff, to: '/admin/estoque', cta: 'Completar', text: `${plural(stock.noPhoto, 'carro em estoque', 'carros em estoque')} sem foto.` })
-    if (stock.noPrice) items.push({ key: 'car-price', icon: CircleDollarSign, to: '/admin/estoque', cta: 'Ver', text: `${plural(stock.noPrice, 'carro em estoque', 'carros em estoque')} sem preço (aparece "Consulte o valor").` })
-    if (stock.noDocs) items.push({ key: 'car-docs', icon: FileWarning, to: '/admin/estoque', cta: 'Anexar', text: `${plural(stock.noDocs, 'carro em estoque', 'carros em estoque')} sem documento anexado (CRLV, laudo).` })
-    return items
+    const items = [
+      { key: 'res-exp', count: res.expired, danger: true, icon: Bookmark, to: '/admin/vendas', cta: 'Resolver', text: `${plural(res.expired, 'reserva passou', 'reservas passaram')} do prazo — converta em venda ou cancele.` },
+      { key: 'res-soon', count: res.dueSoon, icon: Bookmark, to: '/admin/vendas', cta: 'Ver', text: `${plural(res.dueSoon, 'reserva vence', 'reservas vencem')} em até 2 dias.` },
+      { key: 'inst-soon', count: upcomingInstallments.length, icon: BellRing, to: '/admin/financeiro/clientes', cta: 'Lembrar', text: `${plural(upcomingInstallments.length, 'parcela de cliente vence', 'parcelas de clientes vencem')} nos próximos 7 dias.` },
+      { key: 'ext-stale', count: ext.staleAnalysis, icon: Landmark, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.staleAnalysis, 'financiamento externo está', 'financiamentos externos estão')} em análise há mais de 7 dias.` },
+      { key: 'ext-approved', count: ext.approvedUnpaid, icon: CircleDollarSign, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.approvedUnpaid, 'financiamento externo aprovado aguarda', 'financiamentos externos aprovados aguardam')} o pagamento do banco.` },
+      { key: 'commissions', count: isAdmin ? unpaid.count : 0, icon: HandCoins, to: '/admin/equipe', cta: 'Pagar', text: `Comissões a pagar: ${formatCurrencyCents(unpaid.amount)} (${plural(unpaid.count, 'venda ou financiamento', 'vendas ou financiamentos')}).` },
+      ...customerPendencies,
+      { key: 'sale-customer', count: salesGap.noCustomer, icon: ClipboardList, to: '/admin/vendas', cta: 'Completar', text: `${plural(salesGap.noCustomer, 'venda', 'vendas')} dos últimos ${RECENT_SALES_DAYS} dias sem cliente vinculado.` },
+      { key: 'sale-contract', count: salesGap.noContract, icon: FileWarning, to: '/admin/vendas', cta: 'Completar', text: `${plural(salesGap.noContract, 'venda', 'vendas')} dos últimos ${RECENT_SALES_DAYS} dias sem contrato ou documento anexado.` },
+      { key: 'sale-checklist', count: salesGap.checklistIncomplete, icon: ClipboardList, to: '/admin/vendas', cta: 'Conferir', text: `${plural(salesGap.checklistIncomplete, 'venda', 'vendas')} com checklist de entrega incompleto.` },
+      { key: 'car-photo', count: stock.noPhoto, icon: ImageOff, to: '/admin/estoque', cta: 'Completar', text: `${plural(stock.noPhoto, 'carro em estoque', 'carros em estoque')} sem foto.` },
+      { key: 'car-price', count: stock.noPrice, icon: CircleDollarSign, to: '/admin/estoque', cta: 'Ver', text: `${plural(stock.noPrice, 'carro em estoque', 'carros em estoque')} sem preço (aparece "Consulte o valor").` },
+      { key: 'car-docs', count: stock.noDocs, icon: FileWarning, to: '/admin/estoque', cta: 'Anexar', text: `${plural(stock.noDocs, 'carro em estoque', 'carros em estoque')} sem documento anexado (CRLV, laudo).` },
+    ]
+    return items.filter((item) => !isTabHidden(PENDENCY_TABS[item.key]))
   })()
 
   if (loading) return <p className="admin-muted">Carregando…</p>
@@ -295,7 +306,7 @@ export default function AdminDashboard() {
 
       {error && <p className="admin-error">{error}</p>}
 
-      {(overdueTransfers > 0 || dueSoonTransfers > 0 || overdueInstallments.length > 0) && (
+      {show('alerts') && (overdueTransfers > 0 || dueSoonTransfers > 0 || overdueInstallments.length > 0) && (
         <div className="admin-alert-list">
           {overdueTransfers > 0 && (
             <Link to="/admin/vendas?filtro=atrasadas" className="admin-alert-item is-danger">
@@ -329,21 +340,9 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {pendencies.length > 0 && (
-        <section className="admin-pendencies">
-          <h2 className="admin-section-title">Pendências ({pendencies.length})</h2>
-          <div className="admin-alert-list">
-            {pendencies.map(({ key, icon: Icon, text, to, cta, danger }) => (
-              <Link key={key} to={to} className={`admin-alert-item ${danger ? 'is-danger' : 'is-warn'}`}>
-                <Icon size={18} />
-                <span>{text}</span>
-                <strong>{cta}</strong>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
+      {show('pendencies') && <PendencyList items={pendencies} />}
 
+      {show('stats') && (
       <div className="expense-summary">
         {canSeeSaleValues && (
           <div className="expense-summary-card">
@@ -382,39 +381,44 @@ export default function AdminDashboard() {
           <strong>{availableCars.length ? `${avgDaysInStock} ${avgDaysInStock === 1 ? 'dia' : 'dias'}` : '—'}</strong>
         </div>
       </div>
+      )}
 
       <div className="charts-grid charts-grid-3">
-        {canSeeSaleValues && (
+        {show('revenue6m') && canSeeSaleValues && (
           <div className="chart-card chart-card-wide">
             <h3>Faturamento dos últimos 6 meses</h3>
             <BarChart data={monthlyRevenue} formatValue={(v) => (v > 0 ? formatCurrency(v) : '—')} />
           </div>
         )}
-        {!canSeeSaleValues && (
+        {show('salesByMonth') && !canSeeSaleValues && (
           <div className="chart-card chart-card-wide">
             <h3>Vendas por mês (quantidade)</h3>
             <BarChart data={monthlySalesCount} color="var(--color-success)" formatValue={(v) => (v > 0 ? v : '—')} />
           </div>
         )}
-        <div className="chart-card">
-          <h3>Carros por status</h3>
-          <DonutChart data={statusData} />
-        </div>
-        {canSeeSaleValues && (
+        {show('byStatus') && (
+          <div className="chart-card">
+            <h3>Carros por status</h3>
+            <DonutChart data={statusData} />
+          </div>
+        )}
+        {show('salesByMonth') && canSeeSaleValues && (
           <div className="chart-card">
             <h3>Vendas por mês (quantidade)</h3>
             <BarChart data={monthlySalesCount} color="var(--color-success)" formatValue={(v) => (v > 0 ? v : '—')} />
           </div>
         )}
-        <div className="chart-card chart-card-wide">
-          <h3>{canSeeSaleValues ? 'Faturamento por vendedor (período)' : 'Vendas por vendedor (período)'}</h3>
-          <HBarChart
-            data={bySeller}
-            formatValue={canSeeSaleValues ? formatCurrency : (v) => `${v} ${v === 1 ? 'venda' : 'vendas'}`}
-            emptyLabel="Nenhuma venda no período."
-          />
-        </div>
-        {canSeeCosts && (
+        {show('bySeller') && (
+          <div className="chart-card chart-card-wide">
+            <h3>{canSeeSaleValues ? 'Faturamento por vendedor (período)' : 'Vendas por vendedor (período)'}</h3>
+            <HBarChart
+              data={bySeller}
+              formatValue={canSeeSaleValues ? formatCurrency : (v) => `${v} ${v === 1 ? 'venda' : 'vendas'}`}
+              emptyLabel="Nenhuma venda no período."
+            />
+          </div>
+        )}
+        {show('expensesByCategory') && canSeeCosts && (
           <div className="chart-card">
             <h3>Gastos por categoria (período)</h3>
             {byCategory.length ? (
@@ -424,7 +428,7 @@ export default function AdminDashboard() {
             )}
           </div>
         )}
-        {canSeeCosts && (
+        {show('expensesBySupplier') && canSeeCosts && (
           <div className="chart-card chart-card-wide">
             <h3>Gastos por fornecedor (período)</h3>
             <HBarChart data={bySupplier} formatValue={formatCurrency} color="#f5a623" emptyLabel="Nenhum gasto com fornecedor no período." />
@@ -432,6 +436,8 @@ export default function AdminDashboard() {
         )}
       </div>
 
+      {show('visits') && (
+      <>
       <h2 className="admin-section-title">Visitas no site</h2>
       <div className="expense-summary">
         <div className="expense-summary-card">
@@ -471,6 +477,8 @@ export default function AdminDashboard() {
         Visitas: cada acesso ao site (voltar em até 30 minutos conta como o mesmo acesso). Visitantes: pessoas diferentes em
         cada dia — quem volta em outro dia conta de novo. A equipe logada no painel não entra na contagem.
       </p>
+      </>
+      )}
     </div>
   )
 }

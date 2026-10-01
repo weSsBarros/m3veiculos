@@ -3,8 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Search, Menu, X, ChevronDown, Phone } from 'lucide-react'
 import { CATEGORIES, BRANDS } from '../utils/carFormat.js'
 import './Header.css'
+import MainPhone from './MainPhone.jsx'
+import { useMainPhone } from '../utils/whatsappRouter.js'
 
 export default function Header() {
+  const mainPhone = useMainPhone()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
@@ -71,9 +74,9 @@ export default function Header() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </form>
-          <a className="header-phone" href="tel:+5598981893675">
+          <a className="header-phone" href={`tel:+${mainPhone}`}>
             <Phone size={16} />
-            <span>(98) 98189-3675</span>
+            <span><MainPhone fallback="(98) 98189-3675" /></span>
           </a>
           <button
             type="button"

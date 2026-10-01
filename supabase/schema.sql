@@ -822,6 +822,7 @@ using (company_id = public.current_company_id());
 alter table public.cars add column if not exists customer_id uuid references public.customers(id) on delete set null;
 create index if not exists cars_customer_id_idx on public.cars (customer_id);
 
+
 -- 16) Modelos de contrato próprios da loja ----------------------------------------
 -- Cada loja pode subir seus próprios modelos de contrato em .docx (com garantia,
 -- sem garantia, repasse etc.) com marcadores {tag} que o sistema preenche
@@ -3337,7 +3338,712 @@ drop trigger if exists external_financings_log_activity on public.external_finan
 create trigger external_financings_log_activity after insert or update or delete on public.external_financings
 for each row execute function public.log_activity();
 
--- 30) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 30) Conferência: passou para a seção 32, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 31) Configurações da loja, WhatsApp com rodízio, pendências dispensadas e
+--     atendimento de clientes
+--
+-- * WhatsApp do site: número fixo ou rodízio entre pessoas da Equipe e números
+--   avulsos, em sequência. O site pergunta o número a cada clique
+--   (whatsapp_contact, liberada para o público) e o mesmo navegador continua
+--   com o mesmo vendedor por alguns dias. Cada clique vira um contato (lead)
+--   para o relatório. O topo e o rodapé mostram o número principal
+--   (store_contact).
+-- * Configurações (só admin, pela função save_store_settings): modo do
+--   WhatsApp, número principal, abas escondidas (da loja toda ou por papel),
+--   blocos do Dashboard e modelos de mensagem.
+-- * Pendências do Dashboard: cada pessoa exclui (volta se a contagem
+--   aumentar) ou adia por algumas horas.
+-- * Clientes: vendedor responsável, carro para a troca, forma de pagamento,
+--   interesses (carro do estoque ou carro procurado), aviso quando entra um
+--   carro que combina e histórico de atendimento com data de retorno.
+
+-- Telefone só com dígitos e com o 55 do Brasil (vazio se não der para usar)
+create or replace function public.wa_digits(p text)
+returns text
+language sql immutable set search_path = public
+as $$
+  select case
+    when length(d) in (10, 11) then '55' || d
+    when length(d) between 12 and 15 then d
+    else ''
+  end
+  from (select regexp_replace(coalesce(p, ''), '\D', '', 'g') as d) x
+$$;
+
+-- Texto sem acento e em minúsculas, para comparar marca e modelo
+create or replace function public.norm_text(p text)
+returns text
+language sql immutable set search_path = public
+as $$
+  select lower(translate(coalesce(p, ''),
+    'áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ',
+    'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC'))
+$$;
+
+-- Configurações da loja -----------------------------------------------------------
+alter table public.companies add column if not exists whatsapp_mode text not null default 'fixo';
+alter table public.companies drop constraint if exists companies_whatsapp_mode_check;
+alter table public.companies add constraint companies_whatsapp_mode_check check (whatsapp_mode in ('fixo', 'rodizio'));
+alter table public.companies add column if not exists whatsapp_main text not null default '';
+alter table public.companies add column if not exists whatsapp_sticky_days integer not null default 30;
+alter table public.companies drop constraint if exists companies_whatsapp_sticky_days_check;
+alter table public.companies add constraint companies_whatsapp_sticky_days_check check (whatsapp_sticky_days between 0 and 365);
+-- Último número do rodízio que atendeu (o próximo clique vai para o seguinte)
+alter table public.companies add column if not exists whatsapp_last_entry uuid;
+alter table public.companies add column if not exists whatsapp_templates jsonb not null default
+  '[{"id": "saudacao", "name": "Saudação", "text": "Olá, {nome}! Aqui é {vendedor}, da {loja}. Tudo bem? Posso ajudar você a encontrar o seu próximo carro?"},
+    {"id": "carro_combina", "name": "Chegou um carro que combina", "text": "Olá, {nome}! Aqui é {vendedor}, da {loja}. Chegou um {carro} que combina com o que você procura:\n{link}\nQuer agendar uma visita ou um test-drive?"},
+    {"id": "parcela", "name": "Lembrete de parcela", "text": "Olá, {nome}! Aqui é {vendedor}, da {loja}. Passando para lembrar da sua parcela. Qualquer dúvida, estou à disposição."},
+    {"id": "documentos", "name": "Documentação", "text": "Olá, {nome}! Aqui é {vendedor}, da {loja}. Sobre a documentação do seu {carro}: "},
+    {"id": "pos_venda", "name": "Pós-venda", "text": "Olá, {nome}! Aqui é {vendedor}, da {loja}. Como está o seu {carro}? Se precisar de qualquer coisa, conte com a gente!"}]';
+alter table public.companies drop constraint if exists companies_whatsapp_templates_check;
+alter table public.companies add constraint companies_whatsapp_templates_check check (jsonb_typeof(whatsapp_templates) = 'array');
+-- {"hiddenTabs": {"all": [], "manager": [], "seller": []}, "hiddenBlocks": []}
+alter table public.companies add column if not exists panel_settings jsonb not null default '{}';
+alter table public.companies drop constraint if exists companies_panel_settings_check;
+alter table public.companies add constraint companies_panel_settings_check check (jsonb_typeof(panel_settings) = 'object');
+
+-- Só o admin grava (as colunas acima não têm permissão de update direto)
+create or replace function public.save_store_settings(p jsonb)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_keys text[];
+begin
+  if v_company is null or not public.is_company_admin() then
+    raise exception 'Só o administrador altera as configurações';
+  end if;
+  update public.companies set
+    whatsapp_mode = case when p ? 'whatsapp_mode' then p->>'whatsapp_mode' else whatsapp_mode end,
+    whatsapp_main = case when p ? 'whatsapp_main' then left(coalesce(p->>'whatsapp_main', ''), 30) else whatsapp_main end,
+    whatsapp_sticky_days = case when p ? 'whatsapp_sticky_days' then (p->>'whatsapp_sticky_days')::integer else whatsapp_sticky_days end,
+    whatsapp_templates = case when p ? 'whatsapp_templates' then p->'whatsapp_templates' else whatsapp_templates end,
+    panel_settings = case when p ? 'panel_settings' then p->'panel_settings' else panel_settings end
+  where id = v_company;
+
+  select array_agg(k order by k) into v_keys from jsonb_object_keys(p) k;
+  insert into public.activity_log (company_id, user_id, user_email, action, entity, label, details)
+  values (v_company, auth.uid(), (select email from auth.users where id = auth.uid()), 'update', 'companies',
+          'Configurações', array_to_string(v_keys, ', '));
+end;
+$$;
+revoke execute on function public.save_store_settings(jsonb) from anon, public;
+grant execute on function public.save_store_settings(jsonb) to authenticated;
+
+-- Nomes da equipe para todos da loja (o vendedor não lê a tabela sellers
+-- inteira, que tem comissões): usado no vendedor responsável pelo cliente
+create or replace function public.team_directory()
+returns table (id uuid, name text, role text, active boolean)
+language sql stable security definer set search_path = public
+as $$
+  select s.id, s.name, s.role, s.active and s.deleted_at is null
+  from public.sellers s
+  where s.company_id = public.current_company_id()
+  order by s.name
+$$;
+revoke execute on function public.team_directory() from anon, public;
+grant execute on function public.team_directory() to authenticated;
+
+-- Rodízio do WhatsApp ------------------------------------------------------------
+-- Pessoa da Equipe (seller_id; telefone em branco = usa o do cadastro dela) ou
+-- número avulso (nome e telefone). Quem é desativado ou excluído da Equipe sai
+-- do rodízio sozinho.
+create table if not exists public.whatsapp_rotation (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  seller_id uuid references public.sellers(id) on delete cascade,
+  name text not null default '',
+  phone text not null default '',
+  active boolean not null default true,
+  position integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists whatsapp_rotation_company_idx on public.whatsapp_rotation (company_id, position);
+create unique index if not exists whatsapp_rotation_seller_idx on public.whatsapp_rotation (seller_id) where seller_id is not null;
+
+drop trigger if exists whatsapp_rotation_set_updated_at on public.whatsapp_rotation;
+create trigger whatsapp_rotation_set_updated_at
+before update on public.whatsapp_rotation
+for each row execute function public.set_updated_at();
+
+alter table public.whatsapp_rotation enable row level security;
+
+drop policy if exists "Team can read whatsapp rotation" on public.whatsapp_rotation;
+create policy "Team can read whatsapp rotation"
+on public.whatsapp_rotation for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Admin can insert whatsapp rotation" on public.whatsapp_rotation;
+create policy "Admin can insert whatsapp rotation"
+on public.whatsapp_rotation for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Admin can update whatsapp rotation" on public.whatsapp_rotation;
+create policy "Admin can update whatsapp rotation"
+on public.whatsapp_rotation for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Admin can delete whatsapp rotation" on public.whatsapp_rotation;
+create policy "Admin can delete whatsapp rotation"
+on public.whatsapp_rotation for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Contatos pelo WhatsApp do site (um por clique) ---------------------------------
+create table if not exists public.whatsapp_leads (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  rotation_id uuid references public.whatsapp_rotation(id) on delete set null,
+  seller_id uuid references public.sellers(id) on delete set null,
+  phone text not null default '',
+  car_id uuid references public.cars(id) on delete set null,
+  page text not null default '',
+  is_returning boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists whatsapp_leads_company_idx on public.whatsapp_leads (company_id, created_at desc);
+create index if not exists whatsapp_leads_seller_idx on public.whatsapp_leads (seller_id);
+
+alter table public.whatsapp_leads enable row level security;
+
+-- Sem política de insert: só a função whatsapp_contact grava
+drop policy if exists "Team can read whatsapp leads" on public.whatsapp_leads;
+create policy "Team can read whatsapp leads"
+on public.whatsapp_leads for select
+to authenticated
+using (
+  company_id = public.current_company_id()
+  and (public.is_company_staff() or seller_id = public.current_seller_id())
+);
+
+drop policy if exists "Admin can delete whatsapp leads" on public.whatsapp_leads;
+create policy "Admin can delete whatsapp leads"
+on public.whatsapp_leads for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Número para um clique no site. Rodízio: o mesmo navegador (p_keep = número
+-- que ele recebeu antes) continua com o mesmo vendedor enquanto ele estiver
+-- ativo; senão, vai para o próximo da lista depois do último que atendeu.
+create or replace function public.whatsapp_contact(
+  p_company uuid,
+  p_car_slug text default null,
+  p_keep uuid default null,
+  p_page text default null
+)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_mode text;
+  v_main text;
+  v_last uuid;
+  v_sticky integer;
+  v_car uuid;
+  v_entry uuid;
+  v_seller uuid;
+  v_phone text;
+  v_returning boolean := false;
+begin
+  -- Trava a linha da loja: dois cliques ao mesmo tempo não pegam o mesmo número
+  select whatsapp_mode, public.wa_digits(whatsapp_main), whatsapp_last_entry, whatsapp_sticky_days
+    into v_mode, v_main, v_last, v_sticky
+  from public.companies where id = p_company
+  for update;
+  if not found then return null; end if;
+
+  if nullif(trim(coalesce(p_car_slug, '')), '') is not null then
+    select id into v_car from public.cars
+    where company_id = p_company and slug = left(trim(p_car_slug), 200) and not hidden;
+  end if;
+
+  if v_mode = 'rodizio' then
+    if p_keep is not null then
+      select r.id, r.seller_id, public.wa_digits(coalesce(nullif(r.phone, ''), s.phone))
+        into v_entry, v_seller, v_phone
+      from public.whatsapp_rotation r
+      left join public.sellers s on s.id = r.seller_id
+      where r.id = p_keep and r.company_id = p_company and r.active
+        and (r.seller_id is null or (s.active and s.deleted_at is null))
+        and public.wa_digits(coalesce(nullif(r.phone, ''), s.phone)) <> '';
+      v_returning := found;
+    end if;
+
+    if not v_returning then
+      with valid as (
+        select r.id, r.seller_id, r.position, r.created_at,
+               public.wa_digits(coalesce(nullif(r.phone, ''), s.phone)) as phone
+        from public.whatsapp_rotation r
+        left join public.sellers s on s.id = r.seller_id
+        where r.company_id = p_company and r.active
+          and (r.seller_id is null or (s.active and s.deleted_at is null))
+          and public.wa_digits(coalesce(nullif(r.phone, ''), s.phone)) <> ''
+      ),
+      last_served as (
+        select position, created_at, id from public.whatsapp_rotation where id = v_last
+      )
+      select v.id, v.seller_id, v.phone into v_entry, v_seller, v_phone
+      from valid v
+      left join last_served l on true
+      order by
+        -- primeiro quem vem depois do último que atendeu; no fim, recomeça
+        case when l.id is not null and (v.position, v.created_at, v.id) > (l.position, l.created_at, l.id) then 0 else 1 end,
+        v.position, v.created_at, v.id
+      limit 1;
+      if found then
+        update public.companies set whatsapp_last_entry = v_entry where id = p_company;
+      end if;
+    end if;
+  end if;
+
+  v_phone := coalesce(nullif(v_phone, ''), nullif(v_main, ''));
+  if v_phone is null then
+    return jsonb_build_object('phone', null, 'entry_id', null, 'mode', v_mode, 'sticky_days', v_sticky);
+  end if;
+
+  insert into public.whatsapp_leads (company_id, rotation_id, seller_id, phone, car_id, page, is_returning)
+  values (p_company, v_entry, v_seller, v_phone, v_car, left(coalesce(p_page, ''), 200), v_returning);
+
+  return jsonb_build_object('phone', v_phone, 'entry_id', v_entry, 'mode', v_mode, 'sticky_days', v_sticky);
+end;
+$$;
+revoke execute on function public.whatsapp_contact(uuid, text, uuid, text) from public;
+grant execute on function public.whatsapp_contact(uuid, text, uuid, text) to anon, authenticated;
+
+-- Número principal (topo e rodapé do site)
+create or replace function public.store_contact(p_company uuid)
+returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  select jsonb_build_object('mode', whatsapp_mode, 'main', nullif(public.wa_digits(whatsapp_main), ''))
+  from public.companies where id = p_company
+$$;
+revoke execute on function public.store_contact(uuid) from public;
+grant execute on function public.store_contact(uuid) to anon, authenticated;
+
+-- Pendências do Dashboard dispensadas (cada pessoa as suas) ----------------------
+-- dismissed_count: a pendência volta quando a contagem passar desse número.
+-- snoozed_until: escondida até essa hora.
+create table if not exists public.dashboard_dismissals (
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  key text not null check (length(key) between 1 and 100),
+  dismissed_count integer,
+  snoozed_until timestamptz,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, company_id, key)
+);
+
+drop trigger if exists dashboard_dismissals_set_updated_at on public.dashboard_dismissals;
+create trigger dashboard_dismissals_set_updated_at
+before update on public.dashboard_dismissals
+for each row execute function public.set_updated_at();
+
+alter table public.dashboard_dismissals enable row level security;
+
+drop policy if exists "Own dismissals" on public.dashboard_dismissals;
+create policy "Own dismissals"
+on public.dashboard_dismissals for all
+to authenticated
+using (user_id = auth.uid() and company_id = public.current_company_id())
+with check (user_id = auth.uid() and company_id = public.current_company_id());
+
+-- Clientes: responsável, troca e forma de pagamento ------------------------------
+alter table public.customers add column if not exists responsible_seller_id uuid references public.sellers(id) on delete set null;
+alter table public.customers add column if not exists trade_in jsonb not null default '{}';
+alter table public.customers add column if not exists payment_intent jsonb not null default '{}';
+alter table public.customers drop constraint if exists customers_trade_in_check;
+alter table public.customers add constraint customers_trade_in_check check (jsonb_typeof(trade_in) = 'object');
+alter table public.customers drop constraint if exists customers_payment_intent_check;
+alter table public.customers add constraint customers_payment_intent_check check (jsonb_typeof(payment_intent) = 'object');
+create index if not exists customers_responsible_idx on public.customers (responsible_seller_id);
+
+-- Interesses do cliente: um carro do estoque que ele gostou ou um carro que ele
+-- procura (campos em branco = qualquer um)
+create table if not exists public.customer_interests (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  customer_id uuid not null references public.customers(id) on delete cascade,
+  kind text not null default 'procura' check (kind in ('estoque', 'procura')),
+  car_id uuid references public.cars(id) on delete cascade,
+  brand text not null default '',
+  model text not null default '',
+  category text not null default '',
+  year_min integer check (year_min is null or year_min between 1950 and 2100),
+  price_max numeric(12, 2) check (price_max is null or price_max >= 0),
+  km_max integer check (km_max is null or km_max >= 0),
+  transmission text not null default '',
+  notes text not null default '',
+  active boolean not null default true,
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint customer_interests_car_check check (kind <> 'estoque' or car_id is not null)
+);
+
+create index if not exists customer_interests_company_idx on public.customer_interests (company_id, kind) where active;
+create index if not exists customer_interests_customer_idx on public.customer_interests (customer_id);
+
+drop trigger if exists customer_interests_set_updated_at on public.customer_interests;
+create trigger customer_interests_set_updated_at
+before update on public.customer_interests
+for each row execute function public.set_updated_at();
+
+alter table public.customer_interests enable row level security;
+
+drop policy if exists "Team can read customer interests" on public.customer_interests;
+create policy "Team can read customer interests"
+on public.customer_interests for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Team can insert customer interests" on public.customer_interests;
+create policy "Team can insert customer interests"
+on public.customer_interests for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Author or staff can update customer interests" on public.customer_interests;
+create policy "Author or staff can update customer interests"
+on public.customer_interests for update
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()))
+with check (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()));
+
+drop policy if exists "Author or staff can delete customer interests" on public.customer_interests;
+create policy "Author or staff can delete customer interests"
+on public.customer_interests for delete
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()));
+
+-- Mesma regra do painel (src/utils/customerInterests.js): uma busca com pelo
+-- menos um critério; marca igual, modelo contido em "modelo versão", ano
+-- mínimo, preço máximo, km máximo e câmbio
+create or replace function public.interest_matches_car(i public.customer_interests, c public.cars)
+returns boolean
+language sql stable set search_path = public
+as $$
+  select i.kind = 'procura' and i.active
+    and (i.brand <> '' or i.model <> '' or i.category <> '' or i.transmission <> ''
+         or i.year_min is not null or i.price_max is not null or i.km_max is not null)
+    and (i.brand = '' or public.norm_text(c.brand) = public.norm_text(i.brand))
+    and (i.model = '' or position(public.norm_text(i.model) in public.norm_text(c.model || ' ' || c.version)) > 0)
+    and (i.category = '' or c.category = i.category)
+    and (i.year_min is null or c.year >= i.year_min)
+    and (i.price_max is null or (c.price is not null and c.price <= i.price_max))
+    and (i.km_max is null or c.km <= i.km_max)
+    and (i.transmission = '' or position(public.norm_text(i.transmission) in public.norm_text(c.transmission)) > 0)
+$$;
+
+-- Avisos de carro que combina (criados pelo banco quando um carro fica
+-- disponível e visível no site, ou muda preço/km/modelo)
+create table if not exists public.customer_interest_matches (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  interest_id uuid not null references public.customer_interests(id) on delete cascade,
+  customer_id uuid not null references public.customers(id) on delete cascade,
+  car_id uuid not null references public.cars(id) on delete cascade,
+  status text not null default 'novo' check (status in ('novo', 'avisado', 'descartado')),
+  handled_by uuid references auth.users(id) on delete set null,
+  handled_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (interest_id, car_id)
+);
+
+create index if not exists customer_interest_matches_company_idx on public.customer_interest_matches (company_id, status);
+create index if not exists customer_interest_matches_customer_idx on public.customer_interest_matches (customer_id);
+
+create or replace function public.customer_interest_matches_handled()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if new.status is distinct from old.status then
+    new.handled_by := auth.uid();
+    new.handled_at := case when new.status = 'novo' then null else now() end;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists customer_interest_matches_handled on public.customer_interest_matches;
+create trigger customer_interest_matches_handled before update on public.customer_interest_matches
+for each row execute function public.customer_interest_matches_handled();
+
+alter table public.customer_interest_matches enable row level security;
+
+-- Sem política de insert: só o gatilho dos carros cria avisos
+drop policy if exists "Team can read interest matches" on public.customer_interest_matches;
+create policy "Team can read interest matches"
+on public.customer_interest_matches for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Team can update interest matches" on public.customer_interest_matches;
+create policy "Team can update interest matches"
+on public.customer_interest_matches for update
+to authenticated
+using (company_id = public.current_company_id() and public.can_edit_stock())
+with check (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Staff can delete interest matches" on public.customer_interest_matches;
+create policy "Staff can delete interest matches"
+on public.customer_interest_matches for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_staff());
+
+create or replace function public.cars_match_interests()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if new.status <> 'disponivel' or new.hidden then return null; end if;
+  -- Já estava disponível e visível: só refaz a busca se mudou algo que conta
+  if tg_op = 'UPDATE' and old.status = 'disponivel' and not old.hidden
+     and (new.brand, new.model, new.version, new.category, new.year, new.km, new.transmission, new.price)
+         is not distinct from
+         (old.brand, old.model, old.version, old.category, old.year, old.km, old.transmission, old.price) then
+    return null;
+  end if;
+  insert into public.customer_interest_matches (company_id, interest_id, customer_id, car_id)
+  select new.company_id, i.id, i.customer_id, new.id
+  from public.customer_interests i
+  where i.company_id = new.company_id and public.interest_matches_car(i, new)
+  on conflict (interest_id, car_id) do nothing;
+  return null;
+end;
+$$;
+
+drop trigger if exists cars_match_interests on public.cars;
+create trigger cars_match_interests after insert or update on public.cars
+for each row execute function public.cars_match_interests();
+
+-- Histórico de atendimento ---------------------------------------------------------
+create table if not exists public.customer_contacts (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  customer_id uuid not null references public.customers(id) on delete cascade,
+  channel text not null default 'whatsapp' check (channel in ('whatsapp', 'ligacao', 'visita', 'outro')),
+  notes text not null default '',
+  car_id uuid references public.cars(id) on delete set null,
+  follow_up_on date,
+  follow_up_done boolean not null default false,
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  author_name text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists customer_contacts_customer_idx on public.customer_contacts (customer_id, created_at desc);
+create index if not exists customer_contacts_follow_up_idx on public.customer_contacts (company_id, follow_up_on) where not follow_up_done;
+
+drop trigger if exists customer_contacts_set_updated_at on public.customer_contacts;
+create trigger customer_contacts_set_updated_at
+before update on public.customer_contacts
+for each row execute function public.set_updated_at();
+
+-- Nome de quem registrou (vendedor da Equipe ou, sem cadastro, o e-mail)
+create or replace function public.customer_contacts_author()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is not null then
+    new.created_by := auth.uid();
+    new.author_name := coalesce(
+      (select name from public.sellers where user_id = auth.uid() and company_id = new.company_id limit 1),
+      (select email from auth.users where id = auth.uid()),
+      '');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists customer_contacts_author on public.customer_contacts;
+create trigger customer_contacts_author before insert on public.customer_contacts
+for each row execute function public.customer_contacts_author();
+
+alter table public.customer_contacts enable row level security;
+
+drop policy if exists "Team can read customer contacts" on public.customer_contacts;
+create policy "Team can read customer contacts"
+on public.customer_contacts for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Team can insert customer contacts" on public.customer_contacts;
+create policy "Team can insert customer contacts"
+on public.customer_contacts for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Author or staff can update customer contacts" on public.customer_contacts;
+create policy "Author or staff can update customer contacts"
+on public.customer_contacts for update
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()))
+with check (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()));
+
+drop policy if exists "Author or staff can delete customer contacts" on public.customer_contacts;
+create policy "Author or staff can delete customer contacts"
+on public.customer_contacts for delete
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or created_by = auth.uid()));
+
+-- Referências da mesma loja: acrescenta vendedor, interesse e número do rodízio
+create or replace function public.check_company_refs()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb := to_jsonb(new);
+  old_rec jsonb := case when tg_op = 'UPDATE' then to_jsonb(old) else '{}'::jsonb end;
+  v_company uuid := (rec->>'company_id')::uuid;
+  v_ref record;
+  v_ok boolean;
+begin
+  for v_ref in
+    select * from (values
+      ('car_id', 'cars', 'Carro'),
+      ('customer_id', 'customers', 'Cliente'),
+      ('supplier_id', 'suppliers', 'Fornecedor'),
+      ('financing_id', 'customer_financings', 'Financiamento'),
+      ('trade_in_car_id', 'cars', 'Carro da troca'),
+      ('external_financing_id', 'external_financings', 'Financiamento externo'),
+      ('seller_id', 'sellers', 'Vendedor'),
+      ('responsible_seller_id', 'sellers', 'Vendedor responsável'),
+      ('interest_id', 'customer_interests', 'Interesse'),
+      ('rotation_id', 'whatsapp_rotation', 'Número do rodízio')
+    ) r (col, tbl, label)
+  loop
+    continue when not rec ? v_ref.col or rec->>v_ref.col is null;
+    continue when tg_op = 'UPDATE'
+      and rec->v_ref.col is not distinct from old_rec->v_ref.col
+      and rec->'company_id' is not distinct from old_rec->'company_id';
+    execute format('select exists (select 1 from public.%I where id = $1 and company_id = $2)', v_ref.tbl)
+      into v_ok using (rec->>v_ref.col)::uuid, v_company;
+    if not v_ok then
+      raise exception '% não encontrado nesta loja', v_ref.label using errcode = '23503';
+    end if;
+  end loop;
+  return new;
+end;
+$$;
+
+drop trigger if exists customers_check_company_refs on public.customers;
+create trigger customers_check_company_refs before insert or update on public.customers
+for each row execute function public.check_company_refs();
+
+drop trigger if exists whatsapp_rotation_check_company_refs on public.whatsapp_rotation;
+create trigger whatsapp_rotation_check_company_refs before insert or update on public.whatsapp_rotation
+for each row execute function public.check_company_refs();
+
+drop trigger if exists customer_interests_check_company_refs on public.customer_interests;
+create trigger customer_interests_check_company_refs before insert or update on public.customer_interests
+for each row execute function public.check_company_refs();
+
+drop trigger if exists customer_contacts_check_company_refs on public.customer_contacts;
+create trigger customer_contacts_check_company_refs before insert or update on public.customer_contacts
+for each row execute function public.check_company_refs();
+
+-- Registro de atividades: rótulos das tabelas novas
+create or replace function public.log_activity()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb;
+  old_rec jsonb;
+  v_company uuid;
+  v_label text;
+  v_details text;
+  v_email text;
+  v_changed text[];
+begin
+  begin
+    if current_setting('app.skip_activity_log', true) = '1' then return null; end if;
+    if tg_op = 'DELETE' then rec := to_jsonb(old); else rec := to_jsonb(new); end if;
+    v_company := (rec->>'company_id')::uuid;
+    -- Sem usuário = SQL Editor ou Edge Function (que grava o próprio log).
+    if v_company is null or auth.uid() is null then return null; end if;
+
+    if tg_op = 'UPDATE' then
+      old_rec := to_jsonb(old);
+      select array_agg(n.key order by n.key) into v_changed
+      from jsonb_each(rec) n
+      where n.key not in ('updated_at') and n.value is distinct from old_rec->n.key;
+      if v_changed is null then return null; end if;
+      v_details := array_to_string(v_changed, ', ');
+      if 'status' = any(v_changed) then
+        v_details := format('status: %s → %s', old_rec->>'status', rec->>'status');
+      end if;
+    end if;
+
+    v_label := case tg_table_name
+      when 'cars' then concat_ws(' ', rec->>'brand', rec->>'model', rec->>'version')
+      when 'customers' then rec->>'name'
+      when 'suppliers' then rec->>'name'
+      when 'sellers' then rec->>'name'
+      when 'contract_templates' then rec->>'name'
+      when 'contracts' then concat(case rec->>'document_type' when 'recibo' then 'Recibo' else 'Contrato' end, ' — ', rec->>'buyer_name')
+      when 'car_expenses' then concat(coalesce(nullif(rec->>'description', ''), rec->>'category'), ' — R$ ', rec->>'amount')
+      when 'sales' then (select concat(c.brand, ' ', c.model, ' — R$ ', rec->>'sale_price') from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'customer_documents' then concat(
+        coalesce(nullif(rec->>'title', ''), nullif(rec->>'file_name', ''), 'Documento'), ' — ',
+        (select cu.name from public.customers cu where cu.id = (rec->>'customer_id')::uuid))
+      when 'customer_financings' then concat('Financiamento — ', rec->>'customer_name')
+      when 'financing_installments' then (
+        select concat('Parcela ', rec->>'number', '/', f.installments_count, ' — ', f.customer_name)
+        from public.customer_financings f where f.id = (rec->>'financing_id')::uuid)
+      when 'car_reservations' then (
+        select concat('Reserva — ', c.brand, ' ', c.model, coalesce(' — ' || nullif(rec->>'customer_name', ''), ''))
+        from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'external_financings' then concat('Financiamento externo — ', rec->>'customer_name')
+      when 'customer_interests' then concat('Interesse — ',
+        (select cu.name from public.customers cu where cu.id = (rec->>'customer_id')::uuid))
+      when 'customer_contacts' then concat('Atendimento — ',
+        (select cu.name from public.customers cu where cu.id = (rec->>'customer_id')::uuid))
+      when 'whatsapp_rotation' then concat('Rodízio do WhatsApp — ', coalesce(
+        nullif(rec->>'name', ''), (select s.name from public.sellers s where s.id = (rec->>'seller_id')::uuid), rec->>'phone'))
+      else null
+    end;
+
+    select email into v_email from auth.users where id = auth.uid();
+
+    insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label, details)
+    values (v_company, auth.uid(), v_email, lower(tg_op), tg_table_name, (rec->>'id')::uuid, v_label, v_details);
+  exception when others then
+    -- O log nunca pode impedir a operação principal
+    null;
+  end;
+  return null;
+end;
+$$;
+
+drop trigger if exists customer_interests_log_activity on public.customer_interests;
+create trigger customer_interests_log_activity after insert or update or delete on public.customer_interests
+for each row execute function public.log_activity();
+
+drop trigger if exists customer_contacts_log_activity on public.customer_contacts;
+create trigger customer_contacts_log_activity after insert or update or delete on public.customer_contacts
+for each row execute function public.log_activity();
+
+drop trigger if exists whatsapp_rotation_log_activity on public.whatsapp_rotation;
+create trigger whatsapp_rotation_log_activity after insert or update or delete on public.whatsapp_rotation
+for each row execute function public.log_activity();
+
+-- 32) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

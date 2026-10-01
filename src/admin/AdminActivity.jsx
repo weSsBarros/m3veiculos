@@ -76,7 +76,6 @@ const FIELD_LABELS = {
   internal_notes: 'observações internas',
   intake_items: 'itens que vieram com o carro',
   inspection: 'vistoria de entrada',
-  payment_method: 'forma de pagamento',
   bank: 'banco',
   down_payment: 'entrada',
   financed_amount: 'valor financiado',

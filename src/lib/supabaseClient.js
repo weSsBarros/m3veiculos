@@ -11,7 +11,7 @@ export const COMPANY_ID = import.meta.env.VITE_COMPANY_ID
 export const isSupabaseConfigured = Boolean(url && anonKey && COMPANY_ID)
 
 // Funções do banco que só leem (as demais gravam algo)
-const READ_ONLY_RPCS = new Set(['current_company_id', 'site_visit_totals', 'car_view_totals'])
+const READ_ONLY_RPCS = new Set(['current_company_id', 'site_visit_totals', 'car_view_totals', 'team_directory', 'store_contact'])
 
 // "Ver como" (lib/viewScope.js): enquanto o admin simula outra pessoa, toda
 // gravação é recusada antes de sair do navegador — tabelas, funções do

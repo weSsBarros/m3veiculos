@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Phone, Mail, MapPin, Clock, MessageCircle } from 'lucide-react'
 import { whatsappLink } from '../utils/whatsapp.js'
 import './Static.css'
+import { openWhatsApp } from '../utils/whatsappRouter.js'
+import MainPhone from '../components/MainPhone.jsx'
 
 export default function Contact() {
   const [form, setForm] = useState({ name: '', phone: '', message: '' })
@@ -14,7 +16,7 @@ export default function Contact() {
   function handleSubmit(e) {
     e.preventDefault()
     const text = `Olá! Meu nome é ${form.name || '—'}.\nTelefone: ${form.phone || '—'}\nMensagem: ${form.message || '—'}`
-    window.open(whatsappLink(text), '_blank', 'noreferrer')
+    openWhatsApp(whatsappLink(text))
     setSent(true)
   }
 
@@ -30,7 +32,7 @@ export default function Contact() {
               <Phone size={20} />
               <div>
                 <strong>Telefone / WhatsApp</strong>
-                <p>(98) 98189-3675</p>
+                <p><MainPhone fallback="(98) 98189-3675" /></p>
                 <p>(98) 98888-6144</p>
               </div>
             </div>

@@ -6,6 +6,7 @@ import { addDaysISO, todayISO } from './carFormat.js'
 import { checklistSummary } from './saleChecklist.js'
 import { isStaleAnalysis } from './externalFinancing.js'
 import { reservationAlert } from './reservations.js'
+import { likedCarGone } from './customerInterests.js'
 
 // Janela das vendas "recentes": vendas antigas (de antes do sistema) não
 // viram pendência para sempre
@@ -58,4 +59,37 @@ export function reservationGaps(reservations, today = new Date()) {
     expired: alerts.filter((a) => a === 'vencida').length,
     dueSoon: alerts.filter((a) => a === 'vence_logo').length,
   }
+}
+
+// Clientes: avisos de carro que combina ainda não tratados, retornos de
+// atendimento para hoje ou atrasados e carros de que o cliente gostou que
+// foram vendidos ou reservados para outra pessoa. mine(customerId, row):
+// se o registro é da pessoa (o vendedor vê os clientes dele e os sem
+// responsável; admin e gerente, todos).
+export function customerGaps({ matches = [], contacts = [], interests = [], cars = [], mine = () => true, today = todayISO() }) {
+  const carsById = new Map(cars.map((c) => [c.id, c]))
+  const followUps = contacts.filter((c) => c.followUpOn && !c.followUpDone && c.followUpOn <= today && mine(c.customerId, c))
+  const gone = interests.filter((i) => likedCarGone(i, carsById.get(i.carId)) && mine(i.customerId, i))
+  return {
+    newMatches: new Set(matches.filter((m) => m.status === 'novo' && mine(m.customerId, m)).map((m) => m.customerId)).size,
+    followUps: followUps.length,
+    likedCarGone: new Set(gone.map((i) => i.customerId)).size,
+  }
+}
+
+// Pendência excluída volta quando a contagem passa da que havia ao excluir;
+// adiada, quando passa a hora. dismissal: { dismissedCount, snoozedUntil }.
+export function isPendencyVisible(dismissal, count, now = new Date()) {
+  if (!count) return false
+  if (!dismissal) return true
+  if (dismissal.snoozedUntil && new Date(dismissal.snoozedUntil) > now) return false
+  if (dismissal.dismissedCount != null && count <= dismissal.dismissedCount) return false
+  return true
+}
+
+// Contagem caiu depois de excluir: guarda a menor, para o aviso voltar assim
+// que aparecer um item novo (ex.: excluiu com 3, resolveu 2 e entrou 1 novo).
+export function lowerDismissedCount(dismissal, count) {
+  if (!dismissal || dismissal.dismissedCount == null) return null
+  return count < dismissal.dismissedCount ? count : null
 }
