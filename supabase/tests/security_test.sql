@@ -528,6 +528,60 @@ select test.check('admin B: não põe vendedor da loja A como responsável pelo 
   test.denied($$update customers set responsible_seller_id = '5e000000-0000-0000-0000-000000000004'$$));
 reset role;
 
+-- ========================================================= plataforma (33)
+-- Dono da plataforma (fora de qualquer loja) e a loja B marcada como demonstração
+insert into auth.users (id, email, last_sign_in_at) values ('cccccccc-0000-0000-0000-000000000001', 'dono@plataforma', now())
+on conflict (id) do nothing;
+insert into public.platform_admins (user_id) values ('cccccccc-0000-0000-0000-000000000001') on conflict do nothing;
+update public.companies set is_demo = true where slug = 'loja-b';
+insert into test.expected select 'companies_total', count(*) from public.companies;
+insert into test.expected select 'in_stock_a', count(*) from public.cars where company_id = test.company_a() and status <> 'vendido';
+
+select test.login(null);
+set role anon;
+select test.check('anon: não usa as funções da plataforma',
+  test.denied($$select platform_overview(current_date - 30, current_date)$$)
+  and test.denied($$select platform_store_detail(test.company_a(), current_date - 30, current_date)$$)
+  and test.denied($$select is_platform_admin()$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não é dono da plataforma e não vê os números das lojas',
+  is_platform_admin() = false
+  and test.denied($$select platform_overview(current_date - 30, current_date)$$)
+  and test.denied($$select platform_store_detail(test.company_a(), current_date - 30, current_date)$$));
+select test.check('admin A: não lê nem grava a lista de donos da plataforma',
+  test.count('select * from platform_admins') = -1
+  and test.denied($$insert into platform_admins (user_id) values (auth.uid())$$));
+select test.check('admin A: não marca a própria loja como demonstração nem muda o endereço',
+  test.denied($$update companies set is_demo = true$$)
+  and test.denied($$update companies set site_url = 'x'$$));
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: é reconhecido e vê todas as lojas',
+  is_platform_admin()
+  and jsonb_array_length(platform_overview(current_date - 30, current_date)) = test.exp('companies_total'));
+select test.check('dono da plataforma: a loja de demonstração vem marcada',
+  exists (select 1 from jsonb_array_elements(platform_overview(current_date - 30, current_date)) e
+          where e ->> 'slug' = 'loja-b' and (e ->> 'is_demo')::boolean)
+  and exists (select 1 from jsonb_array_elements(platform_overview(current_date - 30, current_date)) e
+              where e ->> 'slug' = 'dom-motors' and not (e ->> 'is_demo')::boolean));
+select test.check('dono da plataforma: estoque da loja A confere',
+  (select (e -> 'stock' ->> 'in_stock')::bigint from jsonb_array_elements(platform_overview(current_date - 30, current_date)) e
+   where e ->> 'slug' = 'dom-motors') = test.exp('in_stock_a'));
+select test.check('dono da plataforma: atividades vêm sem rótulo fora de carros',
+  jsonb_array_length(platform_store_detail(test.company_a(), current_date - 365, current_date) -> 'activities') > 0
+  and not exists (
+    select 1 from jsonb_array_elements(platform_store_detail(test.company_a(), current_date - 365, current_date) -> 'activities') e
+    where e ->> 'entity' <> 'cars' and (e ->> 'label' is not null or e ->> 'details' is not null)));
+select test.check('dono da plataforma: período inválido dá erro',
+  test.denied($$select platform_overview(current_date, current_date - 1)$$)
+  and test.denied($$select platform_store_detail(test.company_a(), current_date - 500, current_date)$$));
+reset role;
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;
