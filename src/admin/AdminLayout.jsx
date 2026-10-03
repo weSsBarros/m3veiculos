@@ -16,6 +16,7 @@ import {
   X,
   LogOut,
   ExternalLink,
+  LifeBuoy,
   Handshake,
   Landmark,
   FileChartColumn,
@@ -29,6 +30,10 @@ import { fetchOverdueInstallments } from '../lib/financingApi.js'
 import { transferAlert } from '../utils/transfer.js'
 import { tabForPath } from '../utils/panelSettings.js'
 import './admin.css'
+import { supportLink } from '../utils/support.js'
+
+// Nome da loja na mensagem do item "Ajuda" (WhatsApp do suporte)
+const STORE_NAME = 'M&3 Veículos'
 
 const SIDEBAR_KEY = 'admin_sidebar_expanded'
 
@@ -205,6 +210,16 @@ export default function AdminLayout() {
         </nav>
 
         <div className="admin-sidebar-bottom">
+          <a
+            href={supportLink(STORE_NAME)}
+            target="_blank"
+            rel="noreferrer"
+            data-tooltip={showLabels ? undefined : 'Ajuda'}
+            aria-label="Ajuda: falar com o suporte no WhatsApp"
+          >
+            <LifeBuoy size={18} />
+            <span className="admin-sidenav-label">Ajuda</span>
+          </a>
           <a href="/" target="_blank" rel="noreferrer" data-tooltip={showLabels ? undefined : 'Ver site'} aria-label="Ver site">
             <ExternalLink size={18} />
             <span className="admin-sidenav-label">Ver site</span>

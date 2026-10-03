@@ -1,0 +1,17 @@
+.site-credit {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.site-credit a {
+  color: inherit;
+  opacity: 0.72;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+
+.site-credit a:hover {
+  opacity: 1;
+  text-decoration: underline;
+}

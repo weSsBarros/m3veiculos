@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import './Footer.css'
 import MainPhone from './MainPhone.jsx'
+import SiteCredit from './SiteCredit.jsx'
 
 export default function Footer() {
   const [email, setEmail] = useState('')
@@ -86,6 +87,7 @@ export default function Footer() {
 
       <div className="container footer-bottom">
         <p>© 2026 M&3 Veículos. Todos os direitos reservados. CNPJ: 12.468.326/0001-27</p>
+        <SiteCredit storeName={'M&3 Veículos'} />
       </div>
     </footer>
   )
