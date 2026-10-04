@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { whatsappLinkForFinancing } from '../utils/whatsapp.js'
 import { maskBirthDate } from '../utils/masks.js'
+import { MoneyInput } from './NumberInputs.jsx'
 import './FinancingModal.css'
 import { openWhatsApp } from '../utils/whatsappRouter.js'
 
@@ -100,7 +101,7 @@ export default function FinancingModal({ car, onClose }) {
           </label>
           <label>
             Valor de entrada
-            <input required value={form.downPayment} onChange={(e) => update('downPayment', e.target.value)} placeholder="Ex: R$ 10.000" />
+            <MoneyInput required value={form.downPayment} onChange={(v) => update('downPayment', v)} placeholder="Ex: 10.000" />
           </label>
 
           <button type="submit" className="btn btn-whatsapp btn-block">

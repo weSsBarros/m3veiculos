@@ -15,6 +15,7 @@ import { likedCarGone, PAYMENT_INTENTS } from '../utils/customerInterests.js'
 import CustomerFileDialog from './CustomerFileDialog.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
+import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
 
 function emptyCustomer(responsibleSellerId = '') {
   return {
@@ -376,12 +377,12 @@ export default function AdminCustomers() {
               </select>
             </label>
             <label>
-              Entrada disponível (R$)
-              <input inputMode="numeric" value={form.paymentIntent.downPayment} onChange={(e) => updateNested('paymentIntent', 'downPayment', e.target.value)} placeholder="Ex: 20.000" />
+              Entrada disponível
+              <MoneyInput value={form.paymentIntent.downPayment} onChange={(v) => updateNested('paymentIntent', 'downPayment', v)} placeholder="Ex: 20.000" />
             </label>
             <label>
-              Parcela que cabe no bolso (R$)
-              <input inputMode="numeric" value={form.paymentIntent.maxInstallment} onChange={(e) => updateNested('paymentIntent', 'maxInstallment', e.target.value)} placeholder="Ex: 1.500" />
+              Parcela que cabe no bolso
+              <MoneyInput value={form.paymentIntent.maxInstallment} onChange={(v) => updateNested('paymentIntent', 'maxInstallment', v)} placeholder="Ex: 1.500" />
             </label>
             <label>
               Carro dele para a troca
@@ -393,11 +394,11 @@ export default function AdminCustomers() {
             </label>
             <label>
               Km do carro da troca
-              <input inputMode="numeric" value={form.tradeIn.km} onChange={(e) => updateNested('tradeIn', 'km', e.target.value)} placeholder="Ex: 45.000" />
+              <KmInput value={form.tradeIn.km} onChange={(v) => updateNested('tradeIn', 'km', v)} placeholder="Ex: 45.000" />
             </label>
             <label>
-              Quanto ele espera pelo carro (R$)
-              <input inputMode="numeric" value={form.tradeIn.expectedValue} onChange={(e) => updateNested('tradeIn', 'expectedValue', e.target.value)} placeholder="Ex: 55.000" />
+              Quanto ele espera pelo carro
+              <MoneyInput value={form.tradeIn.expectedValue} onChange={(v) => updateNested('tradeIn', 'expectedValue', v)} placeholder="Ex: 55.000" />
             </label>
           </div>
         </details>

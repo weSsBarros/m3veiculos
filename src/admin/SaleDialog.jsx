@@ -11,6 +11,7 @@ import SaleChecklist from './SaleChecklist.jsx'
 import PaymentFields, { paymentFromSale } from './PaymentFields.jsx'
 import TradeInFields, { EMPTY_TRADE_IN } from './TradeInFields.jsx'
 import useConfirm from '../components/useConfirm.jsx'
+import { MoneyInput } from '../components/NumberInputs.jsx'
 import '../components/ConfirmDialog.css'
 
 // Janela aberta ao marcar um carro como "Vendido": vendedor, cliente
@@ -156,12 +157,10 @@ export default function SaleDialog({
           />
 
           <label>
-            Valor final da venda (R$)
-            <input
-              type="text"
-              inputMode="numeric"
+            Valor final da venda
+            <MoneyInput
               value={price}
-              onChange={(e) => setPrice(e.target.value)}
+              onChange={(v) => setPrice(v)}
               placeholder="Ex: 95.000"
               required
             />

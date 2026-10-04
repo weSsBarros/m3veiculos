@@ -23,6 +23,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import { DEFAULT_INTAKE_CHECKLIST, DEFAULT_INSPECTION_CHECKLIST } from '../utils/carChecklists.js'
 import { DEFAULT_BANKS } from '../utils/payment.js'
+import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
 
 const EMPTY_CAR = {
   brand: '',
@@ -368,7 +369,7 @@ export default function AdminCarForm() {
             </label>
             <label>
               Quilometragem
-              <input inputMode="numeric" required value={car.km} onChange={(e) => update('km', e.target.value)} />
+              <KmInput required value={car.km} onChange={(v) => update('km', v)} />
             </label>
             <label>
               Câmbio
@@ -440,23 +441,21 @@ export default function AdminCarForm() {
 
           <div className="admin-form-grid">
             <label>
-              Preço de venda (R$)
-              <input
-                inputMode="numeric"
+              Preço de venda
+              <MoneyInput
                 required={!noPrice}
                 disabled={noPrice}
                 value={noPrice ? '' : car.price}
-                onChange={(e) => update('price', e.target.value)}
+                onChange={(v) => update('price', v)}
                 placeholder={noPrice ? 'Sem preço definido' : ''}
               />
             </label>
             <label>
               Preço "de" — opcional, mostra desconto
-              <input
-                inputMode="numeric"
+              <MoneyInput
                 disabled={noPrice}
                 value={noPrice ? '' : car.originalPrice || ''}
-                onChange={(e) => update('originalPrice', e.target.value)}
+                onChange={(v) => update('originalPrice', v)}
               />
             </label>
             <label>
@@ -487,11 +486,10 @@ export default function AdminCarForm() {
                   </select>
                 </label>
                 <label>
-                  Valor final da venda (R$)
-                  <input
-                    inputMode="numeric"
+                  Valor final da venda
+                  <MoneyInput
                     value={sale.price}
-                    onChange={(e) => updateSale('price', e.target.value)}
+                    onChange={(v) => updateSale('price', v)}
                     placeholder={noPrice ? 'Ex: 95.000' : 'Em branco = preço anunciado'}
                   />
                 </label>
@@ -559,11 +557,10 @@ export default function AdminCarForm() {
           <div className="admin-form-grid">
             {showPurchase && (
               <label>
-                Preço de compra (R$)
-                <input
-                  inputMode="numeric"
+                Preço de compra
+                <MoneyInput
                   value={car.purchasePrice || ''}
-                  onChange={(e) => update('purchasePrice', e.target.value)}
+                  onChange={(v) => update('purchasePrice', v)}
                   placeholder="Quanto a loja pagou pelo carro"
                 />
               </label>

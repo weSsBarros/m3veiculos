@@ -19,6 +19,7 @@ import { downloadCsv } from '../utils/exportCsv.js'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { MoneyInput } from '../components/NumberInputs.jsx'
 
 function emptyExpense() {
   return {
@@ -262,8 +263,8 @@ export default function AdminCarExpenses() {
             </select>
           </label>
           <label>
-            Valor (R$)
-            <input inputMode="numeric" required value={form.amount} onChange={(e) => update('amount', e.target.value)} />
+            Valor
+            <MoneyInput required value={form.amount} onChange={(v) => update('amount', v)} />
           </label>
           <label>
             Data

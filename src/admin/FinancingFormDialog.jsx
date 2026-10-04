@@ -5,6 +5,7 @@ import { addDaysISO, formatCurrencyCents, todayISO } from '../utils/carFormat.js
 import { formatMoneyInput, parseMoneyBR, parsePercentBR, priceInstallment, round2 } from '../utils/financing.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import CustomerPicker from './CustomerPicker.jsx'
+import { MoneyInput } from '../components/NumberInputs.jsx'
 import '../components/ConfirmDialog.css'
 
 function carLabel(car) {
@@ -150,21 +151,21 @@ export default function FinancingFormDialog({ soldCars, salesByCar, financedCarI
 
         <div className="admin-form-grid">
           <label>
-            Valor do veículo (R$)
-            <input inputMode="decimal" value={vehiclePrice} onChange={(e) => setVehiclePrice(e.target.value)} placeholder="Ex: 80.000,00" />
+            Valor do veículo
+            <MoneyInput cents value={vehiclePrice} onChange={(v) => setVehiclePrice(v)} placeholder="Ex: 80.000,00" />
           </label>
           <label>
-            Entrada (R$) — opcional
-            <input inputMode="decimal" value={downPayment} onChange={(e) => setDownPayment(e.target.value)} placeholder="0,00" />
+            Entrada — opcional
+            <MoneyInput cents value={downPayment} onChange={(v) => setDownPayment(v)} placeholder="0,00" />
           </label>
           <label>
-            Valor financiado (R$)
-            <input
-              inputMode="decimal"
+            Valor financiado
+            <MoneyInput
+              cents
               value={financedTouched ? financedInput : formatMoneyInput(financed || '')}
-              onChange={(e) => {
+              onChange={(v) => {
                 setFinancedTouched(true)
-                setFinancedInput(e.target.value)
+                setFinancedInput(v)
               }}
               placeholder="Valor do veículo menos a entrada"
               required
@@ -179,13 +180,13 @@ export default function FinancingFormDialog({ soldCars, salesByCar, financedCarI
             <input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="Em branco = sem juros" />
           </label>
           <label>
-            Valor da parcela (R$)
-            <input
-              inputMode="decimal"
+            Valor da parcela
+            <MoneyInput
+              cents
               value={installmentTouched ? installmentInput : formatMoneyInput(suggestedInstallment || '')}
-              onChange={(e) => {
+              onChange={(v) => {
                 setInstallmentTouched(true)
-                setInstallmentInput(e.target.value)
+                setInstallmentInput(v)
               }}
               required
             />

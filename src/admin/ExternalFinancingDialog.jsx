@@ -6,6 +6,7 @@ import { parseMoneyBR, formatMoneyInput } from '../utils/financing.js'
 import { EXTERNAL_STATUSES, computeExternalCommission, describeExternalCommission } from '../utils/externalFinancing.js'
 import CustomerPicker from './CustomerPicker.jsx'
 import BankSelect from './BankSelect.jsx'
+import { MoneyInput } from '../components/NumberInputs.jsx'
 import '../components/ConfirmDialog.css'
 
 function money(value) {
@@ -130,8 +131,8 @@ export default function ExternalFinancingDialog({
             <input value={form.vehiclePlate} onChange={(e) => update('vehiclePlate', e.target.value)} placeholder="Ex: ABC1D23" />
           </label>
           <label>
-            Valor do carro (R$)
-            <input inputMode="decimal" value={form.vehiclePrice} onChange={(e) => update('vehiclePrice', e.target.value)} placeholder="Ex: 85.000,00" />
+            Valor do carro
+            <MoneyInput cents value={form.vehiclePrice} onChange={(v) => update('vehiclePrice', v)} placeholder="Ex: 85.000,00" />
           </label>
           <label>
             O carro está com
@@ -150,20 +151,20 @@ export default function ExternalFinancingDialog({
         <div className="admin-form-grid">
           <BankSelect value={form.bank} onChange={(bank) => update('bank', bank)} banks={banks} disabled={saving} label="Banco" />
           <label>
-            Entrada (R$) — opcional
-            <input inputMode="decimal" value={form.downPayment} onChange={(e) => update('downPayment', e.target.value)} placeholder="0,00" />
+            Entrada — opcional
+            <MoneyInput cents value={form.downPayment} onChange={(v) => update('downPayment', v)} placeholder="0,00" />
           </label>
           <label>
-            Valor financiado (R$)
-            <input inputMode="decimal" value={form.financedAmount} onChange={(e) => update('financedAmount', e.target.value)} placeholder="Ex: 60.000,00" />
+            Valor financiado
+            <MoneyInput cents value={form.financedAmount} onChange={(v) => update('financedAmount', v)} placeholder="Ex: 60.000,00" />
           </label>
           <label>
             Parcelas — opcional
             <input inputMode="numeric" value={form.installmentsCount} onChange={(e) => update('installmentsCount', e.target.value.replace(/\D/g, '').slice(0, 3))} placeholder="Ex: 48" />
           </label>
           <label>
-            Valor da parcela (R$) — opcional
-            <input inputMode="decimal" value={form.installmentAmount} onChange={(e) => update('installmentAmount', e.target.value)} placeholder="0,00" />
+            Valor da parcela — opcional
+            <MoneyInput cents value={form.installmentAmount} onChange={(v) => update('installmentAmount', v)} placeholder="0,00" />
           </label>
           <label>
             Enviado ao banco em
@@ -188,8 +189,8 @@ export default function ExternalFinancingDialog({
           </label>
           {isStaff && showValues && (
             <label>
-              Retorno da loja (R$)
-              <input inputMode="decimal" value={form.storeReturn} onChange={(e) => update('storeReturn', e.target.value)} placeholder="Quanto o banco paga à loja" />
+              Retorno da loja
+              <MoneyInput cents value={form.storeReturn} onChange={(v) => update('storeReturn', v)} placeholder="Quanto o banco paga à loja" />
             </label>
           )}
         </div>

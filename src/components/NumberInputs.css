@@ -1,0 +1,36 @@
+/* Campos de valor (R$ antes) e quilometragem (km depois): o texto fica dentro
+   da caixa, por cima do campo. O espaço para ele vem do padding inline do input. */
+.affix-input {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.affix-input > input {
+  display: block;
+  width: 100%;
+}
+
+.affix-input-text {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text-muted, #6b7280);
+  pointer-events: none;
+}
+
+.affix-input--prefix .affix-input-text {
+  left: 12px;
+}
+
+.affix-input--suffix .affix-input-text {
+  right: 12px;
+}
+
+.affix-input > input:disabled + .affix-input-text {
+  opacity: 0.55;
+}

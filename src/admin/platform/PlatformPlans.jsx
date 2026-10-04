@@ -5,6 +5,7 @@ import { money } from '../../utils/billing.js'
 import { PANEL_TABS } from '../../utils/panelSettings.js'
 import useConfirm from '../../components/useConfirm.jsx'
 import PlatformTabs from './PlatformTabs.jsx'
+import { MoneyInput } from '../../components/NumberInputs.jsx'
 import '../admin.css'
 
 const EMPTY = { id: null, name: '', monthlyPrice: '', features: PANEL_TABS.map((t) => t.key), active: true }
@@ -103,8 +104,8 @@ export default function PlatformPlans() {
               <input value={form.name} maxLength={40} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ex.: Básico" />
             </label>
             <label>
-              Valor mensal (R$)
-              <input inputMode="decimal" value={form.monthlyPrice} onChange={(e) => setForm((f) => ({ ...f, monthlyPrice: e.target.value }))} placeholder="Ex: 199,90" />
+              Valor mensal
+              <MoneyInput cents value={form.monthlyPrice} onChange={(v) => setForm((f) => ({ ...f, monthlyPrice: v }))} placeholder="Ex: 199,90" />
             </label>
           </div>
           <div>

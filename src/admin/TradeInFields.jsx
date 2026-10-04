@@ -1,3 +1,5 @@
+import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
+
 export const EMPTY_TRADE_IN = {
   enabled: false,
   brand: '',
@@ -49,7 +51,7 @@ export default function TradeInFields({ value, onChange, disabled }) {
             </label>
             <label>
               Quilometragem
-              <input inputMode="numeric" value={value.km} onChange={(e) => update('km', e.target.value)} disabled={disabled} />
+              <KmInput value={value.km} onChange={(v) => update('km', v)} disabled={disabled} />
             </label>
             <label>
               Cor
@@ -60,8 +62,8 @@ export default function TradeInFields({ value, onChange, disabled }) {
               <input value={value.plate} onChange={(e) => update('plate', e.target.value)} placeholder="Ex: ABC1D23" disabled={disabled} />
             </label>
             <label>
-              Valor da troca (R$)
-              <input inputMode="numeric" value={value.value} onChange={(e) => update('value', e.target.value)} placeholder="Quanto abate da venda" disabled={disabled} />
+              Valor da troca
+              <MoneyInput value={value.value} onChange={(v) => update('value', v)} placeholder="Quanto abate da venda" disabled={disabled} />
             </label>
           </div>
           <span className="sale-dialog-note">

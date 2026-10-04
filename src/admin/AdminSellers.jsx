@@ -8,6 +8,7 @@ import { fetchSales, markCommissionsPaid } from '../lib/salesApi.js'
 import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
 import { EXT_COMMISSION_TYPES, describeExternalCommission } from '../utils/externalFinancing.js'
 import CommissionsDialog from './CommissionsDialog.jsx'
+import { MoneyInput } from '../components/NumberInputs.jsx'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { formatCurrency, formatCurrencyCents, formatDateBR } from '../utils/carFormat.js'
 import { periodRange, inRange } from '../utils/period.js'
@@ -511,13 +512,17 @@ export default function AdminSellers() {
           )}
           {form.hasCommission && (
           <label>
-            {form.commissionType === 'percent' ? 'Comissão (%)' : 'Comissão por carro (R$)'}
-            <input
-              inputMode="decimal"
-              value={form.commissionValue}
-              onChange={(e) => update('commissionValue', e.target.value)}
-              placeholder={form.commissionType === 'percent' ? 'Ex: 1,5' : 'Ex: 500'}
-            />
+            {form.commissionType === 'percent' ? 'Comissão (%)' : 'Comissão por carro'}
+            {form.commissionType === 'percent' ? (
+              <input
+                inputMode="decimal"
+                value={form.commissionValue}
+                onChange={(e) => update('commissionValue', e.target.value)}
+                placeholder="Ex: 1,5"
+              />
+            ) : (
+              <MoneyInput cents value={form.commissionValue} onChange={(v) => update('commissionValue', v)} placeholder="Ex: 500" />
+            )}
           </label>
           )}
           <label>
@@ -530,13 +535,17 @@ export default function AdminSellers() {
           </label>
           {form.extCommissionType !== 'none' && (
             <label>
-              {form.extCommissionType === 'fixed' ? 'Valor por financiamento (R$)' : 'Percentual (%)'}
-              <input
-                inputMode="decimal"
-                value={form.extCommissionValue}
-                onChange={(e) => update('extCommissionValue', e.target.value)}
-                placeholder={form.extCommissionType === 'fixed' ? 'Ex: 300' : 'Ex: 1'}
-              />
+              {form.extCommissionType === 'fixed' ? 'Valor por financiamento' : 'Percentual (%)'}
+              {form.extCommissionType === 'fixed' ? (
+                <MoneyInput cents value={form.extCommissionValue} onChange={(v) => update('extCommissionValue', v)} placeholder="Ex: 300" />
+              ) : (
+                <input
+                  inputMode="decimal"
+                  value={form.extCommissionValue}
+                  onChange={(e) => update('extCommissionValue', e.target.value)}
+                  placeholder="Ex: 1"
+                />
+              )}
             </label>
           )}
         </div>

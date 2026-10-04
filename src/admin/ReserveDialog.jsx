@@ -4,6 +4,7 @@ import DateInputBR from '../components/DateInputBR.jsx'
 import { addDaysISO, todayISO } from '../utils/carFormat.js'
 import { parseMoneyBR } from '../utils/financing.js'
 import CustomerPicker from './CustomerPicker.jsx'
+import { MoneyInput } from '../components/NumberInputs.jsx'
 import '../components/ConfirmDialog.css'
 
 // Reserva com sinal: cliente, vendedor, valor do sinal, prazo e observações.
@@ -64,8 +65,8 @@ export default function ReserveDialog({ car, sellers, customers, onCustomerCreat
         </label>
 
         <label>
-          Valor do sinal (R$) — opcional
-          <input inputMode="decimal" value={deposit} onChange={(e) => setDeposit(e.target.value)} placeholder="Ex: 2.000,00" disabled={saving} />
+          Valor do sinal — opcional
+          <MoneyInput cents value={deposit} onChange={(v) => setDeposit(v)} placeholder="Ex: 2.000,00" disabled={saving} />
         </label>
 
         <label>

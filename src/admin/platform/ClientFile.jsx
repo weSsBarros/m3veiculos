@@ -17,6 +17,9 @@ import { todayISO } from '../../utils/carFormat.js'
 import useConfirm from '../../components/useConfirm.jsx'
 import { StatusPill, BillingPill } from './ClientParts.jsx'
 import PlatformTabs from './PlatformTabs.jsx'
+import DateInputBR from '../../components/DateInputBR.jsx'
+import MonthInputBR from '../../components/MonthInputBR.jsx'
+import { MoneyInput } from '../../components/NumberInputs.jsx'
 import '../admin.css'
 
 const SECTIONS = [
@@ -314,11 +317,11 @@ export default function ClientFile() {
                 </select>
               </label>
               <label>
-                Mensalidade (R$)
-                <input
-                  inputMode="decimal"
+                Mensalidade
+                <MoneyInput
+                  cents
                   value={billingForm.monthlyPrice}
-                  onChange={(e) => setBillingForm((f) => ({ ...f, monthlyPrice: e.target.value }))}
+                  onChange={(v) => setBillingForm((f) => ({ ...f, monthlyPrice: v }))}
                   placeholder={planPrice ? `Do plano: ${priceInput(planPrice)}` : 'Ex: 199,90'}
                 />
               </label>
@@ -335,7 +338,7 @@ export default function ClientFile() {
               </label>
               <label>
                 Primeiro mês cobrado
-                <input type="month" value={billingForm.billingStart} onChange={(e) => setBillingForm((f) => ({ ...f, billingStart: e.target.value }))} />
+                <MonthInputBR value={billingForm.billingStart} onChange={(v) => setBillingForm((f) => ({ ...f, billingStart: v }))} />
               </label>
             </div>
             <p className="admin-form-note">
@@ -387,15 +390,15 @@ export default function ClientFile() {
             <div className="admin-form-grid admin-form-grid-3">
               <label>
                 Mês de referência
-                <input type="month" value={payForm.referenceMonth} onChange={(e) => setPayForm((f) => ({ ...f, referenceMonth: e.target.value }))} />
+                <MonthInputBR value={payForm.referenceMonth} onChange={(v) => setPayForm((f) => ({ ...f, referenceMonth: v }))} />
               </label>
               <label>
-                Valor pago (R$)
-                <input inputMode="decimal" value={payForm.amount} onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))} />
+                Valor pago
+                <MoneyInput cents value={payForm.amount} onChange={(v) => setPayForm((f) => ({ ...f, amount: v }))} />
               </label>
               <label>
                 Pago em
-                <input type="date" value={payForm.paidOn} onChange={(e) => setPayForm((f) => ({ ...f, paidOn: e.target.value }))} />
+                <DateInputBR value={payForm.paidOn} onChange={(v) => setPayForm((f) => ({ ...f, paidOn: v }))} />
               </label>
               <label>
                 Forma
@@ -481,7 +484,7 @@ export default function ClientFile() {
               ))}
               <label>
                 Vencimento do domínio
-                <input type="date" value={dataForm.domainExpiresOn} onChange={(e) => setDataForm((f) => ({ ...f, domainExpiresOn: e.target.value }))} />
+                <DateInputBR value={dataForm.domainExpiresOn} onChange={(v) => setDataForm((f) => ({ ...f, domainExpiresOn: v }))} />
               </label>
             </div>
             <label>

@@ -6,6 +6,7 @@ import { CATEGORIES, BRANDS, TRANSMISSIONS, CAR_STATUSES, formatCurrency, format
 import { describeInterest, matchingStockCars, likedCarGone, hasCriteria } from '../utils/customerInterests.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import useConfirm from '../components/useConfirm.jsx'
+import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
 
 const categoryLabel = (slug) => CATEGORIES.find((c) => c.slug === slug)?.label || slug
 const statusLabel = (value) => CAR_STATUSES.find((s) => s.value === value)?.label || value
@@ -293,12 +294,12 @@ export default function CustomerInterests({ customer, cars, onNotify, onChanged 
                   <input inputMode="numeric" value={form.yearMin} onChange={(e) => update('yearMin', e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="Ex: 2019" />
                 </label>
                 <label>
-                  Preço até (R$)
-                  <input inputMode="numeric" value={form.priceMax} onChange={(e) => update('priceMax', e.target.value)} placeholder="Ex: 120.000" />
+                  Preço até
+                  <MoneyInput value={form.priceMax} onChange={(v) => update('priceMax', v)} placeholder="Ex: 120.000" />
                 </label>
                 <label>
                   Km até
-                  <input inputMode="numeric" value={form.kmMax} onChange={(e) => update('kmMax', e.target.value)} placeholder="Ex: 60.000" />
+                  <KmInput value={form.kmMax} onChange={(v) => update('kmMax', v)} placeholder="Ex: 60.000" />
                 </label>
                 <label>
                   Câmbio

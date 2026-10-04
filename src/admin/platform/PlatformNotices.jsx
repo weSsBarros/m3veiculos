@@ -5,6 +5,7 @@ import { dateBR } from '../../utils/billing.js'
 import { todayISO } from '../../utils/carFormat.js'
 import useConfirm from '../../components/useConfirm.jsx'
 import PlatformTabs from './PlatformTabs.jsx'
+import DateInputBR from '../../components/DateInputBR.jsx'
 import '../admin.css'
 
 const LEVELS = { info: 'Informação', aviso: 'Aviso', urgente: 'Urgente' }
@@ -148,11 +149,11 @@ export default function PlatformNotices() {
           </label>
           <label>
             Começa em
-            <input type="date" value={form.startsOn} onChange={(e) => setForm((f) => ({ ...f, startsOn: e.target.value }))} />
+            <DateInputBR value={form.startsOn} onChange={(v) => setForm((f) => ({ ...f, startsOn: v }))} />
           </label>
           <label>
             Termina em (opcional)
-            <input type="date" value={form.endsOn} onChange={(e) => setForm((f) => ({ ...f, endsOn: e.target.value }))} />
+            <DateInputBR value={form.endsOn} onChange={(v) => setForm((f) => ({ ...f, endsOn: v }))} />
           </label>
         </div>
         <label>

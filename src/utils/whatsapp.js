@@ -54,7 +54,7 @@ export function whatsappLinkForFinancing(car, buyer = {}) {
       `Número de contato: ${buyer.phone || '—'}`,
       `Tem CNH: ${buyer.hasCnh || '—'}`,
       `CPF: ${buyer.cpf || '—'}`,
-      `Valor de entrada: ${buyer.downPayment || '—'}`
+      `Valor de entrada: ${buyer.downPayment ? `R$ ${buyer.downPayment}` : '—'}`
     )
   }
 

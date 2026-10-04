@@ -1,5 +1,6 @@
 import { SALE_PAYMENT_METHODS } from '../utils/payment.js'
 import BankSelect from './BankSelect.jsx'
+import { MoneyInput } from '../components/NumberInputs.jsx'
 
 export const EMPTY_PAYMENT = { method: '', bank: '', downPayment: '', financedAmount: '' }
 
@@ -39,12 +40,12 @@ export default function PaymentFields({ value, onChange, banks = [], disabled })
         <>
           <BankSelect value={value.bank} onChange={(bank) => update('bank', bank)} banks={banks} disabled={disabled} />
           <label>
-            Entrada (R$) — opcional
-            <input inputMode="decimal" value={value.downPayment} onChange={(e) => update('downPayment', e.target.value)} placeholder="0,00" disabled={disabled} />
+            Entrada — opcional
+            <MoneyInput cents value={value.downPayment} onChange={(v) => update('downPayment', v)} placeholder="0,00" disabled={disabled} />
           </label>
           <label>
-            Valor financiado (R$) — opcional
-            <input inputMode="decimal" value={value.financedAmount} onChange={(e) => update('financedAmount', e.target.value)} placeholder="0,00" disabled={disabled} />
+            Valor financiado — opcional
+            <MoneyInput cents value={value.financedAmount} onChange={(v) => update('financedAmount', v)} placeholder="0,00" disabled={disabled} />
           </label>
         </>
       )}

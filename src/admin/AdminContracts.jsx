@@ -20,6 +20,7 @@ import { loadContractLogo } from '../utils/contractLogo.js'
 import { loadStoredCompany, saveStoredCompany } from '../utils/contractCompany.js'
 import { downloadSavedContract } from '../utils/contractDownload.js'
 import DateInputBR from '../components/DateInputBR.jsx'
+import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
 import './admin.css'
 
 const EMPTY_BUYER = { name: '', document: '', rg: '', address: '', phone: '', email: '' }
@@ -372,7 +373,7 @@ export default function AdminContracts() {
             </label>
             <label>
               Km
-              <input inputMode="numeric" value={vehicle.km} onChange={(e) => updateVehicle('km', e.target.value)} />
+              <KmInput value={vehicle.km} onChange={(v) => updateVehicle('km', v)} />
             </label>
             <label>
               Placa
@@ -393,8 +394,8 @@ export default function AdminContracts() {
           <h2>Condições da venda</h2>
           <div className="admin-form-grid">
             <label>
-              Preço de venda (R$)
-              <input inputMode="numeric" value={sale.price} onChange={(e) => updateSale('price', e.target.value)} required />
+              Preço de venda
+              <MoneyInput value={sale.price} onChange={(v) => updateSale('price', v)} required />
             </label>
             <label>
               Forma de pagamento

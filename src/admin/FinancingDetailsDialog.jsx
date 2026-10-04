@@ -20,6 +20,7 @@ import { companyForDocuments } from '../utils/contractCompany.js'
 import { whatsappLinkToPhone } from '../utils/whatsapp.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import useConfirm from '../components/useConfirm.jsx'
+import { MoneyInput } from '../components/NumberInputs.jsx'
 import '../components/ConfirmDialog.css'
 
 const STATUS_PILL = { em_dia: 'is-success', em_atraso: 'is-danger', quitado: 'is-info', cancelado: '' }
@@ -62,12 +63,12 @@ function PaymentDialog({ financing, installment, onConfirm, onClose, saving }) {
           <DateInputBR value={paidOn} onChange={setPaidOn} required />
         </label>
         <label>
-          Multa e juros por atraso (R$)
-          <input
-            inputMode="decimal"
+          Multa e juros por atraso
+          <MoneyInput
+            cents
             value={chargesInput === null ? formatMoneyInput(suggested.total) : chargesInput}
-            onChange={(e) => {
-              setChargesInput(e.target.value)
+            onChange={(v) => {
+              setChargesInput(v)
               setReceivedInput(null)
             }}
           />
@@ -79,11 +80,11 @@ function PaymentDialog({ financing, installment, onConfirm, onClose, saving }) {
           </span>
         )}
         <label>
-          Valor recebido (R$)
-          <input
-            inputMode="decimal"
+          Valor recebido
+          <MoneyInput
+            cents
             value={receivedInput === null ? formatMoneyInput(received) : receivedInput}
-            onChange={(e) => setReceivedInput(e.target.value)}
+            onChange={(v) => setReceivedInput(v)}
             required
           />
         </label>
@@ -144,8 +145,8 @@ function AdjustDialog({ financing, installment, onConfirm, onClose, saving }) {
           <DateInputBR value={dueDate} onChange={setDueDate} required />
         </label>
         <label>
-          Valor (R$)
-          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+          Valor
+          <MoneyInput cents value={amount} onChange={(v) => setAmount(v)} required />
         </label>
         {error && <p className="admin-error">{error}</p>}
         <div className="confirm-dialog-actions">
