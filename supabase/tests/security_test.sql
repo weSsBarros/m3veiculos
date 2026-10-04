@@ -547,10 +547,10 @@ reset role;
 
 select test.login('aaaaaaaa-0000-0000-0000-000000000001');
 set role authenticated;
-select test.check('admin A: não é dono da plataforma e não vê os números das lojas',
+select test.check('admin A: não é dono da plataforma e não vê os números das outras lojas',
   is_platform_admin() = false
   and test.denied($$select platform_overview(current_date - 30, current_date)$$)
-  and test.denied($$select platform_store_detail(test.company_a(), current_date - 30, current_date)$$));
+  and test.denied($$select platform_store_detail('bbbbbbbb-0000-0000-0000-00000000000b', current_date - 30, current_date)$$));
 select test.check('admin A: não lê nem grava a lista de donos da plataforma',
   test.count('select * from platform_admins') = -1
   and test.denied($$insert into platform_admins (user_id) values (auth.uid())$$));
@@ -580,6 +580,60 @@ select test.check('dono da plataforma: atividades vêm sem rótulo fora de carro
 select test.check('dono da plataforma: período inválido dá erro',
   test.denied($$select platform_overview(current_date, current_date - 1)$$)
   and test.denied($$select platform_store_detail(test.company_a(), current_date - 500, current_date)$$));
+select test.check('dono da plataforma: sem loja própria, não tem aba Desempenho',
+  test.denied($$select store_performance(current_date - 30, current_date)$$));
+reset role;
+
+-- ========================================================= desempenho (35)
+select test.login(null);
+set role anon;
+select test.check('anon: não vê o desempenho de loja nenhuma',
+  test.denied($$select store_performance(current_date - 30, current_date)$$)
+  and test.denied($$select platform_rows(current_date - 30, current_date, null)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: vê o desempenho da própria loja',
+  (store_performance(current_date - 30, current_date) ->> 'id')::uuid = test.company_a()
+  and (store_performance(current_date - 30, current_date) -> 'stock' ->> 'in_stock')::bigint = test.exp('in_stock_a'));
+select test.check('admin A: vê o detalhe da própria loja',
+  jsonb_array_length(platform_store_detail(test.company_a(), current_date - 365, current_date) -> 'activities') > 0);
+select test.check('admin A: não chama a função interna com todas as lojas',
+  test.denied($$select platform_rows(current_date - 30, current_date, null)$$)
+  and test.denied($$select platform_rows(current_date - 30, current_date, 'bbbbbbbb-0000-0000-0000-00000000000b')$$));
+select test.check('admin A: período inválido dá erro no desempenho',
+  test.denied($$select store_performance(current_date, current_date - 1)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente A: não vê o desempenho (só o admin)',
+  test.denied($$select store_performance(current_date - 30, current_date)$$)
+  and test.denied($$select platform_store_detail(test.company_a(), current_date - 30, current_date)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: não vê o desempenho (só o admin)',
+  test.denied($$select store_performance(current_date - 30, current_date)$$)
+  and test.denied($$select platform_store_detail(test.company_a(), current_date - 30, current_date)$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: vê só a loja B, nunca a loja A',
+  (store_performance(current_date - 30, current_date) ->> 'id')::uuid = 'bbbbbbbb-0000-0000-0000-00000000000b'
+  and test.denied($$select platform_store_detail(test.company_a(), current_date - 30, current_date)$$));
+reset role;
+
+-- Vendedor na loja A e admin na loja B: nunca recebe os números da loja A
+select test.login('aaaaaaaa-0000-0000-0000-000000000007');
+set role authenticated;
+select test.check('vendedor A / admin B: nunca vê o desempenho da loja A',
+  case when test.denied($$select store_performance(current_date - 30, current_date)$$) then true
+       else (store_performance(current_date - 30, current_date) ->> 'id')::uuid <> test.company_a() end
+  and test.denied($$select platform_store_detail(test.company_a(), current_date - 30, current_date)$$));
 reset role;
 
 -- ================================================================ resultado

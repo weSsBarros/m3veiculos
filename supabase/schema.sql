@@ -4320,7 +4320,261 @@ end $$;
 revoke execute on function public.platform_store_detail(uuid, date, date) from anon, public;
 grant execute on function public.platform_store_detail(uuid, date, date) to authenticated;
 
--- 34) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 34) Conferência: passou para a seção 36, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 35) Desempenho: a aba de cada loja (só o admin, só a própria loja)
+--
+-- * platform_rows(p_start, p_end, p_company): os números da seção 33, sem
+--   checar quem chama. Sem loja = todas; com loja = só ela. Ninguém chama pela
+--   API (só as funções abaixo, que conferem o acesso).
+-- * platform_overview: igual à seção 33 (só o dono da plataforma).
+-- * store_performance(p_start, p_end): a linha da loja de quem chama, só para o
+--   admin dela. É o que a aba "Desempenho" do painel mostra.
+-- * platform_store_detail: o dono da plataforma vê qualquer loja; o admin vê
+--   só a própria.
+
+create or replace function public.platform_rows(p_start date, p_end date, p_company uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_prev_start date;
+  v_prev_end date;
+  v_result jsonb;
+begin
+  if p_start is null or p_end is null or p_end < p_start or p_end - p_start > 400 then
+    raise exception 'Período inválido' using errcode = '22023';
+  end if;
+  v_prev_end := p_start - 1;
+  v_prev_start := p_start - (p_end - p_start + 1);
+
+  select coalesce(jsonb_agg(s.store order by s.is_demo, s.name), '[]'::jsonb) into v_result
+  from (
+    select c.is_demo, c.name, jsonb_build_object(
+      'id', c.id,
+      'slug', c.slug,
+      'name', c.name,
+      'site_url', c.site_url,
+      'is_demo', c.is_demo,
+      'created_at', c.created_at,
+      'stock_alert_days', c.stock_alert_days,
+      'whatsapp_mode', c.whatsapp_mode,
+      'whatsapp_ok', c.whatsapp_main <> '',
+      'settings_customized', c.panel_settings <> '{}'::jsonb,
+      'site', (
+        select jsonb_build_object(
+          'visits', coalesce(sum(v.visits) filter (where v.day between p_start and p_end), 0),
+          'visitors', coalesce(sum(v.visitors) filter (where v.day between p_start and p_end), 0),
+          'visits_prev', coalesce(sum(v.visits) filter (where v.day between v_prev_start and v_prev_end), 0),
+          'visitors_prev', coalesce(sum(v.visitors) filter (where v.day between v_prev_start and v_prev_end), 0))
+        from public.site_visits_daily v
+        where v.company_id = c.id and v.day between v_prev_start and p_end),
+      'car_views', (
+        select jsonb_build_object(
+          'views', coalesce(sum(x.views) filter (where x.day between p_start and p_end), 0),
+          'views_prev', coalesce(sum(x.views) filter (where x.day between v_prev_start and v_prev_end), 0))
+        from public.car_views_daily x
+        where x.company_id = c.id and x.day between v_prev_start and p_end),
+      'leads', (
+        select jsonb_build_object(
+          'total', count(*) filter (where d between p_start and p_end),
+          'prev', count(*) filter (where d between v_prev_start and v_prev_end))
+        from (select (l.created_at at time zone 'America/Fortaleza')::date as d
+              from public.whatsapp_leads l where l.company_id = c.id) l),
+      'stock', (
+        select jsonb_build_object(
+          'available', count(*) filter (where k.status = 'disponivel' and not k.hidden),
+          'reserved', count(*) filter (where k.status = 'reservado'),
+          'maintenance', count(*) filter (where k.status = 'manutencao'),
+          'hidden', count(*) filter (where k.hidden and k.status <> 'vendido'),
+          'in_stock', count(*) filter (where k.status <> 'vendido'),
+          'no_photo', count(*) filter (where k.status = 'disponivel' and not k.hidden
+                                         and jsonb_array_length(coalesce(k.images, '[]'::jsonb)) = 0),
+          'stale', count(*) filter (where k.status = 'disponivel'
+                                      and current_date - coalesce(k.purchase_date, (k.created_at at time zone 'America/Fortaleza')::date) > c.stock_alert_days),
+          'added', count(*) filter (where (k.created_at at time zone 'America/Fortaleza')::date between p_start and p_end),
+          'added_prev', count(*) filter (where (k.created_at at time zone 'America/Fortaleza')::date between v_prev_start and v_prev_end),
+          'last_added_at', max(k.created_at),
+          'last_updated_at', max(k.updated_at))
+        from public.cars k
+        where k.company_id = c.id),
+      'sales', (
+        select jsonb_build_object(
+          'sold', count(*) filter (where x.sale_date between p_start and p_end),
+          'sold_prev', count(*) filter (where x.sale_date between v_prev_start and v_prev_end),
+          'sold_site', count(*) filter (where x.sale_date between p_start and p_end and x.from_site),
+          'sold_site_prev', count(*) filter (where x.sale_date between v_prev_start and v_prev_end and x.from_site),
+          'total', count(*))
+        from (
+          select s.sale_date, exists (
+            select 1 from public.whatsapp_leads l
+            where l.company_id = s.company_id and l.car_id = s.car_id
+              and (l.created_at at time zone 'America/Fortaleza')::date <= s.sale_date) as from_site
+          from public.sales s
+          where s.company_id = c.id) x),
+      'usage', (
+        select jsonb_build_object(
+          'last_activity_at', max(a.created_at),
+          'last_work_at', max(a.created_at) filter (where a.entity <> 'auth'),
+          'activities', count(*) filter (where a.entity <> 'auth' and a.d between p_start and p_end),
+          'activities_prev', count(*) filter (where a.entity <> 'auth' and a.d between v_prev_start and v_prev_end),
+          'logins', count(*) filter (where a.entity = 'auth' and a.d between p_start and p_end),
+          'active_users', count(distinct a.user_id) filter (where a.d between p_start and p_end),
+          'active_days', count(distinct a.d) filter (where a.entity <> 'auth' and a.d between p_start and p_end))
+        from (select x.*, (x.created_at at time zone 'America/Fortaleza')::date as d
+              from public.activity_log x where x.company_id = c.id) a),
+      'last_login_at', (
+        select max(u.last_sign_in_at)
+        from public.user_company uc join auth.users u on u.id = uc.user_id
+        where uc.company_id = c.id),
+      'team', jsonb_build_object(
+        'admins', (select count(*) from public.user_company uc where uc.company_id = c.id and uc.role = 'admin'),
+        'managers', (select count(*) from public.sellers t
+                     where t.company_id = c.id and t.role = 'manager' and t.active and t.deleted_at is null),
+        'sellers', (select count(*) from public.sellers t
+                    where t.company_id = c.id and t.role = 'seller' and t.active and t.deleted_at is null)),
+      'features', jsonb_build_object(
+        'customers', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customers x where x.company_id = c.id),
+        'customer_contacts', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customer_contacts x where x.company_id = c.id),
+        'customer_interests', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customer_interests x where x.company_id = c.id),
+        'reservations', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.car_reservations x where x.company_id = c.id),
+        'contracts', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.contracts x where x.company_id = c.id),
+        'contract_templates', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.contract_templates x where x.company_id = c.id),
+        'financings', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customer_financings x where x.company_id = c.id),
+        'external_financings', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.external_financings x where x.company_id = c.id),
+        'expenses', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.car_expenses x where x.company_id = c.id),
+        'customer_documents', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customer_documents x where x.company_id = c.id),
+        'sales', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where x.sale_date between p_start and p_end)) from public.sales x where x.company_id = c.id),
+        'rotation', (select jsonb_build_object('total', count(*) filter (where x.active), 'period', 0) from public.whatsapp_rotation x where x.company_id = c.id))
+    ) as store
+    from public.companies c
+    where p_company is null or c.id = p_company
+  ) s;
+
+  return v_result;
+end $$;
+revoke execute on function public.platform_rows(date, date, uuid) from anon, authenticated, public;
+
+create or replace function public.platform_overview(p_start date, p_end date)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  return public.platform_rows(p_start, p_end, null);
+end $$;
+revoke execute on function public.platform_overview(date, date) from anon, public;
+grant execute on function public.platform_overview(date, date) to authenticated;
+
+create or replace function public.store_performance(p_start date, p_end date)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+begin
+  if v_company is null or not public.is_company_admin() then
+    raise exception 'Acesso restrito ao admin da loja' using errcode = '42501';
+  end if;
+  return public.platform_rows(p_start, p_end, v_company) -> 0;
+end $$;
+revoke execute on function public.store_performance(date, date) from anon, public;
+grant execute on function public.store_performance(date, date) to authenticated;
+
+create or replace function public.platform_store_detail(p_company uuid, p_start date, p_end date)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_result jsonb;
+begin
+  if not (public.is_platform_admin()
+          or (p_company is not null and p_company = public.current_company_id() and public.is_company_admin())) then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  if p_start is null or p_end is null or p_end < p_start or p_end - p_start > 400 then
+    raise exception 'Período inválido' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.companies where id = p_company) then
+    raise exception 'Loja não encontrada' using errcode = 'P0002';
+  end if;
+
+  select jsonb_build_object(
+    'daily', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+          'day', d.day,
+          'visits', coalesce(v.visits, 0),
+          'visitors', coalesce(v.visitors, 0),
+          'views', coalesce(cv.views, 0),
+          'leads', coalesce(l.leads, 0)) order by d.day), '[]'::jsonb)
+      from (select g::date as day from generate_series(p_start, p_end, interval '1 day') g) d
+      left join public.site_visits_daily v on v.company_id = p_company and v.day = d.day
+      left join lateral (
+        select sum(x.views) as views from public.car_views_daily x
+        where x.company_id = p_company and x.day = d.day) cv on true
+      left join lateral (
+        select count(*) as leads from public.whatsapp_leads w
+        where w.company_id = p_company and (w.created_at at time zone 'America/Fortaleza')::date = d.day) l on true),
+    'top_viewed', (
+      select coalesce(jsonb_agg(t order by t.count desc, t.car), '[]'::jsonb)
+      from (
+        select concat_ws(' ', k.brand, k.model, k.model_year) as car, sum(x.views)::integer as count
+        from public.car_views_daily x join public.cars k on k.id = x.car_id
+        where x.company_id = p_company and x.day between p_start and p_end
+        group by k.id, k.brand, k.model, k.model_year
+        order by count desc
+        limit 10) t),
+    'top_leads', (
+      select coalesce(jsonb_agg(t order by t.count desc, t.car), '[]'::jsonb)
+      from (
+        select concat_ws(' ', k.brand, k.model, k.model_year) as car, count(*)::integer as count
+        from public.whatsapp_leads w join public.cars k on k.id = w.car_id
+        where w.company_id = p_company
+          and (w.created_at at time zone 'America/Fortaleza')::date between p_start and p_end
+        group by k.id, k.brand, k.model, k.model_year
+        order by count desc
+        limit 10) t),
+    'team', (
+      select coalesce(jsonb_agg(t order by t.role, t.name), '[]'::jsonb)
+      from (
+        select coalesce(sl.name, 'Admin') as name, uc.role,
+               coalesce(sl.active and sl.deleted_at is null, true) as active,
+               u.last_sign_in_at
+        from public.user_company uc
+        join auth.users u on u.id = uc.user_id
+        left join public.sellers sl on sl.company_id = uc.company_id and sl.user_id = uc.user_id
+        where uc.company_id = p_company) t),
+    'activities', (
+      select coalesce(jsonb_agg(t order by t.at desc), '[]'::jsonb)
+      from (
+        select a.created_at as at, a.action, a.entity,
+               case when a.entity = 'cars' then a.label end as label,
+               case when a.entity = 'cars' then a.details end as details,
+               coalesce(p.name, case when p.role = 'admin' then 'Admin' end, 'Sistema') as who,
+               p.role
+        from public.activity_log a
+        left join lateral (
+          select coalesce(sl.name, case when uc.role = 'admin' then 'Admin' end) as name,
+                 coalesce(uc.role, sl.role) as role
+          from (select 1) one
+          left join public.user_company uc on uc.company_id = a.company_id and uc.user_id = a.user_id
+          left join public.sellers sl on sl.company_id = a.company_id
+            and (sl.user_id = a.user_id or sl.former_user_id = a.user_id)
+          limit 1) p on true
+        where a.company_id = p_company
+        order by a.created_at desc
+        limit 40) t)
+  ) into v_result;
+
+  return v_result;
+end $$;
+revoke execute on function public.platform_store_detail(uuid, date, date) from anon, public;
+grant execute on function public.platform_store_detail(uuid, date, date) to authenticated;
+
+-- 36) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e
