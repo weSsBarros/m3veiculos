@@ -30,9 +30,9 @@ function AffixNumberInput({ value, onChange, cents = false, affix, side, maxDigi
     const pos = atEnd ? next.length : caretAfter(next, raw.slice(0, caret).replace(/[^\d,]/g, '').length)
     onChange(next)
     // Depois que o React escrever o valor novo, o cursor volta para o lugar certo
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       if (ref.current && document.activeElement === ref.current) ref.current.setSelectionRange(pos, pos)
-    })
+    }, 0)
   }
 
   // Apagar em cima do ponto de milhar apaga o dígito ao lado (senão o ponto volta)

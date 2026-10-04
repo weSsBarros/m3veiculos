@@ -41,7 +41,7 @@ import {
 } from '../utils/panelSettings.js'
 import { DEFAULT_TEMPLATES, TEMPLATE_FIELDS, fillTemplate } from '../utils/messageTemplates.js'
 import { sortRotation, entryName, entryPhone, entryProblem, nextRotationEntry, formatWaPhone, waDigits } from '../utils/whatsappRotation.js'
-import { maskPhoneBR } from '../utils/masks.js'
+import { maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
 import { formatDateBR } from '../utils/carFormat.js'
 import ChecklistSettingsDialog from './ChecklistSettingsDialog.jsx'
 import LateFeeSettingsDialog from './LateFeeSettingsDialog.jsx'
@@ -464,7 +464,7 @@ export default function AdminSettings() {
             <div className="admin-form-grid">
               <label>
                 Número principal
-                <input value={wa.main} onChange={(e) => setWa((p) => ({ ...p, main: maskPhoneBR(e.target.value) }))} placeholder="(98) 99999-9999" inputMode="tel" />
+                <input value={wa.main} onChange={(e) => setWa((p) => ({ ...p, main: maskKeepingCaret(e, maskPhoneBR) }))} placeholder="(98) 99999-9999" inputMode="tel" />
                 <span className="admin-form-hint">
                   Aparece no topo e no rodapé do site. {wa.mode === 'fixo' ? 'Todos os botões vão para ele.' : 'No rodízio, só é usado se ninguém da lista estiver disponível.'}
                 </span>
@@ -552,7 +552,7 @@ export default function AdminSettings() {
               <p className="admin-form-hint">Ex.: telefone da recepção ou de alguém sem login.</p>
               <div className="rotation-add-row">
                 <input value={newExtra.name} onChange={(e) => setNewExtra((p) => ({ ...p, name: e.target.value }))} placeholder="Nome" />
-                <input value={newExtra.phone} onChange={(e) => setNewExtra((p) => ({ ...p, phone: maskPhoneBR(e.target.value) }))} placeholder="(98) 99999-9999" inputMode="tel" />
+                <input value={newExtra.phone} onChange={(e) => setNewExtra((p) => ({ ...p, phone: maskKeepingCaret(e, maskPhoneBR) }))} placeholder="(98) 99999-9999" inputMode="tel" />
                 <button type="submit" className="btn btn-outline" disabled={rotationBusy}>
                   <Plus size={15} /> Adicionar
                 </button>

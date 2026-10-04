@@ -12,7 +12,7 @@ import { MoneyInput } from '../components/NumberInputs.jsx'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { formatCurrency, formatCurrencyCents, formatDateBR } from '../utils/carFormat.js'
 import { periodRange, inRange } from '../utils/period.js'
-import { maskPhoneBR } from '../utils/masks.js'
+import { maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
 import PeriodFilter from './PeriodFilter.jsx'
 import '../components/ConfirmDialog.css'
 import './admin.css'
@@ -461,7 +461,7 @@ export default function AdminSellers() {
           </label>
           <label>
             Telefone
-            <input value={form.phone} onChange={(e) => update('phone', maskPhoneBR(e.target.value))} placeholder="(00) 00000-0000" />
+            <input value={form.phone} onChange={(e) => update('phone', maskKeepingCaret(e, maskPhoneBR))} placeholder="(00) 00000-0000" />
           </label>
           {!editingId && (
             <label>

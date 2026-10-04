@@ -19,6 +19,7 @@ import { StatusPill, BillingPill } from './ClientParts.jsx'
 import PlatformTabs from './PlatformTabs.jsx'
 import DateInputBR from '../../components/DateInputBR.jsx'
 import MonthInputBR from '../../components/MonthInputBR.jsx'
+import MonthSelectBR from '../../components/MonthSelectBR.jsx'
 import { MoneyInput } from '../../components/NumberInputs.jsx'
 import '../admin.css'
 
@@ -338,7 +339,7 @@ export default function ClientFile() {
               </label>
               <label>
                 Primeiro mês cobrado
-                <MonthInputBR value={billingForm.billingStart} onChange={(v) => setBillingForm((f) => ({ ...f, billingStart: v }))} />
+                <MonthSelectBR value={billingForm.billingStart} onChange={(v) => setBillingForm((f) => ({ ...f, billingStart: v }))} />
               </label>
             </div>
             <p className="admin-form-note">

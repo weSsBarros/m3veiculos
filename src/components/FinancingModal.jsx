@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { whatsappLinkForFinancing } from '../utils/whatsapp.js'
-import { maskBirthDate } from '../utils/masks.js'
+import { maskBirthDate, maskKeepingCaret } from '../utils/masks.js'
 import { MoneyInput } from './NumberInputs.jsx'
 import './FinancingModal.css'
 import { openWhatsApp } from '../utils/whatsappRouter.js'
@@ -57,7 +57,7 @@ export default function FinancingModal({ car, onClose }) {
               maxLength={10}
               placeholder="DD/MM/AAAA"
               value={form.birthDate}
-              onChange={(e) => update('birthDate', maskBirthDate(e.target.value))}
+              onChange={(e) => update('birthDate', maskKeepingCaret(e, maskBirthDate))}
             />
           </label>
           <label>

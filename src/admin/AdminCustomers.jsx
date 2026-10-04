@@ -7,7 +7,7 @@ import { fetchSales } from '../lib/salesApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
 import { removeCustomerDocumentFiles } from '../lib/customerDocumentsApi.js'
 import { useAuth } from '../context/AuthContext.jsx'
-import { maskCPF, maskPhoneBR } from '../utils/masks.js'
+import { maskCPF, maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
 import { matchesCarSearch, parseIntBR, todayISO } from '../utils/carFormat.js'
 import { fetchTeamDirectory } from '../lib/storeSettingsApi.js'
 import { fetchMatches, fetchContacts, fetchInterests } from '../lib/customerCrmApi.js'
@@ -333,7 +333,7 @@ export default function AdminCustomers() {
           </label>
           <label>
             CPF
-            <input value={form.document} onChange={(e) => update('document', maskCPF(e.target.value))} placeholder="000.000.000-00" />
+            <input value={form.document} onChange={(e) => update('document', maskKeepingCaret(e, maskCPF))} placeholder="000.000.000-00" />
           </label>
           <label>
             RG
@@ -341,7 +341,7 @@ export default function AdminCustomers() {
           </label>
           <label>
             Telefone
-            <input value={form.phone} onChange={(e) => update('phone', maskPhoneBR(e.target.value))} placeholder="(00) 00000-0000" />
+            <input value={form.phone} onChange={(e) => update('phone', maskKeepingCaret(e, maskPhoneBR))} placeholder="(00) 00000-0000" />
           </label>
           <label>
             E-mail

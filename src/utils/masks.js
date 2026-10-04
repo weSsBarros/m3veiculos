@@ -62,3 +62,31 @@ export function toMaskedBR(value, cents) {
   if (/^\d+\.\d{1,2}$/.test(str)) str = cents ? str.replace('.', ',') : str.split('.')[0]
   return maskMoneyBR(str)
 }
+
+// Para o onChange de campos com máscara (CPF, telefone): aplica a máscara e
+// devolve o cursor para o mesmo dígito, em vez de jogá-lo para o fim. Apagar
+// em cima de um separador apaga o dígito antes dele (senão o separador volta e
+// nada acontece). Uso: onChange={(e) => update('phone', maskKeepingCaret(e, maskPhoneBR))}
+export function maskKeepingCaret(e, mask) {
+  const input = e.target
+  const raw = input.value
+  const caret = input.selectionStart ?? raw.length
+  const digits = (s) => s.replace(/\D/g, '')
+  let source = raw
+  let count = digits(raw.slice(0, caret)).length
+  if (e.nativeEvent?.inputType === 'deleteContentBackward' && count > 0 && mask(raw).length > raw.length) {
+    const all = digits(raw)
+    source = all.slice(0, count - 1) + all.slice(count)
+    count -= 1
+  }
+  const next = mask(source)
+  if (caret < raw.length || source !== raw) {
+    let pos = 0
+    for (let seen = 0; pos < next.length && seen < count; pos++) if (/\d/.test(next[pos])) seen++
+    // depois que o React gravar o valor novo (setTimeout também roda com a aba em segundo plano)
+    setTimeout(() => {
+      if (document.activeElement === input) input.setSelectionRange(pos, pos)
+    }, 0)
+  }
+  return next
+}

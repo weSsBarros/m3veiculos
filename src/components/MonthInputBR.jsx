@@ -1,44 +1,49 @@
 import { useEffect, useState } from 'react'
+import useSlotInput from './useSlotInput.js'
 
-function monthToDigits(value) {
+const GROUPS = [2, 4]
+
+function monthToSlots(value) {
   const [y, m] = String(value || '').split('-')
-  return y && m ? m + y : ''
+  return y && m ? (m + y).split('') : Array(6).fill('')
 }
 
-function digitsToMonth(digits) {
-  if (digits.length !== 6) return ''
+function slotsToMonth(slots) {
+  if (slots.some((s) => !s)) return ''
+  const digits = slots.join('')
   const month = Number(digits.slice(0, 2))
   if (month < 1 || month > 12) return ''
   return `${digits.slice(2, 6)}-${digits.slice(0, 2)}`
 }
 
-// Campo de mês digitável no formato brasileiro (mm/aaaa), como o DateInputBR.
-// Recebe/emite "aaaa-mm" (o mesmo valor de um <input type="month">).
+// Campo de mês digitável no formato brasileiro (mm/aaaa), como o DateInputBR
+// (digitação por posição). Recebe/emite "aaaa-mm" (o mesmo valor de um
+// <input type="month">).
 export default function MonthInputBR({ value, onChange, required, id, placeholder = 'mm/aaaa' }) {
-  const [digits, setDigits] = useState(() => monthToDigits(value))
+  const [slots, setSlots] = useState(() => monthToSlots(value))
 
   useEffect(() => {
-    if (value !== digitsToMonth(digits)) {
-      setDigits(monthToDigits(value))
+    if (value !== slotsToMonth(slots)) {
+      setSlots(monthToSlots(value))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])
 
-  function handleChange(e) {
-    const next = e.target.value.replace(/\D/g, '').slice(0, 6)
-    setDigits(next)
-    onChange(digitsToMonth(next))
-  }
+  const field = useSlotInput(GROUPS, slots, (next) => {
+    setSlots(next)
+    onChange(slotsToMonth(next))
+  })
 
   return (
     <input
+      ref={field.ref}
       id={id}
       type="text"
       inputMode="numeric"
+      autoComplete="off"
       placeholder={placeholder}
-      maxLength={7}
-      value={digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits}
-      onChange={handleChange}
+      value={field.value}
+      onChange={field.onChange}
       required={required}
     />
   )

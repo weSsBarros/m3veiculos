@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { UserPlus } from 'lucide-react'
 import { createCustomer } from '../lib/customersApi.js'
-import { maskCPF, maskPhoneBR } from '../utils/masks.js'
+import { maskCPF, maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
 
 // Cliente comprador (opcional) na hora da venda: escolhe da lista ou cadastra
 // na hora (nome, CPF e telefone). Fica dentro de outros <form>, então o
@@ -78,7 +78,7 @@ export default function CustomerPicker({ customers, value, onChange, onCreated, 
               <input
                 inputMode="numeric"
                 value={draft.document}
-                onChange={(e) => updateDraft('document', maskCPF(e.target.value))}
+                onChange={(e) => updateDraft('document', maskKeepingCaret(e, maskCPF))}
                 onKeyDown={handleKeyDown}
                 placeholder="000.000.000-00"
               />
@@ -88,7 +88,7 @@ export default function CustomerPicker({ customers, value, onChange, onCreated, 
               <input
                 inputMode="tel"
                 value={draft.phone}
-                onChange={(e) => updateDraft('phone', maskPhoneBR(e.target.value))}
+                onChange={(e) => updateDraft('phone', maskKeepingCaret(e, maskPhoneBR))}
                 onKeyDown={handleKeyDown}
                 placeholder="(00) 00000-0000"
               />
