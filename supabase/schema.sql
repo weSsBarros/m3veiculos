@@ -5113,7 +5113,41 @@ $$;
 revoke execute on function public.company_status(uuid) from public;
 grant execute on function public.company_status(uuid) to anon, authenticated;
 
--- 40) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 40) Conferência: passou para a seção 42, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 41) Painel WB.Dev: despesas da plataforma (aba Financeiro) ----------------
+--
+-- Custos da WB.Dev (hospedagem, domínios, ferramentas, anúncios...) para a aba
+-- Financeiro da Plataforma mostrar o lucro do período. Só o dono da plataforma
+-- (platform_admins) lê e grava. company_id (opcional) liga a despesa a um
+-- cliente (ex.: o domínio da loja), para o ranking por cliente mostrar quanto
+-- sobra de cada um.
+create table if not exists public.platform_expenses (
+  id uuid primary key default gen_random_uuid(),
+  spent_on date not null default current_date,
+  description text not null check (char_length(btrim(description)) between 1 and 120),
+  category text not null default 'outros'
+    check (category in ('hospedagem', 'dominios', 'ferramentas', 'marketing', 'impostos', 'pessoal', 'outros')),
+  amount numeric(10,2) not null check (amount > 0),
+  company_id uuid references public.companies(id) on delete set null,
+  notes text not null default '',
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists platform_expenses_spent_on_idx on public.platform_expenses (spent_on);
+
+alter table public.platform_expenses enable row level security;
+
+drop policy if exists "Platform admins manage platform expenses" on public.platform_expenses;
+create policy "Platform admins manage platform expenses"
+on public.platform_expenses for all
+to authenticated
+using (public.is_platform_admin())
+with check (public.is_platform_admin());
+
+-- 42) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

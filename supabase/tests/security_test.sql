@@ -828,6 +828,42 @@ select test.check('liberada: a data do bloqueio é apagada',
 select test.check('a loja de demonstração não pode ser bloqueada',
   test.denied($$update public.client_accounts set status = 'bloqueado' where company_id = 'bbbbbbbb-0000-0000-0000-00000000000b'$$));
 
+-- ================================================ despesas da plataforma (41)
+select test.login(null);
+set role anon;
+select test.check('anon: não vê nem lança despesas da plataforma',
+  test.count('select * from platform_expenses') <= 0
+  and test.denied($$insert into platform_expenses (description, amount) values ('x', 1)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não vê nem lança despesas da plataforma',
+  test.count('select * from platform_expenses') <= 0
+  and test.denied($$insert into platform_expenses (description, amount) values ('x', 1)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: não vê nem lança despesas da plataforma',
+  test.count('select * from platform_expenses') <= 0
+  and test.denied($$insert into platform_expenses (description, amount) values ('x', 1)$$));
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: lança, edita e apaga despesas (com ou sem cliente)',
+  test.allowed($$insert into platform_expenses (description, category, amount, company_id) values ('Domínio da loja A', 'dominios', 59.99, test.company_a())$$)
+  and test.allowed($$insert into platform_expenses (description, category, amount) values ('Hospedagem', 'hospedagem', 120)$$)
+  and test.allowed($$update platform_expenses set amount = 60 where description = 'Domínio da loja A'$$)
+  and test.count('select * from platform_expenses') = 2
+  and test.allowed($$delete from platform_expenses where description = 'Hospedagem'$$));
+select test.check('despesa: valor zero, sem descrição ou categoria inválida são recusados',
+  test.denied($$insert into platform_expenses (description, amount) values ('x', 0)$$)
+  and test.denied($$insert into platform_expenses (description, amount) values ('  ', 10)$$)
+  and test.denied($$insert into platform_expenses (description, category, amount) values ('x', 'festa', 10)$$));
+reset role;
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;
