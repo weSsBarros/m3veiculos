@@ -45,6 +45,12 @@ test('menu: cargo personalizado e menu próprio mostram só as abas da lista', (
   assert.equal(menuTabHidden(settings, 'vendas', { role: 'seller', panelTabs: [] }), true)
   // "Esconder de todos" vale mesmo se o cargo ou a pessoa tiver a aba
   assert.equal(menuTabHidden(settings, 'fornecedores', { role: 'manager', panelTabs: ['fornecedores'] }), true)
+  // Plano da loja (painel WB.Dev): aba fora do plano some para todos, inclusive o admin
+  const plan = ['estoque', 'vendas']
+  assert.equal(menuTabHidden(settings, 'financeiro', { role: 'admin', planTabs: plan }), true)
+  assert.equal(menuTabHidden(settings, 'vendas', { role: 'manager', customRole: despachante, planTabs: plan }), false)
+  assert.equal(menuTabHidden(settings, 'estoque', { role: 'seller', panelTabs: ['estoque'], planTabs: ['vendas'] }), true)
+  assert.equal(menuTabHidden(settings, 'clientes', { role: 'seller', planTabs: null }), false)
   // Abas que cada nível pode ter
   assert.equal(tabsForRole('seller').some((t) => t.key === 'financeiro'), false)
   assert.equal(tabsForRole('manager').some((t) => t.key === 'financeiro'), true)

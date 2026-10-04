@@ -70,7 +70,7 @@ function Section({ icon: Icon, title, description, children }) {
 // financeiro que antes ficavam espalhadas.
 export default function AdminSettings() {
   const { confirm, confirmDialog } = useConfirm()
-  const { setPanelSettings } = useAuth()
+  const { setPanelSettings, planTabs } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [store, setStore] = useState(null)
@@ -352,9 +352,14 @@ export default function AdminSettings() {
               <tbody>
                 {PANEL_TABS.map((tab) => {
                   const all = panel.hiddenTabs.all.includes(tab.key)
+                  // Fora do plano da loja (painel WB.Dev): some para todos
+                  const outOfPlan = Array.isArray(planTabs) && !planTabs.includes(tab.key)
                   return (
-                    <tr key={tab.key}>
-                      <td><strong>{tab.label}</strong></td>
+                    <tr key={tab.key} className={outOfPlan ? 'is-hidden-row' : ''}>
+                      <td>
+                        <strong>{tab.label}</strong>
+                        {outOfPlan && <span className="admin-table-sub">fora do plano da loja</span>}
+                      </td>
                       <td>
                         <input type="checkbox" aria-label={`Esconder ${tab.label} de todos`} checked={all} onChange={() => setPanel((p) => toggleHiddenTab(p, 'all', tab.key))} />
                       </td>

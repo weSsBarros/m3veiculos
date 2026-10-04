@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import ViewAsBar from './ViewAsBar.jsx'
+import AccountNotices from './AccountNotices.jsx'
 import { fetchOpenTransfers } from '../lib/salesApi.js'
 import { fetchOverdueInstallments } from '../lib/financingApi.js'
 import { transferAlert } from '../utils/transfer.js'
@@ -117,7 +118,7 @@ function readExpanded() {
 }
 
 export default function AdminLayout() {
-  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden, isPlatformAdmin } = useAuth()
+  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden, isPlatformAdmin, planTabs } = useAuth()
   const [expanded, setExpanded] = useState(readExpanded)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
@@ -144,6 +145,8 @@ export default function AdminLayout() {
     .filter((item) => item.end || !isTabHidden(tabForPath(item.to)))
     .concat(isPlatformAdmin ? [PLATFORM_ITEM] : [])
   const hiddenHere = isTabHidden(tabForPath(pathname))
+  // Aba fora do plano da loja (painel WB.Dev → Planos)
+  const outOfPlan = Array.isArray(planTabs) && Boolean(tabForPath(pathname)) && !planTabs.includes(tabForPath(pathname))
   const showLabels = expanded || mobileOpen
 
   return (
@@ -253,16 +256,23 @@ export default function AdminLayout() {
 
       <main className="admin-main">
         <ViewAsBar />
+        <AccountNotices storeName={STORE_NAME} />
         {/* Trocar a visão remonta a tela, que busca os dados de novo */}
         {hiddenHere ? (
           <div className="admin-page">
             <div className="admin-hidden-tab">
               <EyeOff size={28} />
               <h1>Aba escondida</h1>
-              <p>{isAdmin ? 'Esta aba está escondida em Configurações → Painel.' : 'O administrador escondeu esta aba do painel.'}</p>
+              <p>
+                {outOfPlan
+                  ? 'Esta aba não faz parte do plano da loja. Para liberar, fale com a WB.Dev.'
+                  : isAdmin
+                    ? 'Esta aba está escondida em Configurações → Painel.'
+                    : 'O administrador escondeu esta aba do painel.'}
+              </p>
               <div className="admin-row-actions">
                 <Link to="/admin" className="btn btn-primary">Voltar para o início</Link>
-                {isAdmin && !viewAs && <Link to="/admin/configuracoes" className="btn btn-outline">Abrir Configurações</Link>}
+                {isAdmin && !viewAs && !outOfPlan && <Link to="/admin/configuracoes" className="btn btn-outline">Abrir Configurações</Link>}
               </div>
             </div>
           </div>

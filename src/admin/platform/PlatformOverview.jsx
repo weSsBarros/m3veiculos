@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCcw, Presentation, FileDown, Sheet, X } from 'lucide-react'
 import { fetchPlatformOverview } from '../../lib/platformApi.js'
+import PlatformTabs from './PlatformTabs.jsx'
 import {
   storeHealth,
   platformTotals,
@@ -162,7 +163,7 @@ export default function PlatformOverview() {
       <div className="admin-page-head">
         <div>
           <h1>Plataforma</h1>
-          <p>Todas as lojas que usam o sistema. Só você vê esta aba.</p>
+          <p>Painel WB.Dev: todas as lojas que usam o sistema. Só você vê esta aba.</p>
         </div>
         <div className="admin-row-actions">
           <select value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="Período">
@@ -177,6 +178,8 @@ export default function PlatformOverview() {
           </button>
         </div>
       </div>
+
+      <PlatformTabs />
 
       {error && <p className="admin-error">{error}</p>}
       {loading && stores.length === 0 ? (

@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
-import { useAuth, WRONG_COMPANY_MESSAGE } from '../context/AuthContext.jsx'
+import { useAuth, WRONG_COMPANY_MESSAGE, SUSPENDED_MESSAGE } from '../context/AuthContext.jsx'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
 import SetupNotice from '../components/SetupNotice.jsx'
 import './admin.css'
 
 export default function AdminLogin() {
-  const { user, loading, signIn } = useAuth()
+  const { user, loading, signIn, suspended } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -24,7 +24,7 @@ export default function AdminLogin() {
       await signIn(email, password)
       navigate('/admin')
     } catch (err) {
-      setError(err.message === WRONG_COMPANY_MESSAGE ? err.message : 'E-mail ou senha inválidos.')
+      setError([WRONG_COMPANY_MESSAGE, SUSPENDED_MESSAGE].includes(err.message) ? err.message : 'E-mail ou senha inválidos.')
     } finally {
       setSubmitting(false)
     }
@@ -62,7 +62,7 @@ export default function AdminLogin() {
           />
         </label>
 
-        {error && <p className="admin-login-error">{error}</p>}
+        {(error || suspended) && <p className="admin-login-error">{error || SUSPENDED_MESSAGE}</p>}
 
         <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
           {submitting ? 'Entrando…' : 'Entrar'}

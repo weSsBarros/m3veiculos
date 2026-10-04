@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { Routes, Route, Outlet, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { CarsProvider } from './context/CarsContext.jsx'
@@ -34,12 +34,19 @@ import AdminSettings from './admin/AdminSettings.jsx'
 import SellerSales from './admin/SellerSales.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 import { trackSiteVisit } from './lib/statsApi.js'
+import { fetchCompanyStatus } from './lib/clientsApi.js'
+import MaintenancePage from './components/MaintenancePage.jsx'
 
 // Abas "Plataforma" (só o dono do sistema) e "Desempenho" (admin da loja):
 // carregam à parte, quando abrem
 const PlatformOverview = lazy(() => import('./admin/platform/PlatformOverview.jsx'))
 const PlatformStore = lazy(() => import('./admin/platform/PlatformStore.jsx'))
 const AdminPerformance = lazy(() => import('./admin/platform/AdminPerformance.jsx'))
+const PlatformClients = lazy(() => import('./admin/platform/PlatformClients.jsx'))
+const ClientFile = lazy(() => import('./admin/platform/ClientFile.jsx'))
+const PlatformBilling = lazy(() => import('./admin/platform/PlatformBilling.jsx'))
+const PlatformNotices = lazy(() => import('./admin/platform/PlatformNotices.jsx'))
+const PlatformPlans = lazy(() => import('./admin/platform/PlatformPlans.jsx'))
 
 function ScrollToTop() {
   const { pathname } = useLocation()
@@ -81,7 +88,28 @@ function VisitTracker() {
   return null
 }
 
+// Loja bloqueada pela WB.Dev (painel WB.Dev → Clientes → Acesso): o site mostra
+// só a página de manutenção. ?manutencao=ver mostra a página sem bloquear.
+function useMaintenance() {
+  const preview = new URLSearchParams(window.location.search).get('manutencao') === 'ver'
+  const [blocked, setBlocked] = useState(false)
+  useEffect(() => {
+    if (preview) return undefined
+    let cancelled = false
+    fetchCompanyStatus().then((status) => {
+      if (!cancelled) setBlocked(status.blocked)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [preview])
+  return preview || blocked
+}
+
 function PublicLayout() {
+  const maintenance = useMaintenance()
+  if (maintenance) return <MaintenancePage />
+
   return (
     <CarsProvider>
       <VisitTracker />
@@ -152,6 +180,11 @@ export default function App() {
           </Route>
           <Route element={<PlatformOnly />}>
             <Route path="plataforma" element={<PlatformOverview />} />
+            <Route path="plataforma/clientes" element={<PlatformClients />} />
+            <Route path="plataforma/clientes/:slug" element={<ClientFile />} />
+            <Route path="plataforma/cobranca" element={<PlatformBilling />} />
+            <Route path="plataforma/avisos" element={<PlatformNotices />} />
+            <Route path="plataforma/planos" element={<PlatformPlans />} />
             <Route path="plataforma/:slug" element={<PlatformStore />} />
           </Route>
         </Route>

@@ -14,6 +14,7 @@ export const isSupabaseConfigured = Boolean(url && anonKey && COMPANY_ID)
 const READ_ONLY_RPCS = new Set([
   'current_company_id', 'site_visit_totals', 'car_view_totals', 'team_directory', 'store_contact',
   'is_platform_admin', 'platform_overview', 'platform_store_detail', 'store_performance',
+  'platform_clients', 'my_account', 'company_status',
 ])
 
 // "Ver como" (lib/viewScope.js): enquanto o admin simula outra pessoa, toda

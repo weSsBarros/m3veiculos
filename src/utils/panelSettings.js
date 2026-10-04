@@ -83,14 +83,17 @@ export function tabsForRole(role) {
 }
 
 // Aba escondida no menu de quem está usando o painel (inclusive no "ver como").
-// person: { role, customRole, panelTabs }.
+// person: { role, customRole, panelTabs, planTabs }.
+// - Aba fora do plano da loja (planTabs, painel WB.Dev → Planos) some para
+//   todos, inclusive o admin. planTabs null = loja sem plano = todas as abas.
 // - "Esconder de todos" vale para todo mundo, inclusive o admin.
 // - Menu próprio da pessoa (panelTabs) ou cargo personalizado (customRole.tabs):
 //   só as abas da lista aparecem (aba nova fica escondida até o admin marcar).
 // - Sem cargo personalizado: as colunas de gerente e vendedor de Configurações.
 export function menuTabHidden(settings, key, person = {}) {
   if (!key) return false
-  const { role, customRole = null, panelTabs = null } = person
+  const { role, customRole = null, panelTabs = null, planTabs = null } = person
+  if (Array.isArray(planTabs) && !planTabs.includes(key)) return true
   const { hiddenTabs } = normalizePanelSettings(settings)
   if (hiddenTabs.all.includes(key)) return true
   if (role !== 'manager' && role !== 'seller') return false
