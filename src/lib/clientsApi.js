@@ -197,6 +197,41 @@ export async function deleteNotice(id) {
   await run(supabase.from('client_notices').delete().eq('id', id))
 }
 
+// ---------------------------------------- despesas da plataforma (seção 41)
+function expenseFromRow(e) {
+  return {
+    id: e.id,
+    spentOn: e.spent_on,
+    description: e.description,
+    category: e.category || 'outros',
+    amount: Number(e.amount) || 0,
+    companyId: e.company_id || null,
+    notes: e.notes || '',
+  }
+}
+
+export async function fetchExpenses() {
+  const query = supabase.from('platform_expenses').select('*').order('spent_on', { ascending: false }).order('created_at', { ascending: false })
+  return (await run(query)).map(expenseFromRow)
+}
+
+export async function saveExpense(expense) {
+  const row = {
+    spent_on: expense.spentOn,
+    description: expense.description.trim(),
+    category: expense.category,
+    amount: expense.amount,
+    company_id: expense.companyId || null,
+    notes: expense.notes || '',
+  }
+  const query = expense.id ? supabase.from('platform_expenses').update(row).eq('id', expense.id) : supabase.from('platform_expenses').insert(row)
+  return expenseFromRow(await run(query.select().single()))
+}
+
+export async function deleteExpense(id) {
+  await run(supabase.from('platform_expenses').delete().eq('id', id))
+}
+
 // ------------------------------------------------------- lado das lojas
 // Painel da loja: situação, abas do plano, avisos e (admin) a mensalidade
 export async function fetchMyAccount() {

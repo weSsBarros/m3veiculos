@@ -5,6 +5,7 @@ const TABS = [
   { to: '/admin/plataforma', label: 'Visão geral', end: true },
   { to: '/admin/plataforma/clientes', label: 'Clientes' },
   { to: '/admin/plataforma/cobranca', label: 'Cobrança' },
+  { to: '/admin/plataforma/financeiro', label: 'Financeiro' },
   { to: '/admin/plataforma/avisos', label: 'Avisos' },
   { to: '/admin/plataforma/planos', label: 'Planos' },
 ]

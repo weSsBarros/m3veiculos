@@ -7,10 +7,10 @@ import { downloadBlob } from './downloadBlob.js'
 import { slugify } from './carFormat.js'
 import { trend, monthLabel } from './platform.js'
 
-const INK = [14, 17, 23]
+export const INK = [14, 17, 23]
 const COBALT = [36, 70, 200]
-const MUTED = [90, 100, 117]
-const MARGIN = 40
+export const MUTED = [90, 100, 117]
+export const MARGIN = 40
 
 const fmt = (n) => (Number(n) || 0).toLocaleString('pt-BR')
 const fmtDate = (iso) => iso.split('-').reverse().join('/')
@@ -25,12 +25,12 @@ function trendText(prev, cur, compare) {
   return { text: `${sign}${t.pct}% ${compare.vs}`, color: t.pct > 0 ? [28, 127, 82] : [190, 51, 40] }
 }
 
-async function newDoc() {
+export async function newDoc() {
   const [{ jsPDF }, { autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
   return { doc: new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' }), autoTable }
 }
 
-function header(doc, title, subtitle) {
+export function header(doc, title, subtitle) {
   const width = doc.internal.pageSize.getWidth()
   doc.setFillColor(...INK)
   doc.rect(0, 0, width, 96, 'F')
@@ -84,7 +84,7 @@ function kpiBoxes(doc, items, startY, compare) {
   return startY + Math.ceil(items.length / 2) * (boxH + gap)
 }
 
-function sectionTitle(doc, text, y) {
+export function sectionTitle(doc, text, y) {
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(12)
   doc.setTextColor(...INK)
@@ -108,7 +108,7 @@ function table(doc, autoTable, startY, head, rows, empty) {
   return doc.lastAutoTable.finalY
 }
 
-function footer(doc, note) {
+export function footer(doc, note) {
   const pages = doc.getNumberOfPages()
   const height = doc.internal.pageSize.getHeight()
   for (let i = 1; i <= pages; i += 1) {

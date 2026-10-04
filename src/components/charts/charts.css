@@ -182,3 +182,44 @@
   color: var(--color-text-muted);
   margin-top: 3px;
 }
+
+/* Barras agrupadas (GroupedBarChart) */
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.chart-bars--grouped {
+  gap: 8px;
+}
+
+.chart-bar-group {
+  flex: 1;
+  width: 100%;
+  max-width: 44px;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  min-height: 0;
+}
+
+.chart-bar-group .chart-bar-track {
+  height: 100%;
+}

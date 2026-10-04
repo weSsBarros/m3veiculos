@@ -4561,3 +4561,40 @@ span.car-plate {
 .account-notice-close:hover {
   background: rgba(0, 0, 0, 0.06);
 }
+
+/* Painel WB.Dev → Financeiro */
+.finance-kpis {
+  margin-bottom: 16px;
+}
+
+.platform-kpi strong.is-negative,
+.finance-table .is-negative {
+  color: var(--color-danger);
+}
+
+.finance-table td {
+  white-space: nowrap;
+}
+
+.finance-table tr.is-future td {
+  color: var(--color-text-muted);
+}
+
+.finance-table tfoot td {
+  font-weight: 800;
+  background: var(--color-bg-alt);
+  border-top: 2px solid var(--color-border);
+}
+
+.finance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0 8px;
+}
+
+@media (max-width: 720px) {
+  .finance-grid {
+    grid-template-columns: 1fr;
+  }
+}
