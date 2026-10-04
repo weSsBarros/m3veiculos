@@ -700,6 +700,134 @@ reset role;
 select test.check('cargo excluído: a pessoa fica sem cargo, com o nível que tinha',
   (select custom_role_id is null and role = 'seller' from public.sellers where id = '5e000000-0000-0000-0000-000000000005'));
 
+-- ======================================================= painel WB.Dev (39)
+-- Conta da loja A com mensalidade de R$ 100 vencendo dia 10 desde janeiro/2026
+update public.client_accounts set monthly_price = 100, due_day = 10, billing_start = '2026-01-15'
+where company_id = test.company_a();
+select test.check('cobrança: início vira o dia 1 do mês',
+  (select billing_start from public.client_accounts where company_id = test.company_a()) = '2026-01-01');
+select test.check('cobrança: três meses sem pagar = atrasado desde o primeiro vencimento',
+  public.client_billing(test.company_a(), '2026-03-12') ->> 'situation' = 'atrasado'
+  and (public.client_billing(test.company_a(), '2026-03-12') ->> 'days_late')::int = 61
+  and jsonb_array_length(public.client_billing(test.company_a(), '2026-03-12') -> 'open') = 3
+  and (public.client_billing(test.company_a(), '2026-03-12') ->> 'open_total')::numeric = 300);
+insert into public.client_payments (company_id, reference_month, amount, paid_on) values
+  (test.company_a(), '2026-01-01', 100, '2026-01-10'),
+  (test.company_a(), '2026-02-01', 100, '2026-02-10');
+select test.check('cobrança: pagos janeiro e fevereiro, atraso conta só de março',
+  (public.client_billing(test.company_a(), '2026-03-12') ->> 'days_late')::int = 2
+  and jsonb_array_length(public.client_billing(test.company_a(), '2026-03-12') -> 'open') = 1);
+insert into public.client_payments (company_id, reference_month, amount, paid_on) values (test.company_a(), '2026-03-01', 100, '2026-03-12');
+select test.check('cobrança: tudo pago = em dia, próximo vencimento em abril',
+  public.client_billing(test.company_a(), '2026-03-12') ->> 'situation' = 'em_dia'
+  and public.client_billing(test.company_a(), '2026-03-12') -> 'next' ->> 'due' = '2026-04-10');
+select test.check('cobrança: 4 dias antes = vence em breve; no dia = vence hoje',
+  public.client_billing(test.company_a(), '2026-04-06') ->> 'situation' = 'vence_em_breve'
+  and public.client_billing(test.company_a(), '2026-04-10') ->> 'situation' = 'vence_hoje');
+select test.check('cobrança: sem valor ou sem vencimento = sem cobrança',
+  public.client_billing('bbbbbbbb-0000-0000-0000-00000000000b', '2026-04-10') ->> 'situation' = 'sem_cobranca');
+select test.check('cobrança: o mesmo mês não é pago duas vezes',
+  test.denied($$insert into public.client_payments (company_id, reference_month, amount) values (test.company_a(), '2026-03-01', 100)$$));
+
+-- Avisos: um para todas as lojas, um só para o admin da loja A, um para a loja B
+insert into public.client_notices (company_id, title, audience) values
+  (null, 'Aviso geral', 'equipe'),
+  (test.company_a(), 'Só para o admin A', 'admin'),
+  ('bbbbbbbb-0000-0000-0000-00000000000b', 'Aviso da loja B', 'equipe');
+
+select test.login(null);
+set role anon;
+select test.check('anon: não vê planos, contas, pagamentos nem avisos',
+  test.count('select * from plans') <= 0 and test.count('select * from client_accounts') <= 0
+  and test.count('select * from client_payments') <= 0 and test.count('select * from client_notices') <= 0);
+select test.check('anon: vê só se a loja está bloqueada e o nome (para o site)',
+  (company_status(test.company_a()) ->> 'blocked')::boolean = false
+  and (select array_agg(k order by k) from jsonb_object_keys(company_status(test.company_a())) k) = array['blocked', 'name']);
+select test.check('anon: não usa a lista de clientes nem a conta da loja',
+  test.denied($$select platform_clients()$$) and test.denied($$select my_account()$$)
+  and test.denied($$select client_billing('00000000-0000-0000-0000-000000000000', null)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não lê nem grava planos, contas, pagamentos e avisos',
+  test.count('select * from plans') <= 0 and test.count('select * from client_accounts') <= 0
+  and test.count('select * from client_payments') <= 0 and test.count('select * from client_notices') <= 0
+  and test.denied($$update client_accounts set status = 'ativo', monthly_price = 0$$)
+  and test.denied($$insert into client_payments (company_id, reference_month, amount) values (current_company_id(), '2026-05-01', 1)$$)
+  and test.denied($$select platform_clients()$$));
+select test.check('admin A: vê a própria mensalidade, o plano e os avisos dele (não os da loja B)',
+  my_account() ->> 'status' = 'ativo'
+  and my_account() -> 'billing' ->> 'situation' is not null
+  and jsonb_array_length(my_account() -> 'features') > 0
+  and (select count(*) from jsonb_array_elements(my_account() -> 'notices') n where n ->> 'title' in ('Aviso geral', 'Só para o admin A')) = 2
+  and not exists (select 1 from jsonb_array_elements(my_account() -> 'notices') n where n ->> 'title' = 'Aviso da loja B'));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: não vê a mensalidade nem o aviso só para o admin',
+  my_account() -> 'billing' = 'null'::jsonb
+  and not exists (select 1 from jsonb_array_elements(my_account() -> 'notices') n where n ->> 'title' = 'Só para o admin A')
+  and exists (select 1 from jsonb_array_elements(my_account() -> 'notices') n where n ->> 'title' = 'Aviso geral'));
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: lista os clientes com cobrança e checagens',
+  jsonb_array_length(platform_clients()) >= 1
+  and exists (select 1 from jsonb_array_elements(platform_clients()) c where c ->> 'company_id' = test.company_a()::text
+              and c -> 'billing' ->> 'situation' is not null and c -> 'checks' ? 'whatsapp_ok'));
+select test.check('dono da plataforma: grava planos, contas, pagamentos e avisos',
+  test.allowed($$insert into plans (name, monthly_price, features) values ('Básico', 99, '{estoque,vendas}')$$)
+  and test.allowed($$update client_accounts set notes = 'ok' where company_id = test.company_a()$$)
+  and test.allowed($$insert into client_payments (company_id, reference_month, amount) values (test.company_a(), '2026-04-01', 100)$$)
+  and test.allowed($$insert into client_notices (title) values ('Manutenção programada')$$));
+reset role;
+
+-- Bloqueio da loja A
+update public.client_accounts set status = 'bloqueado', block_reason = 'teste' where company_id = test.company_a();
+select test.check('bloqueio: grava quando a loja foi bloqueada',
+  (select blocked_at is not null from public.client_accounts where company_id = test.company_a()));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('loja bloqueada: o admin perde o acesso a tudo',
+  current_company_id() is null and test.count('select * from cars') = 0 and test.count('select * from customers') = 0
+  and test.denied($$select my_account()$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('loja bloqueada: o vendedor perde o acesso a tudo',
+  current_company_id() is null and test.count('select * from staff_cars') = 0);
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('loja bloqueada: o site não vê os carros dela e sabe que está bloqueada',
+  test.count('select id from cars where company_id = test.company_a()') = 0
+  and (company_status(test.company_a()) ->> 'blocked')::boolean);
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('loja bloqueada: as outras lojas continuam normais',
+  current_company_id() = 'bbbbbbbb-0000-0000-0000-00000000000b');
+reset role;
+
+update public.client_accounts set status = 'ativo' where company_id = test.company_a();
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('loja liberada: o admin volta a ter acesso',
+  current_company_id() = test.company_a() and test.count('select * from cars') > 0);
+reset role;
+select test.check('liberada: a data do bloqueio é apagada',
+  (select blocked_at is null from public.client_accounts where company_id = test.company_a()));
+
+select test.check('a loja de demonstração não pode ser bloqueada',
+  test.denied($$update public.client_accounts set status = 'bloqueado' where company_id = 'bbbbbbbb-0000-0000-0000-00000000000b'$$));
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;

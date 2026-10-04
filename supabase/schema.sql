@@ -4785,7 +4785,335 @@ drop trigger if exists custom_roles_log_activity on public.custom_roles;
 create trigger custom_roles_log_activity after insert or update or delete on public.custom_roles
 for each row execute function public.log_activity();
 
--- 38) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 38) Conferência: passou para a seção 40, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 39) Painel WB.Dev: clientes, planos, mensalidades, avisos e bloqueio
+--
+-- Gestão dos clientes do sistema (as lojas), dentro da aba Plataforma do
+-- painel da WB.AUTO. Só o dono da plataforma (platform_admins) lê e grava as
+-- tabelas desta seção; as lojas recebem só o que precisam por funções:
+-- * my_account(): situação, abas do plano, avisos e (só para o admin) a
+--   mensalidade.
+-- * company_status(): pública; diz se a loja está bloqueada (o site mostra a
+--   página de manutenção e o login mostra "acesso suspenso").
+-- Bloqueio (ou cliente cancelado): current_company_id() devolve vazio para a
+-- equipe da loja (o banco recusa tudo) e o site público deixa de ver os
+-- carros. A loja de demonstração (WB.AUTO) não pode ser bloqueada.
+-- Cobrança manual: um mês está pago quando há pagamento com aquele mês de
+-- referência (client_payments.reference_month).
+
+create table if not exists public.plans (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(btrim(name)) between 1 and 40),
+  monthly_price numeric(10,2) check (monthly_price is null or monthly_price >= 0),
+  features text[] not null default '{}',
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists plans_name_idx on public.plans (lower(btrim(name)));
+
+alter table public.plans enable row level security;
+
+drop policy if exists "Platform admins manage plans" on public.plans;
+create policy "Platform admins manage plans"
+on public.plans for all
+to authenticated
+using (public.is_platform_admin())
+with check (public.is_platform_admin());
+
+drop trigger if exists plans_set_updated_at on public.plans;
+create trigger plans_set_updated_at
+before update on public.plans
+for each row execute function public.set_updated_at();
+
+insert into public.plans (name, features)
+select 'Completo', array['estoque', 'novo-carro', 'vendas', 'financeiro', 'financiamentos-externos', 'relatorios',
+  'historico', 'contratos', 'clientes', 'fornecedores', 'equipe', 'atividades', 'desempenho']
+where not exists (select 1 from public.plans);
+
+create table if not exists public.client_accounts (
+  company_id uuid primary key references public.companies(id) on delete cascade,
+  plan_id uuid references public.plans(id) on delete set null,
+  monthly_price numeric(10,2) check (monthly_price is null or monthly_price >= 0),
+  due_day integer check (due_day between 1 and 28),
+  billing_start date,
+  status text not null default 'ativo' check (status in ('ativo', 'bloqueado', 'cancelado')),
+  blocked_at timestamptz,
+  block_reason text not null default '',
+  legal_name text not null default '',
+  cnpj text not null default '',
+  responsible_name text not null default '',
+  responsible_phone text not null default '',
+  responsible_email text not null default '',
+  domain text not null default '',
+  domain_expires_on date,
+  notes text not null default '',
+  onboarding jsonb not null default '{}' check (jsonb_typeof(onboarding) = 'object'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.client_accounts enable row level security;
+
+drop policy if exists "Platform admins manage client accounts" on public.client_accounts;
+create policy "Platform admins manage client accounts"
+on public.client_accounts for all
+to authenticated
+using (public.is_platform_admin())
+with check (public.is_platform_admin());
+
+-- Mês de início sempre no dia 1; data do bloqueio; a demonstração não bloqueia
+create or replace function public.client_accounts_guard()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if new.billing_start is not null then
+    new.billing_start := date_trunc('month', new.billing_start)::date;
+  end if;
+  if new.status <> 'ativo' and exists (select 1 from public.companies where id = new.company_id and is_demo) then
+    raise exception 'A loja de demonstração não pode ser bloqueada nem cancelada' using errcode = '23514';
+  end if;
+  if new.status = 'ativo' then
+    new.blocked_at := null;
+  elsif tg_op = 'INSERT' or old.status is distinct from new.status then
+    new.blocked_at := now();
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+
+drop trigger if exists client_accounts_guard on public.client_accounts;
+create trigger client_accounts_guard
+before insert or update on public.client_accounts
+for each row execute function public.client_accounts_guard();
+
+insert into public.client_accounts (company_id, plan_id)
+select c.id, (select p.id from public.plans p where p.name = 'Completo' limit 1)
+from public.companies c
+where not c.is_demo
+on conflict (company_id) do nothing;
+
+create table if not exists public.client_payments (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  reference_month date not null check (extract(day from reference_month) = 1),
+  amount numeric(10,2) not null check (amount >= 0),
+  paid_on date not null default current_date,
+  method text not null default '',
+  notes text not null default '',
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (company_id, reference_month)
+);
+
+alter table public.client_payments enable row level security;
+
+drop policy if exists "Platform admins manage client payments" on public.client_payments;
+create policy "Platform admins manage client payments"
+on public.client_payments for all
+to authenticated
+using (public.is_platform_admin())
+with check (public.is_platform_admin());
+
+create table if not exists public.client_notices (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references public.companies(id) on delete cascade,
+  title text not null check (char_length(btrim(title)) between 1 and 80),
+  message text not null default '',
+  level text not null default 'info' check (level in ('info', 'aviso', 'urgente')),
+  audience text not null default 'equipe' check (audience in ('admin', 'equipe')),
+  starts_on date not null default current_date,
+  ends_on date,
+  created_at timestamptz not null default now(),
+  check (ends_on is null or ends_on >= starts_on)
+);
+
+create index if not exists client_notices_company_idx on public.client_notices (company_id);
+
+alter table public.client_notices enable row level security;
+
+drop policy if exists "Platform admins manage client notices" on public.client_notices;
+create policy "Platform admins manage client notices"
+on public.client_notices for all
+to authenticated
+using (public.is_platform_admin())
+with check (public.is_platform_admin());
+
+-- Loja bloqueada ou cliente cancelado: sem painel e sem estoque no site
+create or replace function public.company_blocked(p_company uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.client_accounts
+    where company_id = p_company and status in ('bloqueado', 'cancelado')
+  )
+$$;
+
+create or replace function public.current_company_id()
+returns uuid
+language sql stable security definer set search_path = public
+as $$
+  select uc.company_id
+  from public.user_company uc
+  where uc.user_id = auth.uid()
+    and (
+      uc.role = 'admin'
+      or exists (select 1 from public.sellers s where s.user_id = uc.user_id and s.company_id = uc.company_id and s.active)
+    )
+    and not public.company_blocked(uc.company_id)
+  limit 1
+$$;
+
+drop policy if exists "Public can read cars" on public.cars;
+create policy "Public can read cars"
+on public.cars for select
+to anon
+using (not hidden and not public.company_blocked(company_id));
+
+-- Situação da cobrança de uma loja (p_today só para os testes)
+create or replace function public.client_billing(p_company uuid, p_today date default null)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  a public.client_accounts%rowtype;
+  v_today date := coalesce(p_today, (now() at time zone 'America/Fortaleza')::date);
+  v_price numeric;
+  v_month date;
+  v_last date;
+  v_due date;
+  v_open jsonb := '[]'::jsonb;
+  v_next jsonb;
+  v_oldest date;
+  v_situation text;
+begin
+  select * into a from public.client_accounts where company_id = p_company;
+  if not found then
+    return jsonb_build_object('situation', 'sem_cobranca');
+  end if;
+  v_price := coalesce(a.monthly_price, (select p.monthly_price from public.plans p where p.id = a.plan_id));
+  if a.status = 'cancelado' or coalesce(v_price, 0) = 0 or a.due_day is null or a.billing_start is null then
+    return jsonb_build_object('situation', 'sem_cobranca', 'price', v_price, 'due_day', a.due_day);
+  end if;
+
+  v_month := a.billing_start;
+  v_last := (date_trunc('month', v_today) + interval '1 month')::date;
+  while v_month <= v_last loop
+    v_due := v_month + (a.due_day - 1);
+    if not exists (select 1 from public.client_payments p where p.company_id = p_company and p.reference_month = v_month) then
+      if v_due < v_today then
+        v_open := v_open || jsonb_build_array(jsonb_build_object('month', v_month, 'due', v_due, 'amount', v_price));
+        v_oldest := coalesce(v_oldest, v_due);
+      elsif v_next is null then
+        v_next := jsonb_build_object('month', v_month, 'due', v_due, 'amount', v_price);
+      end if;
+    end if;
+    v_month := (v_month + interval '1 month')::date;
+  end loop;
+
+  v_situation := case
+    when v_oldest is not null then 'atrasado'
+    when v_next is not null and (v_next->>'due')::date = v_today then 'vence_hoje'
+    when v_next is not null and (v_next->>'due')::date - v_today <= 5 then 'vence_em_breve'
+    else 'em_dia'
+  end;
+
+  return jsonb_build_object(
+    'situation', v_situation,
+    'price', v_price,
+    'due_day', a.due_day,
+    'open', v_open,
+    'open_total', v_price * jsonb_array_length(v_open),
+    'days_late', case when v_oldest is null then 0 else v_today - v_oldest end,
+    'next', v_next
+  );
+end $$;
+revoke execute on function public.client_billing(uuid, date) from anon, authenticated, public;
+
+-- Lista do painel WB.Dev: conta, plano, cobrança e o que dá para conferir
+-- sozinho no checklist de implantação
+create or replace function public.platform_clients()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'company_id', c.id,
+      'slug', c.slug,
+      'name', c.name,
+      'site_url', c.site_url,
+      'account', to_jsonb(a) - 'company_id',
+      'plan', (select jsonb_build_object('id', p.id, 'name', p.name, 'monthly_price', p.monthly_price, 'features', p.features)
+               from public.plans p where p.id = a.plan_id),
+      'billing', public.client_billing(c.id, null),
+      'checks', jsonb_build_object(
+        'whatsapp_ok', c.whatsapp_main <> '',
+        'cars', (select count(*) from public.cars k where k.company_id = c.id),
+        'logins', (select count(*) from public.user_company uc where uc.company_id = c.id),
+        'own_domain', c.site_url <> '' and c.site_url not like '%hostingersite.com%')
+    ) order by c.name), '[]'::jsonb)
+    from public.companies c
+    join public.client_accounts a on a.company_id = c.id
+  );
+end $$;
+revoke execute on function public.platform_clients() from anon, public;
+grant execute on function public.platform_clients() to authenticated;
+
+-- Painel da loja: situação, abas do plano, avisos e (admin) a mensalidade
+create or replace function public.my_account()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_admin boolean := public.is_company_admin();
+  v_today date := (now() at time zone 'America/Fortaleza')::date;
+  a public.client_accounts%rowtype;
+begin
+  if v_company is null then
+    raise exception 'Sem acesso' using errcode = '42501';
+  end if;
+  select * into a from public.client_accounts where company_id = v_company;
+  return jsonb_build_object(
+    'status', coalesce(a.status, 'ativo'),
+    'plan_name', (select p.name from public.plans p where p.id = a.plan_id),
+    'features', (select to_jsonb(p.features) from public.plans p where p.id = a.plan_id),
+    'notices', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'id', n.id, 'title', n.title, 'message', n.message, 'level', n.level) order by n.created_at desc), '[]'::jsonb)
+      from public.client_notices n
+      where (n.company_id is null or n.company_id = v_company)
+        and n.starts_on <= v_today
+        and (n.ends_on is null or n.ends_on >= v_today)
+        and (n.audience = 'equipe' or v_admin)),
+    'billing', case when v_admin then public.client_billing(v_company, null) end
+  );
+end $$;
+revoke execute on function public.my_account() from anon, public;
+grant execute on function public.my_account() to authenticated;
+
+-- Público: a loja está bloqueada? (site e tela de login)
+create or replace function public.company_status(p_company uuid)
+returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  select jsonb_build_object('blocked', public.company_blocked(c.id), 'name', c.name)
+  from public.companies c
+  where c.id = p_company
+$$;
+revoke execute on function public.company_status(uuid) from public;
+grant execute on function public.company_status(uuid) to anon, authenticated;
+
+-- 40) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e
