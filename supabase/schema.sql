@@ -4574,7 +4574,218 @@ end $$;
 revoke execute on function public.platform_store_detail(uuid, date, date) from anon, public;
 grant execute on function public.platform_store_detail(uuid, date, date) to authenticated;
 
--- 36) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 36) Conferência: passou para a seção 38, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 37) Cargos personalizados, menu por pessoa e troca de cargo
+--
+-- * custom_roles: cargos criados pelo admin (ex.: "Despachante"). Cada cargo
+--   tem um nível de acesso (base_role: vendedor ou gerente), que é o que o
+--   banco libera, e as abas que aparecem no menu (tabs). As regras (RLS)
+--   continuam pelo papel do login (user_company.role).
+-- * sellers.custom_role_id: o cargo da pessoa (sem cargo = Vendedor/Gerente).
+--   Excluir o cargo devolve a pessoa ao cargo base.
+-- * sellers.panel_tabs: o menu próprio da pessoa (null = segue o cargo).
+-- * Trocar o cargo na Equipe (o admin muda sellers.role ou custom_role_id)
+--   atualiza o papel do login nesta loja, só entre vendedor e gerente; um
+--   vínculo de admin nunca muda.
+
+create table if not exists public.custom_roles (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  name text not null check (char_length(btrim(name)) between 1 and 40),
+  base_role text not null default 'seller' check (base_role in ('seller', 'manager')),
+  tabs text[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists custom_roles_company_name_idx on public.custom_roles (company_id, lower(btrim(name)));
+
+alter table public.custom_roles enable row level security;
+
+drop policy if exists "Team can read custom roles" on public.custom_roles;
+create policy "Team can read custom roles"
+on public.custom_roles for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Admin can insert custom roles" on public.custom_roles;
+create policy "Admin can insert custom roles"
+on public.custom_roles for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Admin can update custom roles" on public.custom_roles;
+create policy "Admin can update custom roles"
+on public.custom_roles for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Admin can delete custom roles" on public.custom_roles;
+create policy "Admin can delete custom roles"
+on public.custom_roles for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop trigger if exists custom_roles_set_updated_at on public.custom_roles;
+create trigger custom_roles_set_updated_at
+before update on public.custom_roles
+for each row execute function public.set_updated_at();
+
+alter table public.sellers add column if not exists custom_role_id uuid references public.custom_roles(id) on delete set null;
+alter table public.sellers add column if not exists panel_tabs text[];
+create index if not exists sellers_custom_role_id_idx on public.sellers (custom_role_id);
+
+-- Com cargo personalizado, o nível da pessoa é o do cargo (e o cargo tem que
+-- ser da mesma loja)
+create or replace function public.sellers_apply_custom_role()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_role public.custom_roles%rowtype;
+begin
+  if new.custom_role_id is not null then
+    select * into v_role from public.custom_roles where id = new.custom_role_id;
+    if not found or v_role.company_id <> new.company_id then
+      raise exception 'Cargo não encontrado nesta loja' using errcode = '23503';
+    end if;
+    new.role := v_role.base_role;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists sellers_apply_custom_role on public.sellers;
+create trigger sellers_apply_custom_role
+before insert or update of custom_role_id, role on public.sellers
+for each row execute function public.sellers_apply_custom_role();
+
+-- Troca de nível: o papel do login nesta loja acompanha (só entre vendedor e
+-- gerente; vínculo de admin não muda). Dispara em qualquer alteração, porque o
+-- nível também muda quando só o cargo (custom_role_id) é trocado.
+create or replace function public.sellers_sync_role()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if new.user_id is not null and new.role is distinct from old.role then
+    update public.user_company
+    set role = new.role
+    where user_id = new.user_id
+      and company_id = new.company_id
+      and role in ('seller', 'manager')
+      and role <> new.role;
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists sellers_sync_role on public.sellers;
+create trigger sellers_sync_role
+after update on public.sellers
+for each row execute function public.sellers_sync_role();
+
+-- Mudou o nível do cargo: as pessoas do cargo acompanham
+create or replace function public.custom_roles_propagate()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if new.base_role is distinct from old.base_role then
+    update public.sellers set role = new.base_role
+    where custom_role_id = new.id and role <> new.base_role;
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists custom_roles_propagate on public.custom_roles;
+create trigger custom_roles_propagate
+after update of base_role on public.custom_roles
+for each row execute function public.custom_roles_propagate();
+
+-- Registro de atividades: cargos e troca de cargo
+create or replace function public.log_activity()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb;
+  old_rec jsonb;
+  v_company uuid;
+  v_label text;
+  v_details text;
+  v_email text;
+  v_changed text[];
+begin
+  begin
+    if current_setting('app.skip_activity_log', true) = '1' then return null; end if;
+    if tg_op = 'DELETE' then rec := to_jsonb(old); else rec := to_jsonb(new); end if;
+    v_company := (rec->>'company_id')::uuid;
+    -- Sem usuário = SQL Editor ou Edge Function (que grava o próprio log).
+    if v_company is null or auth.uid() is null then return null; end if;
+
+    if tg_op = 'UPDATE' then
+      old_rec := to_jsonb(old);
+      select array_agg(n.key order by n.key) into v_changed
+      from jsonb_each(rec) n
+      where n.key not in ('updated_at') and n.value is distinct from old_rec->n.key;
+      if v_changed is null then return null; end if;
+      v_details := array_to_string(v_changed, ', ');
+      if 'status' = any(v_changed) then
+        v_details := format('status: %s → %s', old_rec->>'status', rec->>'status');
+      end if;
+      -- Troca de cargo na Equipe: "cargo: Vendedor → Gerente"
+      if tg_table_name = 'sellers' and ('role' = any(v_changed) or 'custom_role_id' = any(v_changed)) then
+        v_details := format('cargo: %s → %s',
+          coalesce((select r.name from public.custom_roles r where r.id = (old_rec->>'custom_role_id')::uuid),
+                   case old_rec->>'role' when 'manager' then 'Gerente' else 'Vendedor' end),
+          coalesce((select r.name from public.custom_roles r where r.id = (rec->>'custom_role_id')::uuid),
+                   case rec->>'role' when 'manager' then 'Gerente' else 'Vendedor' end));
+      end if;
+    end if;
+
+    v_label := case tg_table_name
+      when 'cars' then concat_ws(' ', rec->>'brand', rec->>'model', rec->>'version')
+      when 'customers' then rec->>'name'
+      when 'suppliers' then rec->>'name'
+      when 'sellers' then rec->>'name'
+      when 'contract_templates' then rec->>'name'
+      when 'custom_roles' then rec->>'name'
+      when 'contracts' then concat(case rec->>'document_type' when 'recibo' then 'Recibo' else 'Contrato' end, ' — ', rec->>'buyer_name')
+      when 'car_expenses' then concat(coalesce(nullif(rec->>'description', ''), rec->>'category'), ' — R$ ', rec->>'amount')
+      when 'sales' then (select concat(c.brand, ' ', c.model, ' — R$ ', rec->>'sale_price') from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'customer_documents' then concat(
+        coalesce(nullif(rec->>'title', ''), nullif(rec->>'file_name', ''), 'Documento'), ' — ',
+        (select cu.name from public.customers cu where cu.id = (rec->>'customer_id')::uuid))
+      when 'customer_financings' then concat('Financiamento — ', rec->>'customer_name')
+      when 'financing_installments' then (
+        select concat('Parcela ', rec->>'number', '/', f.installments_count, ' — ', f.customer_name)
+        from public.customer_financings f where f.id = (rec->>'financing_id')::uuid)
+      when 'car_reservations' then (
+        select concat('Reserva — ', c.brand, ' ', c.model, coalesce(' — ' || nullif(rec->>'customer_name', ''), ''))
+        from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'external_financings' then concat('Financiamento externo — ', rec->>'customer_name')
+      else null
+    end;
+
+    select email into v_email from auth.users where id = auth.uid();
+
+    insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label, details)
+    values (v_company, auth.uid(), v_email, lower(tg_op), tg_table_name, (rec->>'id')::uuid, v_label, v_details);
+  exception when others then
+    -- O log nunca pode impedir a operação principal
+    null;
+  end;
+  return null;
+end;
+$$;
+
+drop trigger if exists custom_roles_log_activity on public.custom_roles;
+create trigger custom_roles_log_activity after insert or update or delete on public.custom_roles
+for each row execute function public.log_activity();
+
+-- 38) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

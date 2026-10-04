@@ -636,6 +636,70 @@ select test.check('vendedor A / admin B: nunca vê o desempenho da loja A',
   and test.denied($$select platform_store_detail(test.company_a(), current_date - 30, current_date)$$));
 reset role;
 
+-- ============================================================= cargos (37)
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: cria cargo personalizado',
+  test.allowed($$insert into custom_roles (id, company_id, name, base_role, tabs) values ('c4000000-0000-0000-0000-0000000000a1', current_company_id(), 'Despachante', 'manager', '{vendas}')$$));
+select test.check('admin A: não repete o nome do cargo na loja',
+  test.denied($$insert into custom_roles (company_id, name, base_role) values (current_company_id(), ' despachante ', 'seller')$$));
+select test.check('admin A: põe o vendedor A2 no cargo Despachante',
+  test.allowed($$update sellers set custom_role_id = 'c4000000-0000-0000-0000-0000000000a1' where id = '5e000000-0000-0000-0000-000000000005'$$));
+reset role;
+select test.check('cargo com acesso de gerente: o login do vendedor A2 vira gerente',
+  (select role from public.sellers where id = '5e000000-0000-0000-0000-000000000005') = 'manager'
+  and (select role from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000005' and company_id = test.company_a()) = 'manager');
+select test.check('troca de cargo aparece no registro de atividades',
+  exists (select 1 from public.activity_log where entity = 'sellers' and entity_id = '5e000000-0000-0000-0000-000000000005'
+          and details = 'cargo: Vendedor → Despachante'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000005');
+set role authenticated;
+select test.check('despachante: lê o cargo (para o menu) e tem acesso de gerente',
+  test.count('select * from custom_roles') = 1 and is_company_staff());
+select test.check('despachante: não cria cargo nem muda o próprio cargo',
+  test.denied($$insert into custom_roles (company_id, name, base_role) values (current_company_id(), 'Chefe', 'manager')$$)
+  and test.denied($$update sellers set custom_role_id = null, role = 'seller' where id = '5e000000-0000-0000-0000-000000000005'$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente A: não muda cargo de ninguém nem edita cargos',
+  test.denied($$update sellers set role = 'manager' where id = '5e000000-0000-0000-0000-000000000004'$$)
+  and test.denied($$update custom_roles set base_role = 'seller'$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê cargos da loja A nem usa cargo da loja A',
+  test.count('select * from custom_roles') = 0
+  and test.denied($$update sellers set custom_role_id = 'c4000000-0000-0000-0000-0000000000a1' where id = '5e000000-0000-0000-0000-0000000000b2'$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: promove a gerente o vendedor que é admin em outra loja',
+  test.allowed($$update sellers set role = 'manager' where id = '5e000000-0000-0000-0000-000000000007'$$));
+select test.check('admin A: não transforma ninguém em admin pela Equipe',
+  test.denied($$update sellers set role = 'admin' where id = '5e000000-0000-0000-0000-000000000004'$$));
+select test.check('admin A: muda o nível do cargo',
+  test.allowed($$update custom_roles set base_role = 'seller' where id = 'c4000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+select test.check('promoção na loja A não mexe no vínculo de admin da loja B',
+  (select role from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000007' and company_id = test.company_a()) = 'manager'
+  and (select role from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000007' and company_id = 'bbbbbbbb-0000-0000-0000-00000000000b') = 'admin');
+select test.check('cargo virou acesso de vendedor: a pessoa e o login acompanham',
+  (select role from public.sellers where id = '5e000000-0000-0000-0000-000000000005') = 'seller'
+  and (select role from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000005' and company_id = test.company_a()) = 'seller');
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: exclui o cargo',
+  test.allowed($$delete from custom_roles where id = 'c4000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+select test.check('cargo excluído: a pessoa fica sem cargo, com o nível que tinha',
+  (select custom_role_id is null and role = 'seller' from public.sellers where id = '5e000000-0000-0000-0000-000000000005'));
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;
