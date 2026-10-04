@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Routes, Route, Outlet, useLocation } from 'react-router-dom'
+import { useEffect, lazy, Suspense } from 'react'
+import { Routes, Route, Outlet, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { CarsProvider } from './context/CarsContext.jsx'
 import TopBar from './components/TopBar.jsx'
@@ -35,12 +35,28 @@ import SellerSales from './admin/SellerSales.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 import { trackSiteVisit } from './lib/statsApi.js'
 
+// Abas "Plataforma" (só o dono do sistema) e "Desempenho" (admin da loja):
+// carregam à parte, quando abrem
+const PlatformOverview = lazy(() => import('./admin/platform/PlatformOverview.jsx'))
+const PlatformStore = lazy(() => import('./admin/platform/PlatformStore.jsx'))
+const AdminPerformance = lazy(() => import('./admin/platform/AdminPerformance.jsx'))
+
 function ScrollToTop() {
   const { pathname } = useLocation()
   useEffect(() => {
     window.scrollTo(0, 0)
   }, [pathname])
   return null
+}
+
+function PlatformOnly() {
+  const { isPlatformAdmin } = useAuth()
+  if (!isPlatformAdmin) return <Navigate to="/admin" replace />
+  return (
+    <Suspense fallback={<p className="admin-muted">Carregando…</p>}>
+      <Outlet />
+    </Suspense>
+  )
 }
 
 function AdminHome() {
@@ -122,9 +138,21 @@ export default function App() {
             <Route path="financeiro" element={<AdminFinance />} />
             <Route path="contratos/modelos" element={<AdminContractTemplates />} />
             <Route path="configuracoes" element={<AdminSettings />} />
+            <Route
+              path="desempenho"
+              element={
+                <Suspense fallback={<p className="admin-muted">Carregando…</p>}>
+                  <AdminPerformance />
+                </Suspense>
+              }
+            />
           </Route>
           <Route element={<CustomerFinanceOnly><Outlet /></CustomerFinanceOnly>}>
             <Route path="financeiro/clientes" element={<AdminCustomerFinance />} />
+          </Route>
+          <Route element={<PlatformOnly />}>
+            <Route path="plataforma" element={<PlatformOverview />} />
+            <Route path="plataforma/:slug" element={<PlatformStore />} />
           </Route>
         </Route>
       </Routes>

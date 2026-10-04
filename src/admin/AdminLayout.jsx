@@ -22,6 +22,8 @@ import {
   FileChartColumn,
   Settings,
   EyeOff,
+  Radar,
+  Gauge,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import ViewAsBar from './ViewAsBar.jsx'
@@ -45,6 +47,7 @@ const ADMIN_NAV = [
   { to: '/admin/financeiro', icon: Wallet, label: 'Financeiro', alert: 'installments' },
   { to: '/admin/financiamentos-externos', icon: Landmark, label: 'Financ. externos' },
   { to: '/admin/relatorios', icon: FileChartColumn, label: 'Relatórios' },
+  { to: '/admin/desempenho', icon: Gauge, label: 'Desempenho' },
   { to: '/admin/historico', icon: History, label: 'Histórico' },
   { to: '/admin/contratos', icon: FileText, label: 'Contratos' },
   { to: '/admin/clientes', icon: Users, label: 'Clientes' },
@@ -57,9 +60,10 @@ const ADMIN_NAV = [
 // Gerente: as abas do admin, mas o Financeiro só com o "Financeiro dos
 // clientes" e só se ele vê os valores das vendas (custos, margem e lucro são
 // só do admin); as demais telas escondem o que ele não pode ver ou fazer.
+// Configurações e Desempenho são só do admin.
 function managerNav(canManageCustomerFinance) {
   return ADMIN_NAV.flatMap((item) => {
-    if (item.to === '/admin/configuracoes') return []
+    if (item.to === '/admin/configuracoes' || item.to === '/admin/desempenho') return []
     if (item.to !== '/admin/financeiro') return [item]
     return canManageCustomerFinance ? [{ ...item, to: '/admin/financeiro/clientes' }] : []
   })
@@ -90,6 +94,9 @@ function usePostSaleAlerts(isStaff, canManageCustomerFinance, pathname) {
   return alerts
 }
 
+// Só para o dono do sistema (platform_admins), fora das abas de Configurações
+const PLATFORM_ITEM = { to: '/admin/plataforma', icon: Radar, label: 'Plataforma' }
+
 const SELLER_NAV = [
   { to: '/admin', end: true, icon: TrendingUp, label: 'Minhas vendas' },
   { to: '/admin/estoque', icon: Car, label: 'Estoque' },
@@ -110,7 +117,7 @@ function readExpanded() {
 }
 
 export default function AdminLayout() {
-  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden } = useAuth()
+  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden, isPlatformAdmin } = useAuth()
   const [expanded, setExpanded] = useState(readExpanded)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
@@ -133,9 +140,9 @@ export default function AdminLayout() {
   }
 
   // Abas escondidas em Configurações somem do menu (o início nunca some)
-  const nav = (isAdmin ? ADMIN_NAV : isManager ? managerNav(canManageCustomerFinance) : SELLER_NAV).filter(
-    (item) => item.end || !isTabHidden(tabForPath(item.to))
-  )
+  const nav = (isAdmin ? ADMIN_NAV : isManager ? managerNav(canManageCustomerFinance) : SELLER_NAV)
+    .filter((item) => item.end || !isTabHidden(tabForPath(item.to)))
+    .concat(isPlatformAdmin ? [PLATFORM_ITEM] : [])
   const hiddenHere = isTabHidden(tabForPath(pathname))
   const showLabels = expanded || mobileOpen
 

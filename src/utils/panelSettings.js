@@ -17,6 +17,7 @@ export const PANEL_TABS = [
   { key: 'fornecedores', label: 'Fornecedores', path: '/admin/fornecedores', roles: ['admin', 'manager'] },
   { key: 'equipe', label: 'Equipe', path: '/admin/equipe', roles: ['admin', 'manager'] },
   { key: 'atividades', label: 'Atividades', path: '/admin/atividades', roles: ['admin', 'manager'] },
+  { key: 'desempenho', label: 'Desempenho', path: '/admin/desempenho', roles: ['admin'] },
 ]
 
 export const DASHBOARD_BLOCKS = [

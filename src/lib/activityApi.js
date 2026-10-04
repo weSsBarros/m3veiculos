@@ -52,6 +52,11 @@ const ENTITY_LABELS = {
   external_financings: 'Financiamento externo',
   financing_installments: 'Parcela',
   auth: 'Acesso',
+  customer_contacts: 'Atendimento',
+  customer_interests: 'Interesse do cliente',
+  customer_interest_matches: 'Aviso de carro que combina',
+  whatsapp_rotation: 'Rodízio do WhatsApp',
+  companies: 'Configurações',
 }
 
 const ACTION_LABELS = {

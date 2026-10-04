@@ -5,6 +5,7 @@ import { setCarsAccess } from '../lib/carsApi.js'
 import { logLogin } from '../lib/activityApi.js'
 import { setViewScope } from '../lib/viewScope.js'
 import { fetchStoreSettings } from '../lib/storeSettingsApi.js'
+import { fetchIsPlatformAdmin } from '../lib/platformApi.js'
 import { normalizePanelSettings, isTabHidden as tabHiddenFor, isBlockHidden as blockHiddenIn } from '../utils/panelSettings.js'
 
 const AuthContext = createContext(null)
@@ -44,6 +45,8 @@ export function AuthProvider({ children }) {
   const [viewAs, setViewAs] = useState(null)
   // Configurações → Painel: abas e blocos do Dashboard escondidos
   const [panelSettings, setPanelSettings] = useState(() => normalizePanelSettings(null))
+  // Dono da plataforma (aba "Plataforma": números de todas as lojas)
+  const [platformAdmin, setPlatformAdmin] = useState(false)
 
   useEffect(() => {
     if (!isSupabaseConfigured) return
@@ -56,6 +59,7 @@ export function AuthProvider({ children }) {
           setRole(null)
           setSeller(null)
           setViewAs(null)
+          setPlatformAdmin(false)
           setViewScope(null)
           setLoading(false)
         }
@@ -77,7 +81,9 @@ export function AuthProvider({ children }) {
       const sellerRecord = userRole !== 'admin' ? await fetchMySeller(session.user.id).catch(() => null) : null
       if (cancelled) return
       const store = await fetchStoreSettings().catch(() => null)
+      const owner = await fetchIsPlatformAdmin().catch(() => false)
       if (cancelled) return
+      setPlatformAdmin(owner)
       setPanelSettings(store ? store.panel : normalizePanelSettings(null))
       setCarsAccess(userRole)
       setUser(session.user)
@@ -184,6 +190,8 @@ export function AuthProvider({ children }) {
         setPanelSettings,
         isTabHidden,
         isBlockHidden,
+        // Some no "ver como": a aba é do dono do sistema, não da equipe da loja
+        isPlatformAdmin: platformAdmin && !simulating,
         viewAs: simulating ? viewAs : null,
         startViewAs,
         stopViewAs,
