@@ -3083,6 +3083,91 @@ span.car-plate {
   margin-bottom: 12px;
 }
 
+/* Cargos da loja (Configurações → Painel) */
+.custom-roles-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.custom-roles-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.custom-roles-list li > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.custom-roles-tabs {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.custom-roles-form {
+  display: grid;
+  gap: 14px;
+  max-width: 720px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-alt);
+}
+
+.custom-roles-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.custom-roles-form .settings-checks label {
+  display: flex;
+  font-weight: 500;
+}
+
+.custom-roles-form input:not([type="checkbox"]) {
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--color-text);
+  background: #fff;
+  outline: none;
+}
+
+.custom-roles-form input:not([type="checkbox"]):focus {
+  border-color: var(--color-primary);
+}
+
+.custom-roles-actions {
+  justify-content: flex-end;
+}
+
+/* Equipe: menu próprio da pessoa */
+.member-menu {
+  margin-top: 14px;
+}
+
+.member-menu .settings-checks {
+  margin-top: 10px;
+}
+
 .settings-msg {
   align-self: center;
   margin-right: auto;

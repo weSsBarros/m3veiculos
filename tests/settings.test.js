@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isTabHidden, isBlockHidden, normalizePanelSettings, tabForPath, toggleHiddenTab } from '../src/utils/panelSettings.js'
+import { isTabHidden, isBlockHidden, normalizePanelSettings, tabForPath, toggleHiddenTab, menuTabHidden, tabsForRole } from '../src/utils/panelSettings.js'
 import { fillTemplate, normalizeTemplates, DEFAULT_TEMPLATES, firstName } from '../src/utils/messageTemplates.js'
 import { interestMatchesCar, matchingStockCars, likedCarGone, describeInterest } from '../src/utils/customerInterests.js'
 import { nextRotationEntry, waDigits, formatWaPhone, entryProblem } from '../src/utils/whatsappRotation.js'
@@ -23,6 +23,32 @@ test('painel: aba escondida de todos vale para o admin; por papel, só para o pa
   const toggled = toggleHiddenTab(toggleHiddenTab(null, 'seller', 'vendas'), 'seller', 'clientes')
   assert.deepEqual(toggled.hiddenTabs.seller, ['vendas', 'clientes'])
   assert.deepEqual(toggleHiddenTab(toggled, 'seller', 'vendas').hiddenTabs.seller, ['clientes'])
+})
+
+test('menu: cargo personalizado e menu próprio mostram só as abas da lista', () => {
+  const settings = { hiddenTabs: { all: ['fornecedores'], manager: ['equipe'], seller: ['relatorios'] }, hiddenBlocks: [] }
+  const despachante = { id: 'c1', name: 'Despachante', baseRole: 'manager', tabs: ['vendas'] }
+  // Admin: só "Esconder de todos"
+  assert.equal(menuTabHidden(settings, 'fornecedores', { role: 'admin' }), true)
+  assert.equal(menuTabHidden(settings, 'equipe', { role: 'admin' }), false)
+  // Papel comum: as colunas de Configurações (igual a antes)
+  assert.equal(menuTabHidden(settings, 'equipe', { role: 'manager' }), true)
+  assert.equal(menuTabHidden(settings, 'relatorios', { role: 'seller' }), true)
+  assert.equal(menuTabHidden(settings, 'vendas', { role: 'seller' }), false)
+  // Cargo personalizado: só as abas do cargo (a coluna do gerente não vale)
+  assert.equal(menuTabHidden(settings, 'vendas', { role: 'manager', customRole: despachante }), false)
+  assert.equal(menuTabHidden(settings, 'estoque', { role: 'manager', customRole: despachante }), true)
+  assert.equal(menuTabHidden(settings, 'equipe', { role: 'manager', customRole: { ...despachante, tabs: ['equipe'] } }), false)
+  // Menu próprio da pessoa vence o cargo; lista vazia = só o início
+  assert.equal(menuTabHidden(settings, 'estoque', { role: 'manager', customRole: despachante, panelTabs: ['estoque'] }), false)
+  assert.equal(menuTabHidden(settings, 'vendas', { role: 'manager', customRole: despachante, panelTabs: ['estoque'] }), true)
+  assert.equal(menuTabHidden(settings, 'vendas', { role: 'seller', panelTabs: [] }), true)
+  // "Esconder de todos" vale mesmo se o cargo ou a pessoa tiver a aba
+  assert.equal(menuTabHidden(settings, 'fornecedores', { role: 'manager', panelTabs: ['fornecedores'] }), true)
+  // Abas que cada nível pode ter
+  assert.equal(tabsForRole('seller').some((t) => t.key === 'financeiro'), false)
+  assert.equal(tabsForRole('manager').some((t) => t.key === 'financeiro'), true)
+  assert.equal(tabsForRole('manager').some((t) => t.key === 'desempenho'), false)
 })
 
 test('painel: aba de cada endereço (edição do carro conta como Estoque)', () => {

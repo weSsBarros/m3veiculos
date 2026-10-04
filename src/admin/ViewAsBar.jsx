@@ -22,7 +22,7 @@ export default function ViewAsBar() {
       <div className="viewas-banner" role="status">
         <Eye size={17} />
         <span>
-          Você está vendo o painel como <strong>{viewAs.name}</strong> ({roleLabel(viewAs.role).toLowerCase()}). Só visualização:
+          Você está vendo o painel como <strong>{viewAs.name}</strong> ({roleLabel(viewAs.role, viewAs.seller?.customRole).toLowerCase()}). Só visualização:
           nada é salvo enquanto estiver nesta visão.
         </span>
         <button
@@ -42,12 +42,14 @@ export default function ViewAsBar() {
   async function toggle() {
     const next = !open
     setOpen(next)
-    if (next && team === null) {
+    // Recarrega a cada abertura: cargo e menu da pessoa podem ter mudado na Equipe
+    if (next) {
       try {
+        setError('')
         setTeam((await fetchSellers()).filter((s) => s.active && !s.deletedAt))
       } catch (err) {
         setError(err.message || 'Não foi possível carregar a equipe.')
-        setTeam([])
+        setTeam((prev) => prev || [])
       }
     }
   }
@@ -79,6 +81,7 @@ export default function ViewAsBar() {
                 {managers.map((s) => (
                   <button key={s.id} type="button" role="menuitem" onClick={() => choose(s)}>
                     {s.name}
+                    {s.customRole && <small> ({s.customRole.name})</small>}
                   </button>
                 ))}
                 {managers.length === 0 && (
@@ -90,6 +93,7 @@ export default function ViewAsBar() {
                 {sellers.map((s) => (
                   <button key={s.id} type="button" role="menuitem" onClick={() => choose(s)}>
                     {s.name}
+                    {s.customRole && <small> ({s.customRole.name})</small>}
                   </button>
                 ))}
                 {sellers.length === 0 && (

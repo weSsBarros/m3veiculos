@@ -76,6 +76,29 @@ export function isTabHidden(settings, key, role) {
   return false
 }
 
+// Abas que um nível de acesso pode ter (o vendedor, por exemplo, nunca tem o
+// Financeiro): as opções dos cargos e do menu de cada pessoa
+export function tabsForRole(role) {
+  return PANEL_TABS.filter((t) => t.roles.includes(role))
+}
+
+// Aba escondida no menu de quem está usando o painel (inclusive no "ver como").
+// person: { role, customRole, panelTabs }.
+// - "Esconder de todos" vale para todo mundo, inclusive o admin.
+// - Menu próprio da pessoa (panelTabs) ou cargo personalizado (customRole.tabs):
+//   só as abas da lista aparecem (aba nova fica escondida até o admin marcar).
+// - Sem cargo personalizado: as colunas de gerente e vendedor de Configurações.
+export function menuTabHidden(settings, key, person = {}) {
+  if (!key) return false
+  const { role, customRole = null, panelTabs = null } = person
+  const { hiddenTabs } = normalizePanelSettings(settings)
+  if (hiddenTabs.all.includes(key)) return true
+  if (role !== 'manager' && role !== 'seller') return false
+  const shown = Array.isArray(panelTabs) ? panelTabs : customRole ? list(customRole.tabs) : null
+  if (shown) return !shown.includes(key)
+  return hiddenTabs[role].includes(key)
+}
+
 export function isBlockHidden(settings, key) {
   return normalizePanelSettings(settings).hiddenBlocks.includes(key)
 }

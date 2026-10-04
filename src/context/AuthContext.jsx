@@ -6,7 +6,7 @@ import { logLogin } from '../lib/activityApi.js'
 import { setViewScope } from '../lib/viewScope.js'
 import { fetchStoreSettings } from '../lib/storeSettingsApi.js'
 import { fetchIsPlatformAdmin } from '../lib/platformApi.js'
-import { normalizePanelSettings, isTabHidden as tabHiddenFor, isBlockHidden as blockHiddenIn } from '../utils/panelSettings.js'
+import { normalizePanelSettings, menuTabHidden, isBlockHidden as blockHiddenIn } from '../utils/panelSettings.js'
 
 const AuthContext = createContext(null)
 
@@ -167,8 +167,14 @@ export function AuthProvider({ children }) {
   const canSeeSaleValues = isAdmin || (isManager && effectiveSeller?.financeAccess === 'values')
   // Financeiro dos clientes (financiamento próprio): mesma regra dos valores das vendas
   const canManageCustomerFinance = canSeeSaleValues
-  // Aba escondida para quem está usando o painel (inclusive no "ver como")
-  const isTabHidden = (key) => tabHiddenFor(panelSettings, key, effectiveRole)
+  // Aba escondida para quem está usando o painel (inclusive no "ver como"):
+  // cargo personalizado e menu próprio da pessoa (Equipe) valem por cima do papel
+  const menuPerson = {
+    role: effectiveRole,
+    customRole: effectiveSeller?.customRole || null,
+    panelTabs: effectiveSeller?.panelTabs ?? null,
+  }
+  const isTabHidden = (key) => menuTabHidden(panelSettings, key, menuPerson)
   const isBlockHidden = (key) => blockHiddenIn(panelSettings, key)
 
   return (

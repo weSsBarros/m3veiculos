@@ -29,6 +29,7 @@ import {
   restoreDismissals,
 } from '../lib/storeSettingsApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
+import CustomRolesSettings from './CustomRolesSettings.jsx'
 import { applyStockAlertToAll, fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import {
   PANEL_TABS,
@@ -337,7 +338,7 @@ export default function AdminSettings() {
       </nav>
 
       <div id="painel">
-        <Section icon={LayoutDashboard} title="Painel" description="Esconda as abas que a loja não usa — para todos ou só para o gerente ou o vendedor — e escolha os blocos do Dashboard.">
+        <Section icon={LayoutDashboard} title="Painel" description="Esconda as abas que a loja não usa — para todos ou só para o gerente ou o vendedor —, crie cargos com abas próprias e escolha os blocos do Dashboard.">
           <div className="admin-table-wrap">
             <table className="admin-table settings-matrix">
               <thead>
@@ -399,6 +400,8 @@ export default function AdminSettings() {
               {saving === 'panel' ? 'Salvando…' : 'Salvar painel'}
             </button>
           </div>
+
+          <CustomRolesSettings />
 
           <h3 className="settings-subtitle">Avisos que você escondeu</h3>
           {dismissedKeys.length === 0 ? (

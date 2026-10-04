@@ -1,11 +1,20 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
 import { scopeSellers } from './viewScope.js'
+import { customRoleFromRow } from './customRolesApi.js'
+
+// A pessoa já vem com o cargo personalizado (nome e abas) para o menu e a lista
+const SELLER_SELECT = '*, custom_role:custom_roles(id, name, base_role, tabs)'
 
 function fromRow(row) {
   return {
     id: row.id,
     userId: row.user_id,
+    // Nível de acesso (o que o banco libera): 'seller' ou 'manager'
     role: row.role || 'seller',
+    // Cargo personalizado (null = Vendedor/Gerente) e menu próprio (null = segue o cargo)
+    customRoleId: row.custom_role_id || null,
+    customRole: row.custom_role ? customRoleFromRow(row.custom_role) : null,
+    panelTabs: Array.isArray(row.panel_tabs) ? row.panel_tabs : null,
     name: row.name,
     email: row.email || '',
     phone: row.phone || '',
@@ -34,7 +43,7 @@ export async function fetchSellers() {
   requireSupabase()
   const { data, error } = await supabase
     .from('sellers')
-    .select('*')
+    .select(SELLER_SELECT)
     .eq('company_id', COMPANY_ID)
     .order('name', { ascending: true })
   if (error) throw error
@@ -43,7 +52,12 @@ export async function fetchSellers() {
 
 export async function fetchMySeller(userId) {
   requireSupabase()
-  const { data, error } = await supabase.from('sellers').select('*').eq('user_id', userId).maybeSingle()
+  const { data, error } = await supabase
+    .from('sellers')
+    .select(SELLER_SELECT)
+    .eq('user_id', userId)
+    .eq('company_id', COMPANY_ID)
+    .maybeSingle()
   if (error) throw error
   return data ? fromRow(data) : null
 }
@@ -62,10 +76,15 @@ export async function updateSeller(id, seller) {
       ...(seller.extCommissionType !== undefined
         ? { ext_commission_type: seller.extCommissionType || 'none', ext_commission_value: seller.extCommissionValue || 0 }
         : {}),
+      // Cargo: com cargo personalizado, o banco põe o nível do cargo
+      ...(seller.role !== undefined
+        ? { role: seller.role === 'manager' ? 'manager' : 'seller', custom_role_id: seller.customRoleId || null }
+        : {}),
+      ...(seller.panelTabs !== undefined ? { panel_tabs: Array.isArray(seller.panelTabs) ? seller.panelTabs : null } : {}),
     })
     .eq('id', id)
     .eq('company_id', COMPANY_ID)
-    .select()
+    .select(SELLER_SELECT)
     .single()
   if (error) throw error
   return fromRow(data)
@@ -107,12 +126,18 @@ export async function createSeller(seller) {
   // "só quantidades" e sem comissão de financiamento externo).
   const financeAccess = created.role === 'manager' && seller.financeAccess === 'values' ? 'values' : created.financeAccess
   const hasExtCommission = seller.extCommissionType && seller.extCommissionType !== 'none'
-  if (financeAccess !== created.financeAccess || hasExtCommission) {
+  // Cargo personalizado e menu próprio também vão logo depois (o login já foi
+  // criado com o nível do cargo)
+  const hasCustomRole = Boolean(seller.customRoleId)
+  const hasOwnMenu = Array.isArray(seller.panelTabs)
+  if (financeAccess !== created.financeAccess || hasExtCommission || hasCustomRole || hasOwnMenu) {
     return updateSeller(created.id, {
       ...created,
       financeAccess,
       extCommissionType: seller.extCommissionType || 'none',
       extCommissionValue: seller.extCommissionValue || 0,
+      customRoleId: seller.customRoleId || null,
+      panelTabs: hasOwnMenu ? seller.panelTabs : null,
     })
   }
   return created
@@ -139,8 +164,15 @@ export function describeCommission(seller) {
   return `${seller.commissionValue.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}% da venda`
 }
 
-export function roleLabel(role) {
+// Nome do cargo: o personalizado (ex.: "Despachante") ou Vendedor/Gerente
+export function roleLabel(role, customRole = null) {
+  if (customRole?.name) return customRole.name
   return role === 'manager' ? 'Gerente' : 'Vendedor'
+}
+
+// Nível de acesso de um cargo personalizado (o que o banco libera)
+export function accessLabel(role) {
+  return role === 'manager' ? 'acesso de gerente' : 'acesso de vendedor'
 }
 
 export function financeAccessLabel(access) {

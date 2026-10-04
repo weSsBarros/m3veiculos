@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2, HandCoins } from 'lucide-react'
-import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, financeAccessLabel } from '../lib/sellersApi.js'
+import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, financeAccessLabel, accessLabel } from '../lib/sellersApi.js'
+import { fetchCustomRoles } from '../lib/customRolesApi.js'
+import { tabsForRole } from '../utils/panelSettings.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchSales, markCommissionsPaid } from '../lib/salesApi.js'
 import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
@@ -16,7 +18,11 @@ import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 
 const EMPTY_FORM = {
+  // Nível de acesso ('seller' ou 'manager') e cargo personalizado (null = Vendedor/Gerente)
   role: 'seller',
+  customRoleId: null,
+  // Menu próprio da pessoa: null = segue o cargo
+  panelTabs: null,
   name: '',
   email: '',
   phone: '',
@@ -32,6 +38,15 @@ const EMPTY_FORM = {
   extCommissionValue: '',
 }
 
+// O que cada nível libera (texto da confirmação de troca de cargo)
+const ACCESS_TEXT = {
+  seller: 'vê só as próprias vendas, reservas e documentos de clientes',
+  manager: 'vê todas as vendas e clientes da loja, menos custos',
+}
+
+// Valor do seletor de cargo: 'seller', 'manager' ou 'custom:<id>'
+const cargoValue = (role, customRoleId) => (customRoleId ? `custom:${customRoleId}` : role)
+
 // Aceita "1,5", "1.5", "500", "1.000" e "1.000,50"
 function parseCommission(value) {
   let str = String(value).trim()
@@ -45,6 +60,7 @@ export default function AdminSellers() {
   const { confirm, confirmDialog } = useConfirm()
   const { isAdmin, canSeeSaleValues } = useAuth()
   const [sellers, setSellers] = useState([])
+  const [customRoles, setCustomRoles] = useState([])
   const [sales, setSales] = useState([])
   const [cars, setCars] = useState([])
   const [loading, setLoading] = useState(true)
@@ -70,14 +86,16 @@ export default function AdminSellers() {
     setLoading(true)
     setError('')
     try {
-      const [sellersData, salesData, carsData, externalsData] = await Promise.all([
+      const [sellersData, salesData, carsData, externalsData, rolesData] = await Promise.all([
         fetchSellers(),
         fetchSales(),
         fetchAllCarsAdmin(),
         // Sem a tabela nova no banco, a Equipe abre normalmente
         fetchExternalFinancings().catch(() => []),
+        fetchCustomRoles().catch(() => []),
       ])
       setSellers(sellersData)
+      setCustomRoles(rolesData)
       setExternals(externalsData)
       setSales(salesData)
       setCars(carsData)
@@ -163,6 +181,39 @@ export default function AdminSellers() {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
+  const formCustomRole = customRoles.find((r) => r.id === form.customRoleId) || null
+
+  // Troca de cargo no formulário: com cargo personalizado, o nível é o do
+  // cargo; o menu próprio perde as abas que o novo nível não tem
+  function changeCargo(value) {
+    const custom = value.startsWith('custom:') ? customRoles.find((r) => r.id === value.slice(7)) : null
+    const role = custom ? custom.baseRole : value === 'manager' ? 'manager' : 'seller'
+    const allowed = tabsForRole(role).map((t) => t.key)
+    setForm((prev) => ({
+      ...prev,
+      role,
+      customRoleId: custom ? custom.id : null,
+      panelTabs: Array.isArray(prev.panelTabs) ? prev.panelTabs.filter((k) => allowed.includes(k)) : null,
+    }))
+  }
+
+  function toggleMenuTab(key) {
+    setForm((prev) => {
+      const tabs = prev.panelTabs || []
+      return { ...prev, panelTabs: tabs.includes(key) ? tabs.filter((k) => k !== key) : [...tabs, key] }
+    })
+  }
+
+  // "Escolher as abas" começa com o que a pessoa vê hoje pelo cargo
+  function setOwnMenu(own) {
+    if (!own) {
+      update('panelTabs', null)
+      return
+    }
+    const options = tabsForRole(form.role).map((t) => t.key)
+    update('panelTabs', formCustomRole ? formCustomRole.tabs.filter((k) => options.includes(k)) : options)
+  }
+
   function startEdit(seller) {
     setEditingId(seller.id)
     setFormError('')
@@ -170,6 +221,8 @@ export default function AdminSellers() {
     const hasCommission = seller.commissionType !== 'none'
     setForm({
       role: seller.role,
+      customRoleId: seller.customRoleId,
+      panelTabs: seller.panelTabs,
       name: seller.name,
       email: seller.email,
       phone: seller.phone,
@@ -228,17 +281,30 @@ export default function AdminSellers() {
       return
     }
 
+    // Troca de cargo: confirma dizendo o que muda no acesso
+    const before = editingId ? sellers.find((s) => s.id === editingId) : null
+    if (before && cargoValue(before.role, before.customRoleId) !== cargoValue(form.role, form.customRoleId)) {
+      const from = roleLabel(before.role, before.customRole)
+      const to = roleLabel(form.role, formCustomRole)
+      const access = before.role !== form.role ? ` Com ${accessLabel(form.role)}, ${ACCESS_TEXT[form.role]}.` : ''
+      const ok = await confirm(`${before.name} passa de ${from} para ${to}.${access} A pessoa vê o menu novo ao recarregar o painel.`, {
+        title: 'Mudar o cargo',
+        confirmLabel: 'Mudar cargo',
+      })
+      if (!ok) return
+    }
+
     setSaving(true)
     try {
       if (editingId) {
         const saved = await updateSeller(editingId, { ...form, commissionType, commissionValue, extCommissionType, extCommissionValue })
         setSellers((prev) => prev.map((s) => (s.id === editingId ? saved : s)))
-        setFormSuccess(`${roleLabel(saved.role)} "${saved.name}" atualizado.`)
+        setFormSuccess(`${roleLabel(saved.role, saved.customRole)} "${saved.name}" atualizado.`)
         cancelEdit()
       } else {
         const created = await createSeller({ ...form, commissionType, commissionValue, extCommissionType, extCommissionValue })
         setSellers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
-        setFormSuccess(`${roleLabel(created.role)} "${created.name}" cadastrado. Já pode entrar no painel com o e-mail ${created.email}.`)
+        setFormSuccess(`${roleLabel(created.role, created.customRole)} "${created.name}" cadastrado. Já pode entrar no painel com o e-mail ${created.email}.`)
         setForm(EMPTY_FORM)
       }
     } catch (err) {
@@ -254,7 +320,7 @@ export default function AdminSellers() {
       ? `Reativar "${seller.name}"? Ele volta a conseguir entrar no painel.`
       : `Desativar "${seller.name}"? Ele perde o acesso ao painel na hora. As vendas dele continuam registradas.`
     const label = next ? 'Reativar' : 'Desativar'
-    if (!(await confirm(msg, { title: `${label} ${roleLabel(seller.role).toLowerCase()}`, confirmLabel: label }))) return
+    if (!(await confirm(msg, { title: `${label} ${roleLabel(seller.role, seller.customRole).toLowerCase()}`, confirmLabel: label }))) return
     try {
       const saved = await updateSeller(seller.id, { ...seller, active: next })
       setSellers((prev) => prev.map((s) => (s.id === seller.id ? saved : s)))
@@ -269,12 +335,12 @@ export default function AdminSellers() {
       ? ` ${salesCount === 1 ? 'A venda dele continua' : `As ${salesCount} vendas dele continuam`} no histórico, com o nome e a comissão.`
       : ''
     const msg = `Excluir "${seller.name}"? O login dele é apagado e ele sai da equipe.${history} Não dá para desfazer. Se for só um afastamento, use Desativar.`
-    if (!(await confirm(msg, { title: `Excluir ${roleLabel(seller.role).toLowerCase()}`, confirmLabel: 'Excluir' }))) return
+    if (!(await confirm(msg, { title: `Excluir ${roleLabel(seller.role, seller.customRole).toLowerCase()}`, confirmLabel: 'Excluir' }))) return
     try {
       const saved = await deleteSeller(seller.id)
       setSellers((prev) => prev.map((s) => (s.id === seller.id ? saved : s)))
       if (editingId === seller.id) cancelEdit()
-      setFormSuccess(`${roleLabel(seller.role)} "${seller.name}" excluído da equipe.`)
+      setFormSuccess(`${roleLabel(seller.role, seller.customRole)} "${seller.name}" excluído da equipe.`)
     } catch (err) {
       alert('Não foi possível excluir: ' + err.message)
     }
@@ -315,7 +381,7 @@ export default function AdminSellers() {
       <div className="admin-page-head">
         <div>
           <h1>Equipe</h1>
-          <p>Vendedores e gerentes: acesso ao painel, vendas e comissões</p>
+          <p>Vendedores, gerentes e cargos da loja: acesso ao painel, vendas e comissões</p>
         </div>
         <div className="admin-row-actions">
           <PeriodFilter
@@ -359,13 +425,22 @@ export default function AdminSellers() {
 
       {isAdmin && (
       <form className="admin-form admin-form-section" onSubmit={handleSubmit}>
-        <h2>{editingId ? `Editar ${roleLabel(form.role).toLowerCase()}` : 'Nova pessoa na equipe'}</h2>
+        <h2>{editingId ? `Editar ${roleLabel(form.role, formCustomRole).toLowerCase()}` : 'Nova pessoa na equipe'}</h2>
         <div className="admin-form-grid admin-form-grid-3">
           <label>
             Cargo
-            <select value={form.role} onChange={(e) => update('role', e.target.value)} disabled={Boolean(editingId)}>
+            <select value={cargoValue(form.role, form.customRoleId)} onChange={(e) => changeCargo(e.target.value)}>
               <option value="seller">Vendedor</option>
               <option value="manager">Gerente</option>
+              {customRoles.length > 0 && (
+                <optgroup label="Cargos da loja">
+                  {customRoles.map((r) => (
+                    <option key={r.id} value={`custom:${r.id}`}>
+                      {r.name} ({accessLabel(r.baseRole)})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </label>
           <label>
@@ -498,9 +573,48 @@ export default function AdminSellers() {
             </p>
           </div>
         )}
+        <div className="member-menu">
+          <span className="admin-field-label">Menu desta pessoa</span>
+          <div className="admin-segmented" role="radiogroup" aria-label="Menu desta pessoa">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!Array.isArray(form.panelTabs)}
+              className={!Array.isArray(form.panelTabs) ? 'is-active' : ''}
+              onClick={() => setOwnMenu(false)}
+            >
+              Seguir o cargo
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={Array.isArray(form.panelTabs)}
+              className={Array.isArray(form.panelTabs) ? 'is-active' : ''}
+              onClick={() => setOwnMenu(true)}
+            >
+              Escolher as abas
+            </button>
+          </div>
+          {Array.isArray(form.panelTabs) ? (
+            <div className="settings-checks">
+              {tabsForRole(form.role).map((t) => (
+                <label key={t.key} className="admin-checkbox">
+                  <input type="checkbox" checked={form.panelTabs.includes(t.key)} onChange={() => toggleMenuTab(t.key)} />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="admin-form-note">
+              {formCustomRole
+                ? `Vê as abas do cargo ${formCustomRole.name} (Configurações → Painel → Cargos da loja).`
+                : `Vê as abas de ${form.role === 'manager' ? 'gerente' : 'vendedor'} marcadas em Configurações → Painel.`}
+            </p>
+          )}
+        </div>
         {editingId && (
           <p className="admin-form-note">
-            O e-mail de login e o cargo não mudam por aqui (o que o gerente vê das vendas pode ser trocado a qualquer momento). Mudar a comissão vale só para as próximas vendas — as já registradas mantêm a comissão da época.
+            O e-mail de login não muda por aqui. Mudar a comissão vale só para as próximas vendas — as já registradas mantêm a comissão da época.
           </p>
         )}
         {formError && <p className="admin-error">{formError}</p>}
@@ -513,7 +627,7 @@ export default function AdminSellers() {
           )}
           <button type="submit" className="btn btn-primary" disabled={saving}>
             {editingId ? null : <UserPlus size={15} />}
-            {saving ? 'Salvando…' : editingId ? 'Salvar alterações' : `Cadastrar ${roleLabel(form.role).toLowerCase()}`}
+            {saving ? 'Salvando…' : editingId ? 'Salvar alterações' : `Cadastrar ${roleLabel(form.role, formCustomRole).toLowerCase()}`}
           </button>
         </div>
       </form>
@@ -553,7 +667,8 @@ export default function AdminSellers() {
                         <span className="admin-table-sub">{s.email}{s.phone ? ` · ${s.phone}` : ''}</span>
                       </td>
                       <td>
-                        <span className={`admin-role-pill role-${s.role}`}>{roleLabel(s.role)}</span>
+                        <span className={`admin-role-pill role-${s.role}`}>{roleLabel(s.role, s.customRole)}</span>
+                        {s.customRole && <span className="admin-table-sub">{accessLabel(s.role)}</span>}
                         {s.role === 'manager' && isAdmin && <span className="admin-table-sub">{financeAccessLabel(s.financeAccess)}</span>}
                       </td>
                       {canSeeSaleValues && (
@@ -612,7 +727,8 @@ export default function AdminSellers() {
                       <strong>{s.name}</strong>
                       <span className="admin-table-sub">{s.email}</span>
                       <span className="admin-card-meta">
-                        {roleLabel(s.role)}
+                        {roleLabel(s.role, s.customRole)}
+                        {s.customRole ? ` (${accessLabel(s.role)})` : ''}
                         {canSeeSaleValues ? ` · ${describeCommission(s)}` : ''}
                         {s.role === 'manager' && isAdmin ? ` · ${financeAccessLabel(s.financeAccess).toLowerCase()}` : ''}
                       </span>
