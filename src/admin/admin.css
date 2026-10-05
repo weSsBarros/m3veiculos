@@ -4622,3 +4622,17 @@ span.car-plate {
 .client-activation-fix .client-access-reason {
   margin-bottom: 0;
 }
+
+/* Painel WB.Dev: lembretes por e-mail */
+.client-reminders {
+  margin-top: 18px;
+}
+
+.client-reminders .admin-checkbox {
+  margin-top: 0;
+}
+
+.client-reminders-title {
+  margin: 18px 0 8px;
+  font-size: 14px;
+}

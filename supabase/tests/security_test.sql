@@ -944,6 +944,97 @@ select test.check('novo cliente: endereço interno repetido ou inválido e nome 
   and test.denied($$select platform_create_client('', 'nome-vazio')$$));
 reset role;
 
+-- ============================ lembretes de mensalidade por e-mail (45)
+-- Cliente ativo com mensalidade de R$ 100 vencendo dia 10 desde outubro/2026
+insert into public.companies (id, slug, name) values ('eeeeeeee-0000-0000-0000-00000000000e', 'lembrete-teste', 'Lembrete Teste');
+update public.client_accounts
+set status = 'ativo', monthly_price = 100, due_day = 10, billing_start = '2026-10-01', responsible_email = ' Dono@Lembrete.Teste '
+where company_id = 'eeeeeeee-0000-0000-0000-00000000000e';
+
+-- Tipos de lembrete que saem para essa loja num dia (como a Edge Function, com a chave de serviço)
+create function test.lembrete(p_day date) returns text language sql as $$
+  select coalesce(string_agg(x ->> 'kind', ',' order by x ->> 'kind'), '')
+  from jsonb_array_elements(public.billing_reminders_due(p_day)) x
+  where x ->> 'company_id' = 'eeeeeeee-0000-0000-0000-00000000000e'
+$$;
+select set_config('request.jwt.claim.role', 'service_role', false);
+
+select test.check('lembretes: de 5 a 1 dia antes, no dia e com 1, 3 e 7 dias de atraso',
+  test.lembrete('2026-10-04') = ''
+  and test.lembrete('2026-10-05') = 'antes_5'
+  and test.lembrete('2026-10-09') = 'antes_5'
+  and test.lembrete('2026-10-10') = 'no_dia'
+  and test.lembrete('2026-10-11') = 'atraso_1'
+  and test.lembrete('2026-10-13') = 'atraso_3'
+  and test.lembrete('2026-10-17') = 'atraso_7'
+  and test.lembrete('2026-10-24') = ''
+  and test.lembrete('2026-11-05') = 'antes_5');
+select test.check('lembretes: vão para o e-mail do responsável (minúsculo, sem espaços), com valor e vencimento',
+  exists (select 1 from jsonb_array_elements(public.billing_reminders_due('2026-10-05')) x
+          where x ->> 'company_id' = 'eeeeeeee-0000-0000-0000-00000000000e'
+            and x -> 'to' = '["dono@lembrete.teste"]'::jsonb
+            and (x ->> 'amount')::numeric = 100 and x ->> 'due' = '2026-10-10' and (x ->> 'days')::int = 5));
+
+-- Lembrete já enviado não sai de novo; com erro, tenta de novo
+insert into public.client_reminders (company_id, kind, reference_month, sent_to, status) values
+  ('eeeeeeee-0000-0000-0000-00000000000e', 'antes_5', '2026-10-01', 'dono@lembrete.teste', 'enviado'),
+  ('eeeeeeee-0000-0000-0000-00000000000e', 'no_dia', '2026-10-01', 'dono@lembrete.teste', 'erro');
+select test.check('lembretes: o mesmo lembrete do mesmo mês sai uma vez só (o que deu erro tenta de novo)',
+  test.lembrete('2026-10-08') = ''
+  and test.lembrete('2026-10-10') = 'no_dia'
+  and test.denied($$insert into public.client_reminders (company_id, kind, reference_month, status)
+                    values ('eeeeeeee-0000-0000-0000-00000000000e', 'antes_5', '2026-10-01', 'enviado')$$));
+
+-- Pagou outubro: nada de atraso
+insert into public.client_payments (company_id, reference_month, amount, paid_on) values ('eeeeeeee-0000-0000-0000-00000000000e', '2026-10-01', 100, '2026-10-10');
+select test.check('lembretes: mês pago não gera aviso de atraso',
+  test.lembrete('2026-10-11') = '' and test.lembrete('2026-10-17') = '');
+
+update public.client_accounts set reminders_enabled = false where company_id = 'eeeeeeee-0000-0000-0000-00000000000e';
+select test.check('lembretes: desligados na ficha, não sai nada', test.lembrete('2026-11-05') = '');
+update public.client_accounts set reminders_enabled = true, status = 'implantacao' where company_id = 'eeeeeeee-0000-0000-0000-00000000000e';
+select test.check('lembretes: cliente em implantação não recebe', test.lembrete('2026-11-05') = '');
+
+select test.check('lembretes: sem e-mail do responsável, vão para os admins da loja (fora o dono da plataforma)',
+  'admin@loja-a' = any(public.client_reminder_recipients(test.company_a()))
+  and not exists (select 1 from unnest(public.client_reminder_recipients(test.company_a())) e
+                  join auth.users u on lower(u.email) = e join public.platform_admins pa on pa.user_id = u.id));
+
+-- Login da equipe WB.Dev como admin da loja A: fica fora da lista
+insert into auth.users (id, email) values ('cccccccc-0000-0000-0000-0000000000e1', 'suporte@wbdev');
+insert into public.user_company (user_id, company_id, role) values ('cccccccc-0000-0000-0000-0000000000e1', test.company_a(), 'admin');
+select test.check('lembretes: sem a tabela da equipe, o login de suporte receberia',
+  'suporte@wbdev' = any(public.client_reminder_recipients(test.company_a())));
+insert into public.platform_team (user_id) values ('cccccccc-0000-0000-0000-0000000000e1');
+select test.check('lembretes: logins da equipe WB.Dev (platform_team) não recebem; o admin da loja continua',
+  not ('suporte@wbdev' = any(public.client_reminder_recipients(test.company_a())))
+  and 'admin@loja-a' = any(public.client_reminder_recipients(test.company_a())));
+delete from public.user_company where user_id = 'cccccccc-0000-0000-0000-0000000000e1';
+delete from auth.users where id = 'cccccccc-0000-0000-0000-0000000000e1';
+select set_config('request.jwt.claim.role', '', false);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin de loja: não vê a lista de lembretes nem o histórico',
+  test.denied($$select billing_reminders_due()$$)
+  and test.denied($$select client_reminder_recipients(current_company_id())$$)
+  and test.denied($$select * from platform_team$$)
+  and test.count('select * from client_reminders') <= 0);
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: não vê lembretes', test.denied($$select billing_reminders_due()$$) and test.count('select * from client_reminders') <= 0);
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: vê a prévia dos lembretes e o histórico, mas não grava no histórico',
+  test.allowed($$select billing_reminders_due()$$)
+  and test.count('select * from client_reminders') >= 2
+  and test.denied($$insert into client_reminders (company_id, kind, reference_month) values ('eeeeeeee-0000-0000-0000-00000000000e', 'atraso_1', '2026-12-01')$$));
+reset role;
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;

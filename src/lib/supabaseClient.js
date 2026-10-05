@@ -12,6 +12,8 @@ export const isSupabaseConfigured = Boolean(url && anonKey && COMPANY_ID)
 
 // Funções do banco que só leem (as demais gravam algo)
 const READ_ONLY_RPCS = new Set([
+  'billing_reminders_due',
+  'client_reminder_recipients',
   'current_company_id', 'site_visit_totals', 'car_view_totals', 'team_directory', 'store_contact',
   'is_platform_admin', 'platform_overview', 'platform_store_detail', 'store_performance',
   'platform_clients', 'my_account', 'company_status',

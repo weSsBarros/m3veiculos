@@ -26,6 +26,7 @@ function accountFromRow(a = {}) {
     onboarding: a.onboarding && typeof a.onboarding === 'object' ? a.onboarding : {},
     implantationStartedOn: a.implantation_started_on || null,
     activatedOn: a.activated_on || null,
+    remindersEnabled: a.reminders_enabled !== false,
   }
 }
 
@@ -113,6 +114,7 @@ const ACCOUNT_COLUMNS = {
   notes: 'notes',
   onboarding: 'onboarding',
   activatedOn: 'activated_on',
+  remindersEnabled: 'reminders_enabled',
 }
 
 // Grava só os campos informados
@@ -219,6 +221,58 @@ export async function createClient(client) {
   })
   return data
 }
+
+// ------------------------------------- lembretes por e-mail (seção 45)
+function reminderFromRow(r) {
+  return {
+    id: r.id,
+    companyId: r.company_id,
+    kind: r.kind,
+    referenceMonth: r.reference_month,
+    paymentId: r.payment_id,
+    sentTo: r.sent_to || '',
+    status: r.status,
+    error: r.error || '',
+    createdAt: r.created_at,
+  }
+}
+
+export async function fetchReminderLog(companyId = null, limit = 30) {
+  let query = supabase.from('client_reminders').select('*').order('created_at', { ascending: false }).limit(limit)
+  if (companyId) query = query.eq('company_id', companyId)
+  return (await run(query)).map(reminderFromRow)
+}
+
+// Para quem vão os e-mails: o responsável da ficha ou, sem ele, os admins da loja
+export async function fetchReminderRecipients(companyId) {
+  return (await run(supabase.rpc('client_reminder_recipients', { p_company: companyId }))) || []
+}
+
+// Lembretes que saem hoje (o que o envio diário vai mandar)
+export async function fetchRemindersDue() {
+  return (await run(supabase.rpc('billing_reminders_due'))) || []
+}
+
+async function invokeEmail(body) {
+  const { data, error } = await supabase.functions.invoke('wbdev-email', { body })
+  if (error) {
+    let message = error.message
+    try {
+      const payload = await error.context?.json()
+      if (payload?.error) message = payload.error
+    } catch {
+      // resposta sem corpo JSON
+    }
+    throw new Error(message)
+  }
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
+export const sendRemindersNow = () => invokeEmail({ action: 'lembretes' })
+export const sendTestEmail = () => invokeEmail({ action: 'teste' })
+export const sendReceiptEmail = ({ paymentId, pdfBase64, filename }) =>
+  invokeEmail({ action: 'recibo', payment_id: paymentId, pdf_base64: pdfBase64, filename })
 
 // ---------------------------------------- despesas da plataforma (seção 41)
 function expenseFromRow(e) {

@@ -12,7 +12,7 @@ const MUTED = [90, 100, 117]
 const MARGIN = 48
 
 // client: cliente do painel WB.Dev (lib/clientsApi.js); payment: pagamento
-export async function exportPaymentReceipt({ client, payment }) {
+export async function buildPaymentReceipt({ client, payment }) {
   const { jsPDF } = await import('jspdf')
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
   const width = doc.internal.pageSize.getWidth()
@@ -85,5 +85,19 @@ export async function exportPaymentReceipt({ client, payment }) {
   doc.setFontSize(8)
   doc.text(`Gerado pelo painel WB.Dev em ${new Date().toLocaleString('pt-BR')}`, MARGIN, height - 24)
 
-  downloadBlob(doc.output('blob'), `recibo-${slugify(client.name)}-${payment.referenceMonth.slice(0, 7)}.pdf`)
+  return { blob: doc.output('blob'), filename: `recibo-${slugify(client.name)}-${payment.referenceMonth.slice(0, 7)}.pdf` }
+}
+
+export async function exportPaymentReceipt({ client, payment }) {
+  const { blob, filename } = await buildPaymentReceipt({ client, payment })
+  downloadBlob(blob, filename)
+}
+
+// O mesmo recibo em base64, para ir anexado no e-mail (Edge Function wbdev-email)
+export async function paymentReceiptBase64({ client, payment }) {
+  const { blob, filename } = await buildPaymentReceipt({ client, payment })
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return { base64: btoa(binary), filename }
 }

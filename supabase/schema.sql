@@ -5356,7 +5356,164 @@ end $$;
 revoke execute on function public.platform_create_client(text, text, text, text, text, uuid, numeric, integer) from anon, public;
 grant execute on function public.platform_create_client(text, text, text, text, text, uuid, numeric, integer) to authenticated;
 
--- 44) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 44) Conferência: passou para a seção 46, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 45) Painel WB.Dev: lembretes de mensalidade por e-mail --------------------
+--
+-- Todo dia de manhã a função wbdev-email (Edge Function) pergunta ao banco
+-- quais lembretes saem hoje (billing_reminders_due) e manda por e-mail do
+-- Gmail da WB.Dev; cada envio fica em client_reminders (o mesmo lembrete do
+-- mesmo mês não sai duas vezes). Janelas:
+--   antes_5: faltam de 1 a 5 dias para o vencimento;
+--   no_dia: vence hoje;
+--   atraso_1 / atraso_3 / atraso_7: 1-2, 3-6 e 7-13 dias de atraso (mês mais
+--   antigo que isso não gera e-mail sozinho).
+-- Quem recebe: o e-mail do responsável da ficha; sem ele, o e-mail de login
+-- dos admins da loja (fora o dono da plataforma e os logins da equipe WB.Dev,
+-- tabela platform_team). O recibo do pagamento também sai pela função (tipo
+-- "recibo"). Só cliente "Ativo" com lembretes ligados.
+alter table public.client_accounts add column if not exists reminders_enabled boolean not null default true;
+
+create table if not exists public.client_reminders (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  kind text not null check (kind in ('antes_5', 'no_dia', 'atraso_1', 'atraso_3', 'atraso_7', 'recibo')),
+  reference_month date,
+  payment_id uuid references public.client_payments(id) on delete set null,
+  sent_to text not null default '',
+  status text not null default 'enviado' check (status in ('enviado', 'erro')),
+  error text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists client_reminders_company_idx on public.client_reminders (company_id, created_at desc);
+drop index if exists public.client_reminders_once;
+create unique index client_reminders_once on public.client_reminders (company_id, kind, reference_month)
+  where status = 'enviado' and kind <> 'recibo';
+
+alter table public.client_reminders enable row level security;
+
+drop policy if exists "Platform admins read client reminders" on public.client_reminders;
+create policy "Platform admins read client reminders"
+on public.client_reminders for select
+to authenticated
+using (public.is_platform_admin());
+
+-- Chamada feita com a chave de serviço (a Edge Function e o agendamento diário)
+-- platform_team: logins da equipe WB.Dev que ficam como admin nas lojas (para
+-- suporte). Não recebem os lembretes. Incluir pelo SQL Editor:
+--   insert into public.platform_team (user_id) select id from auth.users where lower(email) = '...';
+create table if not exists public.platform_team (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+alter table public.platform_team enable row level security;
+revoke all on public.platform_team from anon, authenticated, public;
+
+create or replace function public.is_service_request()
+returns boolean
+language sql stable
+as $$
+  select coalesce(
+    nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role',
+    current_setting('request.jwt.claim.role', true)
+  ) = 'service_role'
+$$;
+
+create or replace function public.client_reminder_recipients(p_company uuid)
+returns text[]
+language plpgsql stable security definer set search_path = public, auth
+as $$
+declare
+  v_email text;
+  v_list text[];
+begin
+  if not (public.is_platform_admin() or public.is_service_request()) then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  select nullif(lower(btrim(responsible_email)), '') into v_email from public.client_accounts where company_id = p_company;
+  if v_email is not null then
+    return array[v_email];
+  end if;
+  select array_agg(distinct lower(u.email) order by lower(u.email)) into v_list
+  from public.user_company uc
+  join auth.users u on u.id = uc.user_id
+  where uc.company_id = p_company
+    and uc.role = 'admin'
+    and coalesce(u.email, '') <> ''
+    and not exists (select 1 from public.platform_admins pa where pa.user_id = uc.user_id)
+    and not exists (select 1 from public.platform_team pt where pt.user_id = uc.user_id);
+  return coalesce(v_list, '{}');
+end $$;
+revoke execute on function public.client_reminder_recipients(uuid) from anon, public;
+grant execute on function public.client_reminder_recipients(uuid) to authenticated, service_role;
+
+create or replace function public.billing_reminders_due(p_today date default null)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_today date := coalesce(p_today, (now() at time zone 'America/Fortaleza')::date);
+  v_items jsonb := '[]'::jsonb;
+  r record;
+  b jsonb;
+  o jsonb;
+  v_days integer;
+  v_kind text;
+begin
+  if not (public.is_platform_admin() or public.is_service_request()) then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  for r in
+    select c.id, c.name, a.responsible_name
+    from public.companies c
+    join public.client_accounts a on a.company_id = c.id
+    where a.status = 'ativo' and a.reminders_enabled
+  loop
+    b := public.client_billing(r.id, v_today);
+    -- antes do vencimento e no dia: o próximo vencimento
+    if jsonb_typeof(b -> 'next') = 'object' then
+      v_days := (b -> 'next' ->> 'due')::date - v_today;
+      v_kind := case when v_days = 0 then 'no_dia' when v_days between 1 and 5 then 'antes_5' end;
+      if v_kind is not null then
+        v_items := v_items || jsonb_build_object('company_id', r.id, 'name', r.name, 'responsible_name', r.responsible_name,
+          'kind', v_kind, 'month', b -> 'next' ->> 'month', 'due', b -> 'next' ->> 'due',
+          'amount', b -> 'next' -> 'amount', 'days', v_days);
+      end if;
+    end if;
+    -- em atraso: cada mês em aberto, nas janelas de 1, 3 e 7 dias
+    for o in select value from jsonb_array_elements(coalesce(b -> 'open', '[]'::jsonb)) loop
+      v_days := v_today - (o ->> 'due')::date;
+      v_kind := case
+        when v_days between 1 and 2 then 'atraso_1'
+        when v_days between 3 and 6 then 'atraso_3'
+        when v_days between 7 and 13 then 'atraso_7'
+      end;
+      if v_kind is not null then
+        v_items := v_items || jsonb_build_object('company_id', r.id, 'name', r.name, 'responsible_name', r.responsible_name,
+          'kind', v_kind, 'month', o ->> 'month', 'due', o ->> 'due', 'amount', o -> 'amount', 'days', v_days);
+      end if;
+    end loop;
+  end loop;
+
+  return (
+    select coalesce(jsonb_agg(x || jsonb_build_object('to', to_jsonb(public.client_reminder_recipients((x ->> 'company_id')::uuid)))
+                              order by x ->> 'name', x ->> 'month'), '[]'::jsonb)
+    from jsonb_array_elements(v_items) as t(x)
+    where not exists (
+      select 1 from public.client_reminders cr
+      where cr.company_id = (x ->> 'company_id')::uuid
+        and cr.kind = x ->> 'kind'
+        and cr.reference_month = (x ->> 'month')::date
+        and cr.status = 'enviado')
+  );
+end $$;
+revoke execute on function public.billing_reminders_due(date) from anon, public;
+grant execute on function public.billing_reminders_due(date) to authenticated, service_role;
+
+-- 46) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, FileDown, MessageCircle, Trash2, Lock, Unlock, Ban, BarChart3, Play, Undo2 } from 'lucide-react'
-import { fetchClients, fetchPayments, fetchPlans, updateClientAccount, addPayment, deletePayment } from '../../lib/clientsApi.js'
+import { ArrowLeft, ExternalLink, FileDown, MessageCircle, Trash2, Lock, Unlock, Ban, BarChart3, Play, Undo2, Mail } from 'lucide-react'
+import {
+  fetchClients,
+  fetchPayments,
+  fetchPlans,
+  updateClientAccount,
+  addPayment,
+  deletePayment,
+  fetchReminderLog,
+  fetchReminderRecipients,
+  sendReceiptEmail,
+} from '../../lib/clientsApi.js'
 import {
   money,
   monthName,
@@ -13,8 +23,9 @@ import {
   onboardingStatus,
   implantationDays,
   firstDueDate,
+  reminderLabel,
 } from '../../utils/billing.js'
-import { exportPaymentReceipt } from '../../utils/clientPdf.js'
+import { exportPaymentReceipt, paymentReceiptBase64 } from '../../utils/clientPdf.js'
 import { todayISO } from '../../utils/carFormat.js'
 import useConfirm from '../../components/useConfirm.jsx'
 import { StatusPill, BillingPill } from './ClientParts.jsx'
@@ -63,6 +74,10 @@ export default function ClientFile() {
   const [dataForm, setDataForm] = useState(null)
   const [blockReason, setBlockReason] = useState('')
   const [activationDate, setActivationDate] = useState(todayISO())
+  const [recipients, setRecipients] = useState([])
+  const [reminderLog, setReminderLog] = useState([])
+  const [sendReceipt, setSendReceipt] = useState(true)
+  const [mailing, setMailing] = useState('')
 
   async function load() {
     setError('')
@@ -73,6 +88,8 @@ export default function ClientFile() {
       setClient(found)
       setPlans(planList)
       setPayments(await fetchPayments(found.companyId))
+      fetchReminderRecipients(found.companyId).then(setRecipients).catch(() => setRecipients([]))
+      fetchReminderLog(found.companyId, 20).then(setReminderLog).catch(() => setReminderLog([]))
       const a = found.account
       setBillingForm({
         planId: a.planId || '',
@@ -157,7 +174,7 @@ export default function ClientFile() {
     setError('')
     setMsg('')
     try {
-      await addPayment({
+      const payment = await addPayment({
         companyId: client.companyId,
         referenceMonth: fromMonthInput(payForm.referenceMonth),
         amount,
@@ -165,12 +182,42 @@ export default function ClientFile() {
         method: payForm.method,
         notes: payForm.notes,
       })
-      setMsg(`Pagamento de ${monthName(fromMonthInput(payForm.referenceMonth))} registrado.`)
+      let done = `Pagamento de ${monthName(payment.referenceMonth)} registrado.`
+      if (sendReceipt && recipients.length) {
+        try {
+          const sent = await mailReceipt(payment)
+          done += ` Recibo enviado para ${sent.join(', ')}.`
+        } catch (err) {
+          done += ` O recibo não saiu por e-mail: ${err.message}`
+        }
+      }
+      setMsg(done)
       await load()
     } catch (err) {
       setError(err.message || 'Não foi possível registrar o pagamento.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function mailReceipt(payment) {
+    const { base64, filename } = await paymentReceiptBase64({ client, payment })
+    const result = await sendReceiptEmail({ paymentId: payment.id, pdfBase64: base64, filename })
+    return result?.to || []
+  }
+
+  async function resendReceipt(payment) {
+    setMailing(payment.id)
+    setError('')
+    setMsg('')
+    try {
+      const sent = await mailReceipt(payment)
+      setMsg(`Recibo de ${monthName(payment.referenceMonth)} enviado para ${sent.join(', ')}.`)
+      setReminderLog(await fetchReminderLog(client.companyId, 20))
+    } catch (err) {
+      setError(err.message || 'Não foi possível enviar o recibo.')
+    } finally {
+      setMailing('')
     }
   }
 
@@ -486,6 +533,10 @@ export default function ClientFile() {
                 <input value={payForm.notes} onChange={(e) => setPayForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Opcional" />
               </label>
             </div>
+            <label className="admin-checkbox">
+              <input type="checkbox" checked={sendReceipt && recipients.length > 0} disabled={!recipients.length} onChange={(e) => setSendReceipt(e.target.checked)} />
+              {recipients.length ? `Enviar o recibo por e-mail para ${recipients.join(', ')}` : 'Sem e-mail para mandar o recibo (preencha o e-mail do responsável em Dados)'}
+            </label>
             <div className="admin-form-actions">
               <button type="submit" className="btn btn-primary" disabled={saving}>
                 {saving ? 'Salvando…' : 'Registrar pagamento'}
@@ -523,6 +574,15 @@ export default function ClientFile() {
                           <button type="button" className="admin-action-btn" onClick={() => exportPaymentReceipt({ client, payment: p })}>
                             <FileDown size={14} /> Recibo
                           </button>
+                          <button
+                            type="button"
+                            className="admin-action-btn"
+                            onClick={() => resendReceipt(p)}
+                            disabled={!recipients.length || mailing === p.id}
+                            title={recipients.length ? `Mandar o recibo para ${recipients.join(', ')}` : 'Sem e-mail para mandar'}
+                          >
+                            <Mail size={14} /> {mailing === p.id ? 'Enviando…' : 'E-mail'}
+                          </button>
                           <button type="button" className="admin-action-btn admin-action-danger" onClick={() => removePayment(p)}>
                             <Trash2 size={14} />
                           </button>
@@ -534,6 +594,59 @@ export default function ClientFile() {
               </table>
             </div>
           )}
+
+          <div className="admin-form-section client-reminders">
+            <h2>Lembretes por e-mail</h2>
+            <label className="admin-checkbox">
+              <input
+                type="checkbox"
+                checked={a.remindersEnabled}
+                disabled={saving}
+                onChange={() => save({ remindersEnabled: !a.remindersEnabled }, a.remindersEnabled ? 'Lembretes desligados para este cliente.' : 'Lembretes ligados.')}
+              />
+              Enviar os lembretes de mensalidade por e-mail (5 dias antes, no dia e com 1, 3 e 7 dias de atraso)
+            </label>
+            <p className="admin-form-note">
+              {recipients.length
+                ? `Vão para: ${recipients.join(', ')}${a.responsibleEmail ? ' (responsável da ficha)' : ' (admins da loja; para mandar a outra pessoa, preencha o e-mail do responsável em Dados)'}.`
+                : 'Sem e-mail para enviar: preencha o e-mail do responsável em Dados.'}{' '}
+              Saem sozinhos todo dia às 8h.
+            </p>
+            {reminderLog.length > 0 && (
+              <div className="admin-table-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Enviado em</th>
+                      <th>E-mail</th>
+                      <th>Mês</th>
+                      <th>Para</th>
+                      <th>Situação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reminderLog.map((r) => (
+                      <tr key={r.id}>
+                        <td>{new Date(r.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                        <td>{reminderLabel(r.kind)}</td>
+                        <td>{r.referenceMonth ? monthName(r.referenceMonth) : '—'}</td>
+                        <td>{r.sentTo || '—'}</td>
+                        <td>
+                          {r.status === 'enviado' ? (
+                            <span className="platform-health is-green">Enviado</span>
+                          ) : (
+                            <span className="platform-health is-red" title={r.error}>
+                              Erro
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </>
       )}
 

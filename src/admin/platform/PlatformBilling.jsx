@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw } from 'lucide-react'
-import { fetchClients, fetchPayments } from '../../lib/clientsApi.js'
-import { billingTotals, receivedByMonth, money, monthName, dateBR, isCharged } from '../../utils/billing.js'
+import { RefreshCcw, Send, Mail } from 'lucide-react'
+import { fetchClients, fetchPayments, fetchRemindersDue, fetchReminderLog, sendRemindersNow, sendTestEmail } from '../../lib/clientsApi.js'
+import { billingTotals, receivedByMonth, money, monthName, dateBR, isCharged, reminderLabel } from '../../utils/billing.js'
 import { recentMonths, monthLabel } from '../../utils/platform.js'
 import BarChart from '../../components/charts/BarChart.jsx'
 import { BillingPill } from './ClientParts.jsx'
@@ -15,6 +15,10 @@ export default function PlatformBilling() {
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [due, setDue] = useState([])
+  const [log, setLog] = useState([])
+  const [mailMsg, setMailMsg] = useState('')
+  const [mailBusy, setMailBusy] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -23,6 +27,8 @@ export default function PlatformBilling() {
       const [c, p] = await Promise.all([fetchClients(), fetchPayments()])
       setClients(c)
       setPayments(p)
+      fetchRemindersDue().then(setDue).catch(() => setDue([]))
+      fetchReminderLog(null, 20).then(setLog).catch(() => setLog([]))
     } catch (err) {
       setError(err.message || 'Não foi possível carregar a cobrança.')
     } finally {
@@ -33,6 +39,27 @@ export default function PlatformBilling() {
   useEffect(() => {
     load()
   }, [])
+
+  async function runMail(kind) {
+    setMailBusy(true)
+    setMailMsg('')
+    setError('')
+    try {
+      if (kind === 'teste') {
+        const r = await sendTestEmail()
+        setMailMsg(`E-mail de teste enviado para ${r.to}. Confira a caixa de entrada.`)
+      } else {
+        const r = await sendRemindersNow()
+        setMailMsg(r.enviados || r.erros ? `${r.enviados} enviado(s), ${r.erros} com erro.` : 'Nenhum lembrete para hoje.')
+        setDue(await fetchRemindersDue())
+        setLog(await fetchReminderLog(null, 20))
+      }
+    } catch (err) {
+      setError(err.message || 'Não foi possível enviar.')
+    } finally {
+      setMailBusy(false)
+    }
+  }
 
   const today = new Date()
   const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
@@ -155,6 +182,77 @@ export default function PlatformBilling() {
               </table>
             </div>
           )}
+
+          <div className="admin-form-section client-reminders">
+            <div className="client-billing-head">
+              <div>
+                <h2>Lembretes por e-mail</h2>
+                <p className="admin-form-hint">Saem sozinhos todo dia às 8h: 5 dias antes, no dia e com 1, 3 e 7 dias de atraso.</p>
+              </div>
+              <div className="admin-row-actions">
+                <button type="button" className="btn btn-outline" onClick={() => runMail('teste')} disabled={mailBusy}>
+                  <Mail size={15} /> E-mail de teste
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => runMail('lembretes')} disabled={mailBusy || due.length === 0}>
+                  <Send size={15} /> {mailBusy ? 'Enviando…' : 'Enviar os de hoje agora'}
+                </button>
+              </div>
+            </div>
+            {mailMsg && <p className="admin-success">{mailMsg}</p>}
+            {due.length === 0 ? (
+              <p className="admin-muted">Nenhum lembrete para hoje.</p>
+            ) : (
+              <ul className="client-list">
+                {due.map((d) => (
+                  <li key={`${d.company_id}-${d.kind}-${d.month}`}>
+                    <Link to={`/admin/plataforma/clientes/${clients.find((c) => c.companyId === d.company_id)?.slug || ''}`}>
+                      <strong>{d.name}</strong>
+                      <span>
+                        {reminderLabel(d.kind)} · {monthName(d.month)} · vence {dateBR(d.due)} · {(d.to || []).join(', ') || 'sem e-mail'}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {log.length > 0 && (
+              <>
+                <h3 className="client-reminders-title">Últimos envios</h3>
+                <div className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Enviado em</th>
+                        <th>Cliente</th>
+                        <th>E-mail</th>
+                        <th>Para</th>
+                        <th>Situação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {log.map((r) => (
+                        <tr key={r.id}>
+                          <td>{new Date(r.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                          <td>{clients.find((c) => c.companyId === r.companyId)?.name || '—'}</td>
+                          <td>{reminderLabel(r.kind)}</td>
+                          <td>{r.sentTo || '—'}</td>
+                          <td>
+                            {r.status === 'enviado' ? (
+                              <span className="platform-health is-green">Enviado</span>
+                            ) : (
+                              <span className="platform-health is-red" title={r.error}>
+                                Erro
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
 
           {implanting.length > 0 && (
             <p className="admin-form-note">

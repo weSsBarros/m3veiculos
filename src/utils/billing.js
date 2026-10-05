@@ -211,3 +211,17 @@ export function firstDueDate({ activatedOn, dueDay, billingStart }) {
   const day = dueDay || Number(auto.slice(8, 10))
   return `${month}-${String(day).padStart(2, '0')}`
 }
+
+// Nome de cada tipo de e-mail (histórico dos lembretes)
+export const REMINDER_KINDS = {
+  antes_5: 'Lembrete antes do vencimento',
+  no_dia: 'Vence hoje',
+  atraso_1: 'Atraso (1 dia)',
+  atraso_3: 'Atraso (3 dias)',
+  atraso_7: 'Atraso (7 dias)',
+  recibo: 'Recibo',
+}
+
+export function reminderLabel(kind) {
+  return REMINDER_KINDS[kind] || kind
+}
