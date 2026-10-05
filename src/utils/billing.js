@@ -43,6 +43,7 @@ export function monthName(isoDate) {
 }
 
 export const SITUATION_LEVEL = {
+  implantacao: 'blue',
   sem_cobranca: 'gray',
   em_dia: 'green',
   vence_em_breve: 'yellow',
@@ -53,6 +54,7 @@ export const SITUATION_LEVEL = {
 // Texto curto da situação (lista de clientes e ficha)
 export function situationText(billing, today = new Date()) {
   const s = billing?.situation || 'sem_cobranca'
+  if (s === 'implantacao') return 'Em implantação'
   if (s === 'sem_cobranca') return 'Sem cobrança'
   if (s === 'atrasado') {
     const n = Number(billing.days_late) || 0
@@ -67,7 +69,7 @@ export function situationText(billing, today = new Date()) {
 // Aviso automático no painel do admin da loja (null = nada a avisar)
 export function storeBillingNotice(billing, today = new Date()) {
   const s = billing?.situation
-  if (!s || s === 'sem_cobranca' || s === 'em_dia') return null
+  if (!s || s === 'implantacao' || s === 'sem_cobranca' || s === 'em_dia') return null
   if (s === 'atrasado') {
     const n = Number(billing.days_late) || 0
     const oldest = billing.open?.[0]
@@ -121,7 +123,7 @@ export const monthOf = (isoDate) => (isoDate ? `${isoDate.slice(0, 7)}-01` : '')
 // payments: pagamentos (paid_on, amount, reference_month)
 export function billingTotals(clients, payments, today = new Date()) {
   const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
-  const charged = clients.filter((c) => c.billing?.situation && c.billing.situation !== 'sem_cobranca')
+  const charged = clients.filter((c) => isCharged(c.billing))
   const mrr = charged.reduce((sum, c) => sum + (Number(c.billing.price) || 0), 0)
   const late = charged.filter((c) => c.billing.situation === 'atrasado')
   const overdue = late.reduce((sum, c) => sum + (Number(c.billing.open_total) || 0), 0)
@@ -174,4 +176,38 @@ export function onboardingStatus(client) {
     const auto = item.auto ? Boolean(item.auto(client)) : false
     return { ...item, auto, done: auto || Boolean(marks[item.key]) }
   })
+}
+
+// Cliente com mensalidade correndo (em implantação ou sem cobrança não conta)
+export function isCharged(billing) {
+  return Boolean(billing?.situation) && !['implantacao', 'sem_cobranca'].includes(billing.situation)
+}
+
+// 1º vencimento automático: 30 dias depois da ativação; se cair no dia 29, 30
+// ou 31, vira o dia 1 do mês seguinte (a mesma regra do client_billing, seção 43)
+export function firstAutoDue(activatedOn) {
+  if (!activatedOn) return null
+  const [y, m, d] = activatedOn.split('-').map(Number)
+  let due = new Date(Date.UTC(y, m - 1, d + 30))
+  if (due.getUTCDate() > 28) due = new Date(Date.UTC(due.getUTCFullYear(), due.getUTCMonth() + 1, 1))
+  return due.toISOString().slice(0, 10)
+}
+
+// Dias em implantação: contando (ainda em implantação) ou quanto levou até ativar
+export function implantationDays(account, today = new Date()) {
+  const start = account?.implantationStartedOn
+  if (!start) return null
+  if (account.status === 'implantacao') return { days: Math.max(0, -daysUntil(start, today)), done: false }
+  if (account.activatedOn) return { days: Math.max(0, daysUntil(account.activatedOn, new Date(`${start}T12:00:00`))), done: true }
+  return null
+}
+
+// 1º vencimento depois de ativar: o dia e o mês escolhidos à mão valem no
+// lugar dos automáticos (como no client_billing)
+export function firstDueDate({ activatedOn, dueDay, billingStart }) {
+  const auto = firstAutoDue(activatedOn)
+  if (!auto && !(dueDay && billingStart)) return null
+  const month = billingStart ? billingStart.slice(0, 7) : auto.slice(0, 7)
+  const day = dueDay || Number(auto.slice(8, 10))
+  return `${month}-${String(day).padStart(2, '0')}`
 }

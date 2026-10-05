@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCcw } from 'lucide-react'
 import { fetchClients, fetchPayments } from '../../lib/clientsApi.js'
-import { billingTotals, receivedByMonth, money, monthName, dateBR } from '../../utils/billing.js'
+import { billingTotals, receivedByMonth, money, monthName, dateBR, isCharged } from '../../utils/billing.js'
 import { recentMonths, monthLabel } from '../../utils/platform.js'
 import BarChart from '../../components/charts/BarChart.jsx'
 import { BillingPill } from './ClientParts.jsx'
@@ -42,7 +42,8 @@ export default function PlatformBilling() {
     () => receivedByMonth(payments, months).map((m) => ({ label: monthLabel(m.month).slice(0, 3), value: m.value })),
     [payments, months]
   )
-  const charged = clients.filter((c) => c.billing.situation !== 'sem_cobranca')
+  const charged = clients.filter((c) => isCharged(c.billing))
+  const implanting = clients.filter((c) => c.account.status === 'implantacao')
   const paidNow = new Set(payments.filter((p) => p.referenceMonth === thisMonth).map((p) => p.companyId))
   const late = charged.filter((c) => c.billing.situation === 'atrasado').sort((a, b) => b.billing.days_late - a.billing.days_late)
   const noCharge = clients.filter((c) => c.billing.situation === 'sem_cobranca' && c.account.status === 'ativo')
@@ -155,6 +156,11 @@ export default function PlatformBilling() {
             </div>
           )}
 
+          {implanting.length > 0 && (
+            <p className="admin-form-note">
+              Em implantação (sem cobrança até ativar): {implanting.map((c) => c.name).join(', ')}.
+            </p>
+          )}
           {noCharge.length > 0 && (
             <p className="admin-form-note">
               Sem cobrança cadastrada: {noCharge.map((c) => c.name).join(', ')}.

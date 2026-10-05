@@ -3,6 +3,7 @@ import { SITUATION_LEVEL, situationText } from '../../utils/billing.js'
 // Peças do painel WB.Dev: selos de situação do cliente e da cobrança
 
 const STATUS = {
+  implantacao: { label: 'Em implantação', level: 'blue' },
   ativo: { label: 'Ativo', level: 'green' },
   bloqueado: { label: 'Bloqueado', level: 'red' },
   cancelado: { label: 'Cancelado', level: 'gray' },

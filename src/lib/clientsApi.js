@@ -24,6 +24,8 @@ function accountFromRow(a = {}) {
     domainExpiresOn: a.domain_expires_on || null,
     notes: a.notes || '',
     onboarding: a.onboarding && typeof a.onboarding === 'object' ? a.onboarding : {},
+    implantationStartedOn: a.implantation_started_on || null,
+    activatedOn: a.activated_on || null,
   }
 }
 
@@ -110,6 +112,7 @@ const ACCOUNT_COLUMNS = {
   domainExpiresOn: 'domain_expires_on',
   notes: 'notes',
   onboarding: 'onboarding',
+  activatedOn: 'activated_on',
 }
 
 // Grava só os campos informados
@@ -117,7 +120,7 @@ export async function updateClientAccount(companyId, fields) {
   const row = {}
   for (const [key, column] of Object.entries(ACCOUNT_COLUMNS)) {
     if (fields[key] === undefined) continue
-    row[column] = fields[key] === '' && ['monthlyPrice', 'dueDay', 'billingStart', 'domainExpiresOn', 'planId'].includes(key) ? null : fields[key]
+    row[column] = fields[key] === '' && ['monthlyPrice', 'dueDay', 'billingStart', 'domainExpiresOn', 'planId', 'activatedOn'].includes(key) ? null : fields[key]
   }
   const data = await run(supabase.from('client_accounts').update(row).eq('company_id', companyId).select().single())
   return accountFromRow(data)
@@ -195,6 +198,26 @@ export async function saveNotice(notice) {
 
 export async function deleteNotice(id) {
   await run(supabase.from('client_notices').delete().eq('id', id))
+}
+
+// Botão "Novo cliente": cria a loja no sistema, já "Em implantação" (seção 43)
+export async function createClient(client) {
+  const data = await run(
+    supabase.rpc('platform_create_client', {
+      p_name: client.name.trim(),
+      p_slug: client.slug.trim(),
+      p_responsible_name: client.responsibleName || '',
+      p_responsible_phone: client.responsiblePhone || '',
+      p_responsible_email: client.responsibleEmail || '',
+      p_plan_id: client.planId || null,
+      p_monthly_price: client.monthlyPrice ?? null,
+      p_due_day: client.dueDay || null,
+    })
+  ).catch((err) => {
+    if (err.code === '23505') throw new Error('Já existe uma loja com esse endereço interno. Escolha outro.')
+    throw err
+  })
+  return data
 }
 
 // ---------------------------------------- despesas da plataforma (seção 41)

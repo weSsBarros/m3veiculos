@@ -3,6 +3,8 @@
 // "Recebido" conta pela data do pagamento (o que entrou no caixa); "a receber"
 // vem pronto do banco (client_billing). Testado em tests/finance.test.js.
 
+import { isCharged } from './billing.js'
+
 const pad = (n) => String(n).padStart(2, '0')
 const sumBy = (list, fn) => list.reduce((total, item) => total + (Number(fn(item)) || 0), 0)
 
@@ -39,7 +41,7 @@ export function monthsBetween(from, to) {
 }
 
 const monthOfDate = (iso) => (iso ? iso.slice(0, 7) : '')
-const chargedClients = (clients) => clients.filter((c) => c.billing?.situation && c.billing.situation !== 'sem_cobranca')
+const chargedClients = (clients) => clients.filter((c) => isCharged(c.billing))
 
 // Mês mais antigo com movimento: início de cobrança, pagamento ou despesa
 export function firstActivityMonth({ clients = [], payments = [], expenses = [] }) {
@@ -194,7 +196,7 @@ export function clientRanking({ clients = [], payments = [], expenses = [], toda
       const totalPaid = sumBy(mine, (p) => p.amount)
       const costs = sumBy(expenses.filter((e) => e.companyId === c.companyId), (e) => e.amount)
       const paidMonths = mine.map((p) => monthOfDate(p.paidOn)).sort()
-      const charged = c.billing?.situation && c.billing.situation !== 'sem_cobranca'
+      const charged = isCharged(c.billing)
       const since = (charged && monthOfDate(c.account?.billingStart)) || paidMonths[0] || null
       const monthsAsClient = since && since <= cur ? monthsBetween(since, cur).length : 0
       return {

@@ -10,6 +10,10 @@ import {
   domainAlert,
   onboardingStatus,
   monthName,
+  isCharged,
+  firstAutoDue,
+  firstDueDate,
+  implantationDays,
 } from '../src/utils/billing.js'
 
 const today = new Date(2026, 9, 7) // 07/10/2026
@@ -88,4 +92,34 @@ test('cobrança: totais, recebido por mês, domínio e implantação', () => {
   assert.equal(byKey.estoque.auto, true)
   assert.equal(byKey.logins.done, false)
   assert.equal(byKey.dominio.done, false)
+})
+
+test('implantação: sem cobrança, sem aviso e fora dos totais', () => {
+  const impl = { situation: 'implantacao', price: 150, due_day: null, due_day_auto: true }
+  assert.equal(situationText(impl), 'Em implantação')
+  assert.equal(storeBillingNotice(impl, today), null)
+  assert.equal(isCharged(impl), false)
+  assert.equal(isCharged({ situation: 'sem_cobranca' }), false)
+  assert.equal(isCharged({ situation: 'em_dia' }), true)
+  assert.equal(billingTotals([{ billing: impl }], [], today).clients, 0)
+})
+
+test('vencimento automático: 30 dias após ativar; dia 29 a 31 vira dia 1 do mês seguinte', () => {
+  assert.equal(firstAutoDue('2026-10-10'), '2026-11-09')
+  assert.equal(firstAutoDue('2026-10-01'), '2026-11-01')
+  assert.equal(firstAutoDue('2026-01-30'), '2026-03-01')
+  assert.equal(firstAutoDue('2026-12-31'), '2027-02-01')
+  assert.equal(firstAutoDue(null), null)
+  assert.equal(firstDueDate({ activatedOn: '2026-10-10' }), '2026-11-09')
+  // o dia escolhido à mão vale no lugar do automático
+  assert.equal(firstDueDate({ activatedOn: '2026-10-10', dueDay: 5 }), '2026-11-05')
+  assert.equal(firstDueDate({ activatedOn: '2026-10-10', dueDay: 5, billingStart: '2026-12-01' }), '2026-12-05')
+  assert.equal(firstDueDate({ dueDay: 10, billingStart: '2026-01-01' }), '2026-01-10')
+  assert.equal(firstDueDate({}), null)
+})
+
+test('dias em implantação: contando e quanto levou até ativar', () => {
+  assert.deepEqual(implantationDays({ status: 'implantacao', implantationStartedOn: '2026-10-01' }, today), { days: 6, done: false })
+  assert.deepEqual(implantationDays({ status: 'ativo', implantationStartedOn: '2026-10-01', activatedOn: '2026-10-20' }, today), { days: 19, done: true })
+  assert.equal(implantationDays({ status: 'ativo', implantationStartedOn: null }, today), null)
 })

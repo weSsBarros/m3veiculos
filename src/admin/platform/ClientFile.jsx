@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, FileDown, MessageCircle, Trash2, Lock, Unlock, Ban, BarChart3 } from 'lucide-react'
+import { ArrowLeft, ExternalLink, FileDown, MessageCircle, Trash2, Lock, Unlock, Ban, BarChart3, Play, Undo2 } from 'lucide-react'
 import { fetchClients, fetchPayments, fetchPlans, updateClientAccount, addPayment, deletePayment } from '../../lib/clientsApi.js'
 import {
   money,
@@ -11,6 +11,8 @@ import {
   whatsappLink,
   domainAlert,
   onboardingStatus,
+  implantationDays,
+  firstDueDate,
 } from '../../utils/billing.js'
 import { exportPaymentReceipt } from '../../utils/clientPdf.js'
 import { todayISO } from '../../utils/carFormat.js'
@@ -31,6 +33,9 @@ const SECTIONS = [
 ]
 
 const METHODS = ['Pix', 'Transferência', 'Dinheiro', 'Cartão', 'Boleto', 'Outro']
+const STATUS_LABEL = { implantacao: 'Em implantação', ativo: 'Ativo', bloqueado: 'Bloqueado', cancelado: 'Cancelado' }
+const DAYS = Array.from({ length: 28 }, (_, i) => i + 1)
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
 
 const toMonthInput = (iso) => (iso ? iso.slice(0, 7) : '')
 const fromMonthInput = (value) => (value ? `${value}-01` : '')
@@ -57,6 +62,7 @@ export default function ClientFile() {
   const [payForm, setPayForm] = useState(null)
   const [dataForm, setDataForm] = useState(null)
   const [blockReason, setBlockReason] = useState('')
+  const [activationDate, setActivationDate] = useState(todayISO())
 
   async function load() {
     setError('')
@@ -74,6 +80,7 @@ export default function ClientFile() {
         dueDay: a.dueDay ? String(a.dueDay) : '',
         billingStart: toMonthInput(a.billingStart),
       })
+      setActivationDate(a.activatedOn || todayISO())
       setDataForm({
         legalName: a.legalName,
         cnpj: a.cnpj,
@@ -197,7 +204,9 @@ export default function ClientFile() {
 
   async function unblock() {
     const ok = await confirm(`Liberar ${client.name}? O painel e o site voltam ao normal na hora.`, { title: 'Liberar cliente', confirmLabel: 'Liberar' })
-    if (ok) save({ status: 'ativo', blockReason: '' }, `${client.name} liberado.`)
+    // quem nunca foi ativado volta para a implantação
+    const back = !client.account.activatedOn && client.account.implantationStartedOn ? 'implantacao' : 'ativo'
+    if (ok) save({ status: back, blockReason: '' }, `${client.name} liberado.`)
   }
 
   async function cancelClient() {
@@ -206,6 +215,35 @@ export default function ClientFile() {
       { title: 'Cancelar cliente', confirmLabel: 'Cancelar cliente', cancelLabel: 'Voltar' }
     )
     if (ok) save({ status: 'cancelado' }, `${client.name} cancelado.`)
+  }
+
+  async function activate() {
+    if (!activationDate) {
+      setError('Informe a data de ativação (dd/mm/aaaa).')
+      return
+    }
+    const first = firstDueDate({ activatedOn: activationDate, dueDay: client.account.dueDay, billingStart: client.account.billingStart })
+    const ok = await confirm(
+      `Ativar ${client.name} a partir de ${dateBR(activationDate)}? A cobrança começa: 1º vencimento em ${dateBR(first)}.`,
+      { title: 'Ativar cliente', confirmLabel: 'Ativar' }
+    )
+    if (ok) save({ status: 'ativo', activatedOn: activationDate }, `${client.name} ativado. 1º vencimento em ${dateBR(first)}.`)
+  }
+
+  async function backToImplantation() {
+    const ok = await confirm(
+      `Voltar ${client.name} para "Em implantação"? A cobrança para e, ao ativar de novo, os 30 dias recomeçam.`,
+      { title: 'Voltar para implantação', confirmLabel: 'Voltar para implantação', cancelLabel: 'Cancelar' }
+    )
+    if (ok) save({ status: 'implantacao' }, `${client.name} voltou para implantação.`)
+  }
+
+  function saveActivationDate() {
+    if (!activationDate) {
+      setError('Informe a data de ativação (dd/mm/aaaa).')
+      return
+    }
+    save({ activatedOn: activationDate }, 'Data de ativação corrigida.')
   }
 
   if (!client) {
@@ -226,6 +264,9 @@ export default function ClientFile() {
   const domain = domainAlert(a)
   const chargeLink = whatsappLink(a.responsiblePhone, chargeMessage({ storeName: client.name, responsibleName: a.responsibleName, billing }))
   const planPrice = plans.find((p) => p.id === billingForm?.planId)?.monthlyPrice
+  const implantation = implantationDays(a)
+  const autoMonth = a.status === 'implantacao' || Boolean(a.activatedOn)
+  const previewFirst = firstDueDate({ activatedOn: activationDate, dueDay: a.dueDay, billingStart: a.billingStart })
 
   return (
     <div className="admin-page platform-page">
@@ -266,13 +307,27 @@ export default function ClientFile() {
         <div className="client-summary">
           <div className="platform-kpi">
             <span>Situação</span>
-            <strong>{a.status === 'ativo' ? 'Ativo' : a.status === 'bloqueado' ? 'Bloqueado' : 'Cancelado'}</strong>
+            <strong>{STATUS_LABEL[a.status] || 'Ativo'}</strong>
             {a.status === 'bloqueado' && <small>desde {dateBR(a.blockedAt?.slice(0, 10))}{a.blockReason ? ` · ${a.blockReason}` : ''}</small>}
+            {implantation && !implantation.done && (
+              <small>
+                há {plural(implantation.days, 'dia', 'dias')} (desde {dateBR(a.implantationStartedOn)})
+              </small>
+            )}
+            {a.status === 'ativo' && a.activatedOn && (
+              <small>
+                desde {dateBR(a.activatedOn)}
+                {implantation?.done ? ` · implantação levou ${plural(implantation.days, 'dia', 'dias')}` : ''}
+              </small>
+            )}
           </div>
           <div className="platform-kpi">
             <span>Mensalidade</span>
             <strong>{billing.price ? money(billing.price) : '—'}</strong>
-            <small>{client.plan?.name ? `Plano ${client.plan.name}` : 'Sem plano'}{a.dueDay ? ` · vence dia ${a.dueDay}` : ''}</small>
+            <small>
+              {client.plan?.name ? `Plano ${client.plan.name}` : 'Sem plano'}
+              {billing.due_day ? ` · vence dia ${billing.due_day}${billing.due_day_auto ? ' (automático)' : ''}` : a.status === 'implantacao' ? ' · vence 30 dias após ativar' : ''}
+            </small>
           </div>
           <div className="platform-kpi">
             <span>Cobrança</span>
@@ -328,23 +383,40 @@ export default function ClientFile() {
               </label>
               <label>
                 Dia do vencimento
-                <input
-                  type="number"
-                  min="1"
-                  max="28"
-                  value={billingForm.dueDay}
-                  onChange={(e) => setBillingForm((f) => ({ ...f, dueDay: e.target.value }))}
-                  placeholder="1 a 28"
-                />
+                <select value={billingForm.dueDay} onChange={(e) => setBillingForm((f) => ({ ...f, dueDay: e.target.value }))}>
+                  <option value="">{autoMonth ? 'Automático (30 dias após ativar)' : 'Escolha o dia'}</option>
+                  {DAYS.map((d) => (
+                    <option key={d} value={d}>
+                      Dia {d}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 Primeiro mês cobrado
-                <MonthSelectBR value={billingForm.billingStart} onChange={(v) => setBillingForm((f) => ({ ...f, billingStart: v }))} />
+                <MonthSelectBR
+                  value={billingForm.billingStart}
+                  onChange={(v) => setBillingForm((f) => ({ ...f, billingStart: v }))}
+                  emptyLabel={autoMonth ? 'Automático (mês do 1º vencimento)' : 'Escolha o mês'}
+                />
               </label>
             </div>
-            <p className="admin-form-note">
-              Sem valor, vencimento ou primeiro mês, a loja fica "sem cobrança" e não recebe aviso. Mensalidade em branco usa o valor do plano.
-            </p>
+            {a.status === 'implantacao' ? (
+              <p className="admin-form-note">
+                Em implantação não há cobrança. Ao ativar, o 1º vencimento é 30 dias depois (se cair no dia 29, 30 ou 31, vence no
+                dia 1 do mês seguinte), a não ser que você escolha o dia ou o mês acima.
+              </p>
+            ) : a.activatedOn ? (
+              <p className="admin-form-note">
+                Ativado em {dateBR(a.activatedOn)}: 1º vencimento em{' '}
+                {dateBR(firstDueDate({ activatedOn: a.activatedOn, dueDay: a.dueDay, billingStart: a.billingStart }))}
+                {a.dueDay ? ' (dia escolhido à mão)' : ' (automático, 30 dias depois)'}. Dia e mês em branco seguem a ativação.
+              </p>
+            ) : (
+              <p className="admin-form-note">
+                Sem valor, vencimento ou primeiro mês, a loja fica "sem cobrança" e não recebe aviso. Mensalidade em branco usa o valor do plano.
+              </p>
+            )}
             <div className="admin-form-actions">
               <button type="submit" className="btn btn-primary" disabled={saving}>
                 {saving ? 'Salvando…' : 'Salvar cobrança'}
@@ -522,9 +594,37 @@ export default function ClientFile() {
       {section === 'acesso' && (
         <div className="admin-form-section client-access">
           <h2>Acesso ao sistema</h2>
-          {a.status === 'ativo' ? (
+          {a.status === 'implantacao' ? (
             <>
-              <p>A loja está ativa: a equipe usa o painel e o site está no ar.</p>
+              <p>
+                Em implantação{implantation ? ` há ${plural(implantation.days, 'dia', 'dias')} (desde ${dateBR(a.implantationStartedOn)})` : ''}: a
+                equipe usa o painel e o site normalmente, sem cobrança.
+              </p>
+              <label className="client-access-reason">
+                Data de ativação (dela contam os 30 dias)
+                <DateInputBR value={activationDate} onChange={setActivationDate} />
+              </label>
+              {previewFirst && (
+                <p className="admin-form-note">
+                  1º vencimento: {dateBR(previewFirst)}
+                  {a.dueDay ? ` (dia ${a.dueDay}, escolhido em Cobrança)` : ''}.
+                  {!billing.price ? ' Defina a mensalidade em Cobrança para a cobrança começar.' : ''}
+                </p>
+              )}
+              <div className="admin-row-actions">
+                <button type="button" className="btn btn-primary" onClick={activate} disabled={saving}>
+                  <Play size={15} /> Ativar cliente
+                </button>
+                <button type="button" className="btn btn-outline" onClick={cancelClient} disabled={saving}>
+                  <Ban size={15} /> Cancelar cliente
+                </button>
+              </div>
+            </>
+          ) : a.status === 'ativo' ? (
+            <>
+              <p>
+                A loja está ativa{a.activatedOn ? ` desde ${dateBR(a.activatedOn)}` : ''}: a equipe usa o painel e o site está no ar.
+              </p>
               <label className="client-access-reason">
                 Motivo do bloqueio (só você vê)
                 <input value={blockReason} onChange={(e) => setBlockReason(e.target.value)} placeholder="Ex.: mensalidade de setembro em atraso" />
@@ -536,7 +636,21 @@ export default function ClientFile() {
                 <button type="button" className="btn btn-outline" onClick={cancelClient} disabled={saving}>
                   <Ban size={15} /> Cancelar cliente
                 </button>
+                <button type="button" className="btn btn-outline" onClick={backToImplantation} disabled={saving}>
+                  <Undo2 size={15} /> Voltar para implantação
+                </button>
               </div>
+              {a.activatedOn && (
+                <div className="client-activation-fix">
+                  <label className="client-access-reason">
+                    Corrigir a data de ativação
+                    <DateInputBR value={activationDate} onChange={setActivationDate} />
+                  </label>
+                  <button type="button" className="btn btn-outline" onClick={saveActivationDate} disabled={saving}>
+                    Salvar data
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <>
