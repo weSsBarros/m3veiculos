@@ -5147,7 +5147,216 @@ to authenticated
 using (public.is_platform_admin())
 with check (public.is_platform_admin());
 
--- 42) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 42) Conferência: passou para a seção 44, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 43) Painel WB.Dev: cliente em implantação, ativação e vencimento automático -
+--
+-- O cliente novo entra "Em implantação" (sem cobrança). Quando o dono da
+-- plataforma o passa para "Ativo", fica gravada a data de ativação e o primeiro
+-- vencimento cai 30 dias depois, repetindo todo mês nesse dia; se cair no dia
+-- 29, 30 ou 31, vence no dia 1 do mês seguinte. O dia de vencimento e o
+-- primeiro mês escolhidos à mão (due_day, billing_start) valem no lugar do
+-- automático. As contas que já existiam continuam "Ativo", como estavam.
+-- Loja criada depois (pelo botão "Novo cliente" do painel ou pelo SQL) ganha a
+-- conta "Em implantação" sozinha.
+alter table public.client_accounts drop constraint if exists client_accounts_status_check;
+alter table public.client_accounts add constraint client_accounts_status_check
+  check (status in ('implantacao', 'ativo', 'bloqueado', 'cancelado'));
+alter table public.client_accounts alter column status set default 'implantacao';
+alter table public.client_accounts add column if not exists implantation_started_on date;
+alter table public.client_accounts add column if not exists activated_on date;
+
+-- Datas padrão no fuso de São Luís: o servidor está em UTC, e depois das 21h o
+-- current_date já é o dia seguinte (um aviso sem data começaria "amanhã")
+alter table public.client_notices alter column starts_on set default ((now() at time zone 'America/Fortaleza')::date);
+alter table public.client_payments alter column paid_on set default ((now() at time zone 'America/Fortaleza')::date);
+alter table public.platform_expenses alter column spent_on set default ((now() at time zone 'America/Fortaleza')::date);
+
+create or replace function public.client_accounts_guard()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_today date := (now() at time zone 'America/Fortaleza')::date;
+begin
+  if new.billing_start is not null then
+    new.billing_start := date_trunc('month', new.billing_start)::date;
+  end if;
+  if new.status in ('bloqueado', 'cancelado') and exists (select 1 from public.companies where id = new.company_id and is_demo) then
+    raise exception 'A loja de demonstração não pode ser bloqueada nem cancelada' using errcode = '23514';
+  end if;
+  if new.status in ('ativo', 'implantacao') then
+    new.blocked_at := null;
+  elsif tg_op = 'INSERT' or old.status is distinct from new.status then
+    new.blocked_at := now();
+  end if;
+  -- Entrou em implantação: começa a contar (voltar de "Ativo" recomeça do zero)
+  if new.status = 'implantacao' then
+    if tg_op = 'INSERT' then
+      new.implantation_started_on := coalesce(new.implantation_started_on, v_today);
+    elsif old.status = 'ativo' then
+      new.implantation_started_on := v_today;
+      new.activated_on := null;
+    elsif old.status is distinct from 'implantacao' then
+      new.implantation_started_on := coalesce(new.implantation_started_on, v_today);
+    end if;
+  end if;
+  -- Saiu da implantação para "Ativo": data de ativação (a escolhida ou hoje)
+  if new.status = 'ativo' and tg_op = 'UPDATE' and old.status = 'implantacao' then
+    new.activated_on := coalesce(new.activated_on, v_today);
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+
+-- Loja nova (fora a demonstração) ganha a conta "Em implantação" no plano Completo
+create or replace function public.companies_create_client_account()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not coalesce(new.is_demo, false) then
+    insert into public.client_accounts (company_id, plan_id, status)
+    values (new.id, (select p.id from public.plans p where p.name = 'Completo' limit 1), 'implantacao')
+    on conflict (company_id) do nothing;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists companies_create_client_account on public.companies;
+create trigger companies_create_client_account
+after insert on public.companies
+for each row execute function public.companies_create_client_account();
+
+-- Situação da cobrança (substitui a da seção 39): "implantacao" não cobra; o
+-- vencimento e o primeiro mês vêm da ativação quando não foram escolhidos
+create or replace function public.client_billing(p_company uuid, p_today date default null)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  a public.client_accounts%rowtype;
+  v_today date := coalesce(p_today, (now() at time zone 'America/Fortaleza')::date);
+  v_price numeric;
+  v_due_day integer;
+  v_start date;
+  v_first date;
+  v_month date;
+  v_last date;
+  v_due date;
+  v_open jsonb := '[]'::jsonb;
+  v_next jsonb;
+  v_oldest date;
+  v_situation text;
+begin
+  select * into a from public.client_accounts where company_id = p_company;
+  if not found then
+    return jsonb_build_object('situation', 'sem_cobranca');
+  end if;
+  v_price := coalesce(a.monthly_price, (select p.monthly_price from public.plans p where p.id = a.plan_id));
+  v_due_day := a.due_day;
+  v_start := a.billing_start;
+  if a.activated_on is not null then
+    v_first := a.activated_on + 30;
+    if extract(day from v_first) > 28 then
+      v_first := (date_trunc('month', v_first) + interval '1 month')::date;
+    end if;
+    v_due_day := coalesce(v_due_day, extract(day from v_first)::integer);
+    v_start := coalesce(v_start, date_trunc('month', v_first)::date);
+  end if;
+
+  if a.status = 'implantacao' then
+    return jsonb_build_object('situation', 'implantacao', 'price', v_price, 'due_day', a.due_day,
+      'due_day_auto', a.due_day is null);
+  end if;
+  if a.status = 'cancelado' or coalesce(v_price, 0) = 0 or v_due_day is null or v_start is null then
+    return jsonb_build_object('situation', 'sem_cobranca', 'price', v_price, 'due_day', v_due_day,
+      'due_day_auto', a.due_day is null and a.activated_on is not null);
+  end if;
+
+  v_month := v_start;
+  v_last := (date_trunc('month', v_today) + interval '1 month')::date;
+  while v_month <= v_last loop
+    v_due := v_month + (v_due_day - 1);
+    if not exists (select 1 from public.client_payments p where p.company_id = p_company and p.reference_month = v_month) then
+      if v_due < v_today then
+        v_open := v_open || jsonb_build_array(jsonb_build_object('month', v_month, 'due', v_due, 'amount', v_price));
+        v_oldest := coalesce(v_oldest, v_due);
+      elsif v_next is null then
+        v_next := jsonb_build_object('month', v_month, 'due', v_due, 'amount', v_price);
+      end if;
+    end if;
+    v_month := (v_month + interval '1 month')::date;
+  end loop;
+
+  v_situation := case
+    when v_oldest is not null then 'atrasado'
+    when v_next is not null and (v_next->>'due')::date = v_today then 'vence_hoje'
+    when v_next is not null and (v_next->>'due')::date - v_today <= 5 then 'vence_em_breve'
+    else 'em_dia'
+  end;
+
+  return jsonb_build_object(
+    'situation', v_situation,
+    'price', v_price,
+    'due_day', v_due_day,
+    'due_day_auto', a.due_day is null and a.activated_on is not null,
+    'billing_start', v_start,
+    'open', v_open,
+    'open_total', v_price * jsonb_array_length(v_open),
+    'days_late', case when v_oldest is null then 0 else v_today - v_oldest end,
+    'next', v_next
+  );
+end $$;
+revoke execute on function public.client_billing(uuid, date) from anon, authenticated, public;
+
+-- Botão "Novo cliente" do painel WB.Dev: cria a loja (nome + endereço interno)
+-- e já preenche a conta, que nasce "Em implantação"
+create or replace function public.platform_create_client(
+  p_name text,
+  p_slug text,
+  p_responsible_name text default '',
+  p_responsible_phone text default '',
+  p_responsible_email text default '',
+  p_plan_id uuid default null,
+  p_monthly_price numeric default null,
+  p_due_day integer default null
+)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_slug text := lower(btrim(coalesce(p_slug, '')));
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  if char_length(btrim(coalesce(p_name, ''))) < 2 then
+    raise exception 'Informe o nome da loja' using errcode = '23514';
+  end if;
+  if v_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' or char_length(v_slug) > 60 then
+    raise exception 'Endereço interno inválido: use letras minúsculas, números e hífen' using errcode = '23514';
+  end if;
+  if exists (select 1 from public.companies where slug = v_slug) then
+    raise exception 'Já existe uma loja com o endereço interno %', v_slug using errcode = '23505';
+  end if;
+  insert into public.companies (slug, name) values (v_slug, btrim(p_name)) returning id into v_id;
+  update public.client_accounts set
+    responsible_name = btrim(coalesce(p_responsible_name, '')),
+    responsible_phone = btrim(coalesce(p_responsible_phone, '')),
+    responsible_email = btrim(coalesce(p_responsible_email, '')),
+    plan_id = coalesce(p_plan_id, plan_id),
+    monthly_price = p_monthly_price,
+    due_day = p_due_day
+  where company_id = v_id;
+  return jsonb_build_object('company_id', v_id, 'slug', v_slug);
+end $$;
+revoke execute on function public.platform_create_client(text, text, text, text, text, uuid, numeric, integer) from anon, public;
+grant execute on function public.platform_create_client(text, text, text, text, text, uuid, numeric, integer) to authenticated;
+
+-- 44) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

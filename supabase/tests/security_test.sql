@@ -701,6 +701,9 @@ select test.check('cargo excluído: a pessoa fica sem cargo, com o nível que ti
   (select custom_role_id is null and role = 'seller' from public.sellers where id = '5e000000-0000-0000-0000-000000000005'));
 
 -- ======================================================= painel WB.Dev (39)
+-- As lojas de teste nascem "Em implantação" (seção 43); aqui fazem o papel das
+-- lojas que já existiam, ativas
+update public.client_accounts set status = 'ativo';
 -- Conta da loja A com mensalidade de R$ 100 vencendo dia 10 desde janeiro/2026
 update public.client_accounts set monthly_price = 100, due_day = 10, billing_start = '2026-01-15'
 where company_id = test.company_a();
@@ -862,6 +865,83 @@ select test.check('despesa: valor zero, sem descrição ou categoria inválida s
   test.denied($$insert into platform_expenses (description, amount) values ('x', 0)$$)
   and test.denied($$insert into platform_expenses (description, amount) values ('  ', 10)$$)
   and test.denied($$insert into platform_expenses (description, category, amount) values ('x', 'festa', 10)$$));
+reset role;
+
+-- ================================== implantação, ativação e novo cliente (43)
+-- Loja nova entra sozinha "Em implantação", sem cobrança
+insert into public.companies (id, slug, name) values ('dddddddd-0000-0000-0000-00000000000d', 'loja-nova-teste', 'Loja Nova Teste');
+select test.check('loja nova: ganha a conta "Em implantação" no plano Completo, contando desde hoje',
+  (select status = 'implantacao' and implantation_started_on is not null and activated_on is null and plan_id is not null
+   from public.client_accounts where company_id = 'dddddddd-0000-0000-0000-00000000000d'));
+update public.client_accounts set monthly_price = 150 where company_id = 'dddddddd-0000-0000-0000-00000000000d';
+select test.check('implantação: não cobra (mesmo com valor) e não bloqueia a loja',
+  public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-10') ->> 'situation' = 'implantacao'
+  and not public.company_blocked('dddddddd-0000-0000-0000-00000000000d'));
+
+-- Ativou em 10/10/2026: 1º vencimento 30 dias depois (09/11), todo dia 9
+update public.client_accounts set status = 'ativo', activated_on = '2026-10-10' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
+select test.check('ativação: grava a data escolhida; 1º vencimento 30 dias depois e todo mês no mesmo dia',
+  (select activated_on = '2026-10-10' from public.client_accounts where company_id = 'dddddddd-0000-0000-0000-00000000000d')
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'situation' = 'em_dia'
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') -> 'next' ->> 'due' = '2026-11-09'
+  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'due_day')::int = 9
+  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'due_day_auto')::boolean
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-11-09') ->> 'situation' = 'vence_hoje'
+  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-11-12') ->> 'days_late')::int = 3
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-12-10') -> 'next' ->> 'due' = '2027-01-09');
+
+-- Ativou em 01/10: os 30 dias caem em 31/10, então vence no dia 1
+update public.client_accounts set activated_on = '2026-10-01' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
+select test.check('ativação: se os 30 dias caem no dia 29, 30 ou 31, vence no dia 1 do mês seguinte',
+  public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') -> 'next' ->> 'due' = '2026-11-01'
+  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'due_day')::int = 1);
+
+-- O dia escolhido à mão vale no lugar do automático
+update public.client_accounts set due_day = 5, activated_on = '2026-10-10' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
+select test.check('vencimento escolhido à mão se sobrepõe ao automático',
+  public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') -> 'next' ->> 'due' = '2026-11-05'
+  and not (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'due_day_auto')::boolean);
+
+-- Voltar para implantação recomeça a contagem e para de cobrar
+update public.client_accounts set status = 'implantacao' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
+select test.check('voltar para implantação: recomeça a contagem, apaga a ativação e para de cobrar',
+  (select activated_on is null and implantation_started_on = (now() at time zone 'America/Fortaleza')::date
+   from public.client_accounts where company_id = 'dddddddd-0000-0000-0000-00000000000d')
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-12-20') ->> 'situation' = 'implantacao');
+update public.client_accounts set status = 'ativo' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
+select test.check('ativação sem data: usa o dia de hoje',
+  (select activated_on = (now() at time zone 'America/Fortaleza')::date
+   from public.client_accounts where company_id = 'dddddddd-0000-0000-0000-00000000000d'));
+select test.check('situação inválida é recusada',
+  test.denied($$update public.client_accounts set status = 'pausado' where company_id = 'dddddddd-0000-0000-0000-00000000000d'$$));
+
+-- Botão "Novo cliente"
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin de loja: não cria cliente na plataforma',
+  test.denied($$select platform_create_client('Loja X', 'loja-x')$$));
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: não cria cliente na plataforma',
+  test.denied($$select platform_create_client('Loja Y', 'loja-y')$$));
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+-- cria numa consulta e confere na seguinte (a mesma consulta não enxerga o que criou)
+select platform_create_client('Auto Teste', 'auto-teste', 'Fulano', '(98) 90000-0000', 'fulano@exemplo.com', null, 180, null) ->> 'slug' as criado;
+select test.check('dono da plataforma: cria o cliente já em implantação, com responsável e valor',
+  exists (select 1 from jsonb_array_elements(platform_clients()) c
+              where c ->> 'slug' = 'auto-teste' and c -> 'account' ->> 'status' = 'implantacao'
+                and c -> 'account' ->> 'responsible_name' = 'Fulano'
+                and (c -> 'account' ->> 'monthly_price')::numeric = 180
+                and c -> 'billing' ->> 'situation' = 'implantacao'));
+select test.check('novo cliente: endereço interno repetido ou inválido e nome vazio são recusados',
+  test.denied($$select platform_create_client('Outra', 'auto-teste')$$)
+  and test.denied($$select platform_create_client('Outra', 'Com Espaco')$$)
+  and test.denied($$select platform_create_client('', 'nome-vazio')$$));
 reset role;
 
 -- ================================================================ resultado
