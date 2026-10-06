@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, Trash2, Receipt, Lock } from 'lucide-react'
+import { ChevronLeft, Trash2, Receipt, Lock, Sparkles, Copy, Eye, FileText, PenLine } from 'lucide-react'
 import { fetchCarById, createCar, updateCar, deleteCar, uploadCarDocument, updateCarDocuments, deleteCarImage } from '../lib/carsApi.js'
 import { removedPhotos } from '../utils/carPhotos.js'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
 import { fetchSaleByCar, saveSaleForCar, deleteSaleForCar } from '../lib/salesApi.js'
 import { fetchReservations, closeReservation } from '../lib/reservationsApi.js'
-import { CATEGORIES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS, CAR_STATUSES, parseIntBR, todayISO } from '../utils/carFormat.js'
+import { CATEGORIES, VEHICLE_CATEGORIES, ENTRY_TYPES, BRANDS, TRANSMISSIONS, FUELS, CONDITIONS, CAR_STATUSES, parseIntBR, todayISO } from '../utils/carFormat.js'
 import ImageUploader from './ImageUploader.jsx'
 import CarDocumentUploader from './CarDocumentUploader.jsx'
 import CustomerPicker from './CustomerPicker.jsx'
@@ -21,6 +21,18 @@ import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
+import { generateCarTexts } from '../lib/textosApi.js'
+import { fetchAllContractTemplates, downloadContractTemplateFile } from '../lib/contractTemplatesApi.js'
+import { buildEntryTemplateData } from '../utils/contractTemplateTags.js'
+import { fillContractTemplateBlob, downloadBlob } from '../utils/fillContractTemplate.js'
+import { companyForDocuments } from '../utils/contractCompany.js'
+import { slugify } from '../utils/carFormat.js'
+import DocxPreview from '../components/DocxPreview.jsx'
+import SignatureDialog from './SignatureDialog.jsx'
+import SignatureStatus from './SignatureStatus.jsx'
+import { fetchSignatureRequests, refreshSignatures } from '../lib/signaturesApi.js'
+import { pendingToRefresh } from '../utils/signatures.js'
+import { RENAVE_STATUSES } from '../utils/renave.js'
 import { DEFAULT_INTAKE_CHECKLIST, DEFAULT_INSPECTION_CHECKLIST } from '../utils/carChecklists.js'
 import { DEFAULT_BANKS } from '../utils/payment.js'
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
@@ -58,6 +70,15 @@ const EMPTY_CAR = {
   internalNotes: '',
   intakeItems: [],
   inspection: [],
+  entryType: 'showroom',
+  ownerCustomerId: '',
+  whatsappSellerId: '',
+  renaveEntryStatus: 'pendente',
+  renaveEntryOn: '',
+  renaveEntryProtocol: '',
+  renaveExitStatus: 'pendente',
+  renaveExitOn: '',
+  renaveExitProtocol: '',
 }
 
 export default function AdminCarForm() {
@@ -72,11 +93,28 @@ export default function AdminCarForm() {
   const [inspection, setInspection] = useState(() => buildInspection(DEFAULT_INSPECTION_CHECKLIST))
   const [payment, setPayment] = useState(EMPTY_PAYMENT)
   const [activeReservation, setActiveReservation] = useState(null)
+  // Textos da IA: a descrição vai para o campo; a legenda é só para copiar
+  const [generating, setGenerating] = useState(false)
+  const [textsError, setTextsError] = useState('')
+  const [caption, setCaption] = useState('')
+  const [copied, setCopied] = useState(false)
+  // Contratos da entrada: modelos marcados como "Entrada do veículo"
+  const [entryTemplates, setEntryTemplates] = useState([])
+  const [entryTemplateId, setEntryTemplateId] = useState('')
+  const [showEntryPreview, setShowEntryPreview] = useState(false)
+  const [entryPreview, setEntryPreview] = useState({ blob: null, error: '', loading: false })
+  const [entryBusy, setEntryBusy] = useState(false)
+  const entryFiles = useRef(new Map())
+  const [storeName, setStoreName] = useState('')
+  // Assinatura digital dos contratos da entrada (seção 53)
+  const [entrySignatures, setEntrySignatures] = useState([])
+  const [entrySigning, setEntrySigning] = useState(false)
 
   useEffect(() => {
     fetchCompanySettings().then((settings) => {
       setAlertDefault(settings.stockAlertDays)
       setLists({ intake: settings.intakeChecklist, inspection: settings.inspectionChecklist, banks: settings.bankList })
+      setStoreName(settings.name || '')
     })
   }, [])
   const { id } = useParams()
@@ -101,6 +139,13 @@ export default function AdminCarForm() {
   useEffect(() => {
     fetchAllCustomers().then(setCustomers).catch(() => {})
     fetchSellers().then(setSellers).catch(() => {})
+    fetchAllContractTemplates()
+      .then((list) => {
+        const entry = list.filter((t) => t.kind === 'entrada')
+        setEntryTemplates(entry)
+        setEntryTemplateId((prev) => prev || entry[0]?.id || '')
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -124,7 +169,7 @@ export default function AdminCarForm() {
     if (!isEditing) return
     fetchCarById(id).then((found) => {
       if (found) {
-        setCar({ ...found, customerId: found.customerId || '' })
+        setCar({ ...found, customerId: found.customerId || '', ownerCustomerId: found.ownerCustomerId || '', whatsappSellerId: found.whatsappSellerId || '' })
         found.images.forEach((url) => seenImages.current.add(url))
         setOriginalStatus(found.status)
         if (found.status === 'reservado') {
@@ -150,6 +195,15 @@ export default function AdminCarForm() {
 
   function update(field, value) {
     setCar((prev) => ({ ...prev, [field]: value }))
+  }
+
+  // RENAVE (seção 55): ao marcar como registrada, a data vem com hoje
+  function updateRenave(which, status) {
+    setCar((prev) => ({
+      ...prev,
+      [`renave${which}Status`]: status,
+      ...(status === 'registrado' && !prev[`renave${which}On`] ? { [`renave${which}On`]: todayISO() } : {}),
+    }))
   }
 
   function updateImages(images) {
@@ -216,7 +270,9 @@ export default function AdminCarForm() {
       ...car,
       year: Number(car.year),
       km: parseIntBR(car.km),
-      doors: Number(car.doors),
+      doors: car.category === 'moto' ? 0 : Number(car.doors) || 4,
+      ownerCustomerId: car.ownerCustomerId || null,
+      whatsappSellerId: car.whatsappSellerId || null,
       price: noPrice ? null : parseIntBR(car.price),
       originalPrice: !noPrice && car.originalPrice ? parseIntBR(car.originalPrice) : null,
       purchasePrice: car.purchasePrice ? parseIntBR(car.purchasePrice) : null,
@@ -276,6 +332,132 @@ export default function AdminCarForm() {
     } catch (err) {
       setError('Não foi possível salvar: ' + err.message)
       setSaving(false)
+    }
+  }
+
+  const entryTemplate = entryTemplates.find((t) => t.id === entryTemplateId) || null
+
+  // Dados do contrato da entrada: loja (da tela Contratos), dono e carro deste cadastro
+  function entryData() {
+    const owner = customers.find((c) => c.id === car.ownerCustomerId) || null
+    const showValue = canSeeCosts || (isStaff && !isEditing)
+    return buildEntryTemplateData({
+      company: companyForDocuments(storeName),
+      owner,
+      vehicle: {
+        brand: car.brand,
+        model: car.model,
+        version: car.version,
+        year: car.year,
+        modelYear: car.modelYear,
+        color: car.color,
+        km: parseIntBR(car.km),
+        plate: car.plate,
+        chassis: car.chassis,
+        renavam: car.renavam,
+        price: noPrice ? null : parseIntBR(car.price),
+      },
+      entry: { type: car.entryType, value: showValue ? parseIntBR(car.purchasePrice) : null, date: car.purchaseDate || '' },
+    })
+  }
+
+  async function entryTemplateFile(template) {
+    if (!entryFiles.current.has(template.filePath)) entryFiles.current.set(template.filePath, await downloadContractTemplateFile(template.filePath))
+    return entryFiles.current.get(template.filePath)
+  }
+
+  useEffect(() => {
+    if (!showEntryPreview || !entryTemplate) return
+    let cancelled = false
+    setEntryPreview((p) => ({ ...p, loading: true, error: '' }))
+    const timer = setTimeout(async () => {
+      try {
+        const blob = await fillContractTemplateBlob(await entryTemplateFile(entryTemplate), entryData())
+        if (!cancelled) setEntryPreview({ blob, error: '', loading: false })
+      } catch (err) {
+        if (!cancelled) setEntryPreview({ blob: null, error: 'Não foi possível montar a prévia: ' + (err.message || err), loading: false })
+      }
+    }, 500)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEntryPreview, entryTemplate, car, customers, noPrice, storeName])
+
+  async function downloadEntryContract() {
+    if (!entryTemplate) return
+    setEntryBusy(true)
+    try {
+      const blob = await fillContractTemplateBlob(await entryTemplateFile(entryTemplate), entryData())
+      downloadBlob(blob, `${slugify(entryTemplate.name) || 'contrato'}-${slugify(`${car.brand} ${car.model}`) || 'carro'}.docx`)
+    } catch (err) {
+      setError('Não foi possível gerar o contrato: ' + err.message)
+    } finally {
+      setEntryBusy(false)
+    }
+  }
+
+  // Envios deste carro para assinar; os que aguardam são conferidos em segundo plano
+  useEffect(() => {
+    if (!id) return
+    let active = true
+    fetchSignatureRequests({ kind: 'entrada', carId: id })
+      .then((list) => {
+        if (!active) return
+        setEntrySignatures(list)
+        const ids = pendingToRefresh(list)
+        if (ids.length) refreshSignatures(ids).then((updated) => active && updated.forEach(updateEntrySignature)).catch(() => {})
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [id])
+
+  function updateEntrySignature(updated) {
+    setEntrySignatures((prev) => [updated, ...prev.filter((r) => r.id !== updated.id)])
+  }
+
+  const entryOwner = customers.find((c) => c.id === car.ownerCustomerId) || null
+
+  async function entryContractFile() {
+    const blob = await fillContractTemplateBlob(await entryTemplateFile(entryTemplate), entryData())
+    return { blob, fileName: `${slugify(entryTemplate.name) || 'contrato'}-${slugify(`${car.brand} ${car.model}`) || 'carro'}.docx` }
+  }
+
+  async function handleGenerateTexts() {
+    if (!car.brand || !car.model) {
+      setTextsError('Preencha ao menos a marca e o modelo antes de gerar.')
+      return
+    }
+    if (car.description.trim() && !(await confirm('Trocar a descrição atual pela escrita pela IA?', { confirmLabel: 'Trocar' }))) return
+    setGenerating(true)
+    setTextsError('')
+    try {
+      const result = await generateCarTexts({
+        ...car,
+        km: parseIntBR(car.km),
+        price: noPrice ? null : parseIntBR(car.price),
+        highlights: highlightsText.split('\n').map((h) => h.trim()).filter(Boolean),
+        intakeItems: intake.filter((e) => e.status === 'ok').map((e) => e.item),
+      })
+      update('description', result.descricao)
+      setCaption(result.legenda)
+      setCopied(false)
+    } catch (err) {
+      setTextsError('Não foi possível gerar: ' + err.message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function copyCaption() {
+    try {
+      await navigator.clipboard.writeText(caption)
+      setCopied(true)
+    } catch {
+      setTextsError('Não foi possível copiar. Selecione o texto e copie à mão.')
     }
   }
 
@@ -350,7 +532,7 @@ export default function AdminCarForm() {
             <label>
               Categoria
               <select required value={car.category} onChange={(e) => update('category', e.target.value)}>
-                {CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
+                {VEHICLE_CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
               </select>
             </label>
           </div>
@@ -388,10 +570,12 @@ export default function AdminCarForm() {
               Cor
               <input required value={car.color} onChange={(e) => update('color', e.target.value)} />
             </label>
-            <label>
-              Portas
-              <input type="number" min="2" max="5" required value={car.doors} onChange={(e) => update('doors', e.target.value)} />
-            </label>
+            {car.category !== 'moto' && (
+              <label>
+                Portas
+                <input type="number" min="2" max="5" required value={car.doors || 4} onChange={(e) => update('doors', e.target.value)} />
+              </label>
+            )}
             <label>
               Condição
               <select required value={car.condition} onChange={(e) => update('condition', e.target.value)}>
@@ -546,7 +730,152 @@ export default function AdminCarForm() {
         </section>
 
         <section className="admin-form-section">
-          <h2>{showPurchase ? 'Custo de aquisição' : 'Aviso de estoque'}</h2>
+          <h2>Entrada na loja</h2>
+          <div className="admin-form-grid">
+            <label>
+              Tipo de entrada
+              <select value={car.entryType} onChange={(e) => update('entryType', e.target.value)}>
+                {ENTRY_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </label>
+            <label>
+              WhatsApp deste carro
+              <select value={car.whatsappSellerId || ''} onChange={(e) => update('whatsappSellerId', e.target.value)}>
+                <option value="">Padrão da loja (número fixo ou rodízio)</option>
+                {sellers
+                  .filter((s) => (s.active && !s.deletedAt && s.phone) || s.id === car.whatsappSellerId)
+                  .map((s) => <option key={s.id} value={s.id}>{s.name}{s.phone ? ` · ${s.phone}` : ' (sem telefone)'}</option>)}
+              </select>
+            </label>
+            <CustomerPicker
+              customers={customers}
+              value={car.ownerCustomerId || ''}
+              onChange={(value) => update('ownerCustomerId', value)}
+              onCreated={(created) => setCustomers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))}
+              disabled={saving}
+              label={car.entryType === 'consignado' ? 'Dono do carro (consignante)' : 'Dono anterior (de quem a loja comprou)'}
+            />
+          </div>
+          <p className="admin-form-note">
+            {car.entryType === 'repasse'
+              ? 'Carro de repasse fica só no painel: não aparece no site.'
+              : car.entryType === 'consignado'
+                ? 'No consignado, informe abaixo o valor combinado com o dono: a margem da venda é a diferença.'
+                : 'O dono anterior vai para os contratos de entrada.'}{' '}
+            Todo botão de WhatsApp deste carro vai para a pessoa escolhida (precisa ter telefone na Equipe).
+          </p>
+
+          <div className="entry-contracts">
+            <h3>Contratos da entrada</h3>
+            {entryTemplates.length === 0 ? (
+              <p className="admin-form-note">
+                Nenhum modelo de entrada ainda.{' '}
+                {isAdmin
+                  ? 'Envie um em Contratos → Modelos de contrato, marcado como “Entrada do veículo”.'
+                  : 'Peça ao administrador para cadastrar um.'}
+              </p>
+            ) : (
+              <>
+                <div className="entry-contracts-actions">
+                  <label>
+                    Modelo
+                    <select value={entryTemplateId} onChange={(e) => setEntryTemplateId(e.target.value)}>
+                      {entryTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" className="btn btn-outline" onClick={() => setShowEntryPreview((v) => !v)}>
+                    <Eye size={15} /> {showEntryPreview ? 'Fechar prévia' : 'Prévia'}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={downloadEntryContract} disabled={entryBusy}>
+                    <FileText size={15} /> {entryBusy ? 'Gerando…' : 'Baixar Word'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => setEntrySigning(true)}
+                    disabled={!isEditing || !entryTemplate}
+                    title={isEditing ? undefined : 'Salve o carro antes de mandar para assinar'}
+                  >
+                    <PenLine size={15} /> Enviar para assinatura
+                  </button>
+                </div>
+                {showEntryPreview && <DocxPreview blob={entryPreview.blob} error={entryPreview.error} loading={entryPreview.loading} />}
+              </>
+            )}
+            {entrySignatures.some((r) => r.status !== 'cancelado') && (
+              <ul className="signature-list">
+                {entrySignatures
+                  .filter((r) => r.status !== 'cancelado')
+                  .map((r) => (
+                    <li key={r.id}>
+                      <p className="signature-list-title">{r.title}</p>
+                      <SignatureStatus request={r} onChange={updateEntrySignature} compact />
+                    </li>
+                  ))}
+              </ul>
+            )}
+            <p className="admin-form-note">
+              Usa os dados deste cadastro e do dono escolhido acima{isEditing ? '' : ' (para mandar assinar, salve o carro antes)'}. Pela
+              assinatura digital, a via assinada vai sozinha para a ficha do dono; assinado no papel, anexe em “Documentos do carro”.
+            </p>
+          </div>
+        </section>
+
+        <section className="admin-form-section">
+          <h2>RENAVE</h2>
+          <p className="admin-form-hint">
+            A entrada e a saída de cada carro no estoque são registradas no RENAVE pela integradora contratada pela loja
+            (obrigatório pela Resolução Contran 1.026/2026). Marque aqui depois de registrar: o início do painel avisa o que
+            estiver pendente.
+          </p>
+          <div className="admin-form-grid">
+            <label>
+              Entrada no RENAVE
+              <select value={car.renaveEntryStatus} onChange={(e) => updateRenave('Entry', e.target.value)}>
+                {RENAVE_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </label>
+            {car.renaveEntryStatus === 'registrado' && (
+              <>
+                <label>
+                  Data da entrada
+                  <DateInputBR value={car.renaveEntryOn || ''} onChange={(iso) => update('renaveEntryOn', iso)} />
+                </label>
+                <label>
+                  Protocolo (opcional)
+                  <input value={car.renaveEntryProtocol} onChange={(e) => update('renaveEntryProtocol', e.target.value)} maxLength={80} />
+                </label>
+              </>
+            )}
+          </div>
+          {car.status === 'vendido' ? (
+            <div className="admin-form-grid">
+              <label>
+                Saída no RENAVE
+                <select value={car.renaveExitStatus} onChange={(e) => updateRenave('Exit', e.target.value)}>
+                  {RENAVE_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </label>
+              {car.renaveExitStatus === 'registrado' && (
+                <>
+                  <label>
+                    Data da saída
+                    <DateInputBR value={car.renaveExitOn || ''} onChange={(iso) => update('renaveExitOn', iso)} />
+                  </label>
+                  <label>
+                    Protocolo (opcional)
+                    <input value={car.renaveExitProtocol} onChange={(e) => update('renaveExitProtocol', e.target.value)} maxLength={80} />
+                  </label>
+                </>
+              )}
+            </div>
+          ) : (
+            <p className="admin-form-note">A saída aparece aqui quando o carro for marcado como vendido.</p>
+          )}
+        </section>
+
+        <section className="admin-form-section">
+          <h2>{showPurchase ? (car.entryType === 'consignado' ? 'Valor combinado com o dono' : 'Custo de aquisição') : 'Aviso de estoque'}</h2>
           {showPurchase && (
             <p className="admin-form-hint">
               {canSeeCosts
@@ -557,17 +886,17 @@ export default function AdminCarForm() {
           <div className="admin-form-grid">
             {showPurchase && (
               <label>
-                Preço de compra
+                {car.entryType === 'consignado' ? 'Valor que vai para o dono' : 'Preço de compra'}
                 <MoneyInput
                   value={car.purchasePrice || ''}
                   onChange={(v) => update('purchasePrice', v)}
-                  placeholder="Quanto a loja pagou pelo carro"
+                  placeholder={car.entryType === 'consignado' ? 'Quanto o dono recebe na venda' : 'Quanto a loja pagou pelo carro'}
                 />
               </label>
             )}
             {showPurchase && (
               <label>
-                Data da compra
+                {car.entryType === 'consignado' ? 'Data de entrada' : 'Data da compra'}
                 <DateInputBR value={car.purchaseDate || ''} onChange={(iso) => update('purchaseDate', iso)} />
               </label>
             )}
@@ -632,13 +961,34 @@ export default function AdminCarForm() {
         </section>
 
         <section className="admin-form-section">
-          <h2>Descrição</h2>
+          <div className="ai-texts-head">
+            <h2>Descrição</h2>
+            <button type="button" className="btn btn-outline" onClick={handleGenerateTexts} disabled={generating || saving}>
+              <Sparkles size={15} /> {generating ? 'Escrevendo…' : 'Gerar com IA'}
+            </button>
+          </div>
+          {textsError && <p className="admin-error">{textsError}</p>}
           <textarea
             rows={5}
             value={car.description}
             onChange={(e) => update('description', e.target.value)}
             placeholder="Texto de apresentação do carro, exibido na página de detalhe."
           />
+          {caption && (
+            <div className="ai-caption">
+              <div className="ai-caption-head">
+                <strong>Legenda para Instagram e WhatsApp</strong>
+                <button type="button" className="admin-action-btn" onClick={copyCaption}>
+                  <Copy size={14} /> {copied ? 'Copiada' : 'Copiar'}
+                </button>
+              </div>
+              <textarea rows={9} value={caption} onChange={(e) => { setCaption(e.target.value); setCopied(false) }} />
+            </div>
+          )}
+          <p className="admin-form-note">
+            “Gerar com IA” escreve a descrição e uma legenda para redes sociais só com os dados deste cadastro (ficha, diferenciais e
+            itens que vieram com o carro). Revise antes de salvar.
+          </p>
         </section>
 
         <div className="admin-form-actions">
@@ -648,6 +998,20 @@ export default function AdminCarForm() {
           </button>
         </div>
       </form>
+      {entrySigning && entryTemplate && (
+        <SignatureDialog
+          kind="entrada"
+          carId={id}
+          defaultTitle={[entryTemplate.name, [car.brand, car.model].filter(Boolean).join(' '), entryOwner?.name].filter(Boolean).join(' · ')}
+          party={{ name: entryOwner?.name || '', email: entryOwner?.email || '' }}
+          buildFile={entryContractFile}
+          onClose={() => setEntrySigning(false)}
+          onSent={(request) => {
+            updateEntrySignature(request)
+            setEntrySigning(false)
+          }}
+        />
+      )}
       {confirmDialog}
     </div>
   )

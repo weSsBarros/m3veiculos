@@ -2,6 +2,7 @@ import { supabase, COMPANY_ID } from './supabaseClient.js'
 import { DEFAULT_SALE_CHECKLIST } from '../utils/saleChecklist.js'
 import { DEFAULT_INTAKE_CHECKLIST, DEFAULT_INSPECTION_CHECKLIST } from '../utils/carChecklists.js'
 import { DEFAULT_BANKS } from '../utils/payment.js'
+import { rememberCompanyFiscal } from '../utils/contractCompany.js'
 
 export const DEFAULT_STOCK_ALERT_DAYS = 60
 
@@ -34,6 +35,7 @@ export async function fetchCompanySettings() {
     bankList: DEFAULT_BANKS,
     intakeChecklist: DEFAULT_INTAKE_CHECKLIST,
     inspectionChecklist: DEFAULT_INSPECTION_CHECKLIST,
+    fiscal: {},
   }
   if (!supabase) return defaults
   const { data, error } = await supabase.from('companies').select('*').eq('id', COMPANY_ID).maybeSingle()
@@ -47,7 +49,17 @@ export async function fetchCompanySettings() {
     bankList: Array.isArray(data.bank_list) ? data.bank_list : DEFAULT_BANKS,
     intakeChecklist: Array.isArray(data.intake_checklist) ? data.intake_checklist : DEFAULT_INTAKE_CHECKLIST,
     inspectionChecklist: Array.isArray(data.inspection_checklist) ? data.inspection_checklist : DEFAULT_INSPECTION_CHECKLIST,
+    // Seção 57: razão social, CNPJ, IE, regime e endereço (os documentos usam)
+    fiscal: rememberCompanyFiscal(data.fiscal, data.name),
   }
+}
+
+// Dados fiscais da loja (só o admin; o banco confere CNPJ, CEP, UF e IBGE)
+export async function saveCompanyFiscal(fiscal) {
+  if (!supabase) throw new Error('Supabase não configurado.')
+  const { data, error } = await supabase.rpc('save_company_fiscal', { p: fiscal })
+  if (error) throw error
+  return rememberCompanyFiscal(data)
 }
 
 // Listas editáveis da loja (admin e gerente): bancos, itens que vêm com o

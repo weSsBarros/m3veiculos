@@ -5513,7 +5513,652 @@ end $$;
 revoke execute on function public.billing_reminders_due(date) from anon, public;
 grant execute on function public.billing_reminders_due(date) to authenticated, service_role;
 
--- 46) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 46) Conferência: passou para a seção 48, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 47) Modelos de contrato: editar no painel, versões anteriores e modelo de cada contrato
+--
+-- O admin edita um modelo já enviado em Contratos → Modelos de contrato →
+-- Editar. Ao salvar, o .docx novo vai para o Storage com outro nome
+-- (save_contract_template_file) e o anterior fica em contract_template_versions,
+-- de onde dá para restaurar (restore_contract_template_version). As duas funções
+-- rodam com a permissão de quem chama: só o admin da loja consegue.
+-- contracts.template_id e template_file_path guardam o modelo e a versão usados
+-- em cada contrato, para o "Baixar" do histórico gerar o mesmo documento.
+alter table public.contract_templates add column if not exists updated_at timestamptz;
+
+drop policy if exists "Admins update contract templates" on public.contract_templates;
+create policy "Admins update contract templates"
+on public.contract_templates for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+create table if not exists public.contract_template_versions (
+  id uuid primary key default gen_random_uuid(),
+  template_id uuid not null references public.contract_templates(id) on delete cascade,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  file_path text not null,
+  created_at timestamptz not null default now(),
+  created_by uuid default auth.uid() references auth.users(id) on delete set null
+);
+
+create index if not exists contract_template_versions_template_idx
+  on public.contract_template_versions (template_id, created_at desc);
+
+alter table public.contract_template_versions enable row level security;
+
+drop policy if exists "Admins read contract template versions" on public.contract_template_versions;
+create policy "Admins read contract template versions"
+on public.contract_template_versions for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Admins insert contract template versions" on public.contract_template_versions;
+create policy "Admins insert contract template versions"
+on public.contract_template_versions for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Admins delete contract template versions" on public.contract_template_versions;
+create policy "Admins delete contract template versions"
+on public.contract_template_versions for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin());
+
+-- Troca o arquivo do modelo pelo novo (já enviado ao Storage) e guarda o anterior
+create or replace function public.save_contract_template_file(p_template uuid, p_file_path text)
+returns void
+language plpgsql security invoker set search_path = public
+as $$
+declare
+  v_old text;
+  v_company uuid;
+begin
+  select file_path, company_id into v_old, v_company
+  from public.contract_templates where id = p_template
+  for update;
+  if not found then
+    raise exception 'Modelo não encontrado ou sem permissão para editar' using errcode = '42501';
+  end if;
+  if coalesce(split_part(p_file_path, '/', 1), '') <> v_company::text or p_file_path = v_old then
+    raise exception 'Arquivo do modelo inválido' using errcode = '22023';
+  end if;
+  insert into public.contract_template_versions (template_id, company_id, file_path)
+  values (p_template, v_company, v_old);
+  update public.contract_templates set file_path = p_file_path, updated_at = now() where id = p_template;
+end $$;
+revoke execute on function public.save_contract_template_file(uuid, text) from anon, public;
+grant execute on function public.save_contract_template_file(uuid, text) to authenticated;
+
+-- Volta para uma versão anterior (a versão atual vira uma versão anterior)
+create or replace function public.restore_contract_template_version(p_version uuid)
+returns void
+language plpgsql security invoker set search_path = public
+as $$
+declare
+  v public.contract_template_versions%rowtype;
+  v_current text;
+begin
+  select * into v from public.contract_template_versions where id = p_version;
+  if not found then
+    raise exception 'Versão não encontrada' using errcode = '42501';
+  end if;
+  select file_path into v_current from public.contract_templates where id = v.template_id for update;
+  if not found then
+    raise exception 'Modelo não encontrado ou sem permissão para editar' using errcode = '42501';
+  end if;
+  delete from public.contract_template_versions where id = p_version;
+  insert into public.contract_template_versions (template_id, company_id, file_path)
+  values (v.template_id, v.company_id, v_current);
+  update public.contract_templates set file_path = v.file_path, updated_at = now() where id = v.template_id;
+end $$;
+revoke execute on function public.restore_contract_template_version(uuid) from anon, public;
+grant execute on function public.restore_contract_template_version(uuid) to authenticated;
+
+alter table public.contracts add column if not exists template_id uuid references public.contract_templates(id) on delete set null;
+alter table public.contracts add column if not exists template_file_path text;
+
+-- 48) Conferência: passou para a seção 50, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 49) Estoque: tipo de entrada, dono do carro e WhatsApp do carro --------------
+--
+-- * entry_type: como o carro entrou na loja — showroom (veículo próprio),
+--   consignado (o dono deixa para a loja vender) ou repasse (vendido a outras
+--   lojas no estado). Carro de repasse não aparece no site (decisão do Wesley).
+--   No consignado, o "preço de compra" é o valor combinado com o dono.
+-- * owner_customer_id: o dono anterior (de quem a loja comprou) ou o dono do
+--   consignado, ligado ao cadastro de clientes (os dados vão para os contratos
+--   de entrada).
+-- * whatsapp_seller_id: pessoa da equipe que atende esse carro. Todo botão de
+--   WhatsApp do carro vai para ela, passando por cima do número fixo e do
+--   rodízio (whatsapp_contact devolve mode = 'carro').
+alter table public.cars add column if not exists entry_type text not null default 'showroom';
+alter table public.cars drop constraint if exists cars_entry_type_check;
+alter table public.cars add constraint cars_entry_type_check check (entry_type in ('showroom', 'consignado', 'repasse'));
+alter table public.cars add column if not exists owner_customer_id uuid references public.customers(id) on delete set null;
+alter table public.cars add column if not exists whatsapp_seller_id uuid references public.sellers(id) on delete set null;
+
+create index if not exists cars_owner_customer_idx on public.cars (owner_customer_id) where owner_customer_id is not null;
+
+-- O dono e a pessoa do WhatsApp têm que ser da mesma loja do carro
+create or replace function public.cars_check_links()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if new.owner_customer_id is not null and not exists (
+    select 1 from public.customers where id = new.owner_customer_id and company_id = new.company_id
+  ) then
+    raise exception 'O dono do carro precisa ser um cliente desta loja' using errcode = '23514';
+  end if;
+  if new.whatsapp_seller_id is not null and not exists (
+    select 1 from public.sellers where id = new.whatsapp_seller_id and company_id = new.company_id
+  ) then
+    raise exception 'O WhatsApp do carro precisa ser de alguém da equipe desta loja' using errcode = '23514';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists cars_check_links on public.cars;
+create trigger cars_check_links before insert or update of owner_customer_id, whatsapp_seller_id, company_id on public.cars
+for each row execute function public.cars_check_links();
+
+-- Site: carro de repasse não aparece
+drop policy if exists "Public can read cars" on public.cars;
+create policy "Public can read cars"
+on public.cars for select
+to anon
+using (not hidden and entry_type <> 'repasse' and not public.company_blocked(company_id));
+
+-- Estoque da equipe (admin, gerente e vendedor): tudo menos o custo de compra.
+drop view if exists public.staff_cars;
+create view public.staff_cars as
+select
+  id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
+  category, condition, price, original_price, badge, status, highlights, description, images,
+  featured, hidden, sold_at, plate, chassis, renavam, documents, customer_id, stock_alert_days,
+  company_id, created_at, updated_at, internal_notes, intake_items, inspection,
+  entry_type, owner_customer_id, whatsapp_seller_id
+from public.cars
+where company_id = public.current_company_id() and public.can_edit_stock()
+with local check option;
+
+revoke all on public.staff_cars from anon, authenticated, public;
+grant select, insert, update on public.staff_cars to authenticated;
+
+-- WhatsApp do site: carro com pessoa definida vai sempre para ela
+create or replace function public.whatsapp_contact(
+  p_company uuid,
+  p_car_slug text default null,
+  p_keep uuid default null,
+  p_page text default null
+)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_mode text;
+  v_main text;
+  v_last uuid;
+  v_sticky integer;
+  v_car uuid;
+  v_car_seller uuid;
+  v_entry uuid;
+  v_seller uuid;
+  v_phone text;
+  v_returning boolean := false;
+begin
+  -- Trava a linha da loja: dois cliques ao mesmo tempo não pegam o mesmo número
+  select whatsapp_mode, public.wa_digits(whatsapp_main), whatsapp_last_entry, whatsapp_sticky_days
+    into v_mode, v_main, v_last, v_sticky
+  from public.companies where id = p_company
+  for update;
+  if not found then return null; end if;
+
+  if nullif(trim(coalesce(p_car_slug, '')), '') is not null then
+    select id, whatsapp_seller_id into v_car, v_car_seller from public.cars
+    where company_id = p_company and slug = left(trim(p_car_slug), 200) and not hidden;
+  end if;
+
+  -- Carro com pessoa definida (ativa e com telefone): vai direto para ela
+  if v_car_seller is not null then
+    select s.id, public.wa_digits(s.phone) into v_seller, v_phone
+    from public.sellers s
+    where s.id = v_car_seller and s.company_id = p_company and s.active and s.deleted_at is null
+      and public.wa_digits(s.phone) <> '';
+    if found then
+      insert into public.whatsapp_leads (company_id, rotation_id, seller_id, phone, car_id, page, is_returning)
+      values (p_company, null, v_seller, v_phone, v_car, left(coalesce(p_page, ''), 200), false);
+      return jsonb_build_object('phone', v_phone, 'entry_id', null, 'mode', 'carro', 'sticky_days', v_sticky);
+    end if;
+    v_seller := null;
+    v_phone := null;
+  end if;
+
+  if v_mode = 'rodizio' then
+    if p_keep is not null then
+      select r.id, r.seller_id, public.wa_digits(coalesce(nullif(r.phone, ''), s.phone))
+        into v_entry, v_seller, v_phone
+      from public.whatsapp_rotation r
+      left join public.sellers s on s.id = r.seller_id
+      where r.id = p_keep and r.company_id = p_company and r.active
+        and (r.seller_id is null or (s.active and s.deleted_at is null))
+        and public.wa_digits(coalesce(nullif(r.phone, ''), s.phone)) <> '';
+      v_returning := found;
+    end if;
+
+    if not v_returning then
+      with valid as (
+        select r.id, r.seller_id, r.position, r.created_at,
+               public.wa_digits(coalesce(nullif(r.phone, ''), s.phone)) as phone
+        from public.whatsapp_rotation r
+        left join public.sellers s on s.id = r.seller_id
+        where r.company_id = p_company and r.active
+          and (r.seller_id is null or (s.active and s.deleted_at is null))
+          and public.wa_digits(coalesce(nullif(r.phone, ''), s.phone)) <> ''
+      ),
+      last_served as (
+        select position, created_at, id from public.whatsapp_rotation where id = v_last
+      )
+      select v.id, v.seller_id, v.phone into v_entry, v_seller, v_phone
+      from valid v
+      left join last_served l on true
+      order by
+        -- primeiro quem vem depois do último que atendeu; no fim, recomeça
+        case when l.id is not null and (v.position, v.created_at, v.id) > (l.position, l.created_at, l.id) then 0 else 1 end,
+        v.position, v.created_at, v.id
+      limit 1;
+      if found then
+        update public.companies set whatsapp_last_entry = v_entry where id = p_company;
+      end if;
+    end if;
+  end if;
+
+  v_phone := coalesce(nullif(v_phone, ''), nullif(v_main, ''));
+  if v_phone is null then
+    return jsonb_build_object('phone', null, 'entry_id', null, 'mode', v_mode, 'sticky_days', v_sticky);
+  end if;
+
+  insert into public.whatsapp_leads (company_id, rotation_id, seller_id, phone, car_id, page, is_returning)
+  values (p_company, v_entry, v_seller, v_phone, v_car, left(coalesce(p_page, ''), 200), v_returning);
+
+  return jsonb_build_object('phone', v_phone, 'entry_id', v_entry, 'mode', v_mode, 'sticky_days', v_sticky);
+end;
+$$;
+revoke execute on function public.whatsapp_contact(uuid, text, uuid, text) from public;
+grant execute on function public.whatsapp_contact(uuid, text, uuid, text) to anon, authenticated;
+
+-- 50) Conferência: passou para a seção 52, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 51) Modelos de contrato da entrada do veículo ----------------------------------
+-- contract_templates.kind: 'venda' (aparece na tela Contratos) ou 'entrada'
+-- (aparece no cadastro do carro, para a compra do particular, a consignação
+-- etc., com os dados do dono do carro — seção 49). O admin troca na lista de
+-- modelos (a regra de update da seção 47 já é só do admin).
+alter table public.contract_templates add column if not exists kind text not null default 'venda';
+alter table public.contract_templates drop constraint if exists contract_templates_kind_check;
+alter table public.contract_templates add constraint contract_templates_kind_check check (kind in ('venda', 'entrada'));
+
+-- 52) Conferência: passou para a seção 54, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 53) Assinatura digital dos contratos (Autentique) ------------------------------
+-- * signature_requests: cada contrato mandado para assinar, de venda (tela
+--   Contratos) ou de entrada (cadastro do carro), com a situação de cada
+--   assinante. Quem grava é só a Edge Function "assinaturas", com a chave de
+--   serviço. A equipe só lê, então ninguém marca "assinado" à mão. Quem vê
+--   segue a regra dos contratos: admin e gerente veem todos, o vendedor só os
+--   que ele mandou.
+-- * A conta da Autentique é uma só, da WB.Dev. A loja de demonstração
+--   (is_demo) manda em modo de teste, sem custo e sem validade.
+-- * Quando todos assinam, a função guarda o PDF assinado na ficha do cliente
+--   (customer_documents): tipo 'compra' na venda e 'entrada' (novo) na entrada.
+-- * signature_team(): quem pode assinar pela loja (equipe ativa com e-mail,
+--   fora os logins da WB.Dev). Usada na lista "Pela loja", porque o vendedor não
+--   lê a tabela sellers inteira.
+-- * platform_rows conta os envios por loja ("Assinaturas digitais" no uso das
+--   funções da Plataforma e do Desempenho).
+
+alter table public.customer_documents drop constraint if exists customer_documents_doc_type_check;
+alter table public.customer_documents add constraint customer_documents_doc_type_check
+  check (doc_type in ('compra', 'entrada', 'entrega', 'pos_venda', 'garantia', 'financiamento', 'outro'));
+
+create table if not exists public.signature_requests (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  kind text not null default 'venda' check (kind in ('venda', 'entrada')),
+  contract_id uuid references public.contracts(id) on delete set null,
+  car_id uuid references public.cars(id) on delete set null,
+  customer_id uuid references public.customers(id) on delete set null,
+  title text not null default '',
+  file_name text not null default '',
+  provider text not null default 'autentique',
+  external_id text,
+  sandbox boolean not null default false,
+  status text not null default 'enviado' check (status in ('enviado', 'assinado', 'recusado', 'cancelado')),
+  -- [{ role: cliente|dono|loja|testemunha, name, email, public_id, viewed_at, signed_at, rejected_at, reason }]
+  signers jsonb not null default '[]' check (jsonb_typeof(signers) = 'array'),
+  signed_document_id uuid references public.customer_documents(id) on delete set null,
+  sent_by uuid default auth.uid() references auth.users(id) on delete set null,
+  finished_at timestamptz,
+  checked_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists signature_requests_company_id_idx on public.signature_requests (company_id);
+create index if not exists signature_requests_contract_id_idx on public.signature_requests (contract_id);
+create index if not exists signature_requests_car_id_idx on public.signature_requests (car_id);
+create index if not exists signature_requests_customer_id_idx on public.signature_requests (customer_id);
+create unique index if not exists signature_requests_external_idx on public.signature_requests (provider, external_id);
+
+drop trigger if exists signature_requests_set_updated_at on public.signature_requests;
+create trigger signature_requests_set_updated_at
+before update on public.signature_requests
+for each row execute function public.set_updated_at();
+
+-- Carro e cliente da mesma loja (regra geral) + contrato e via assinada
+drop trigger if exists signature_requests_check_company_refs on public.signature_requests;
+create trigger signature_requests_check_company_refs before insert or update on public.signature_requests
+for each row execute function public.check_company_refs();
+
+create or replace function public.signature_requests_check_refs()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if new.contract_id is not null
+     and not exists (select 1 from public.contracts where id = new.contract_id and company_id = new.company_id) then
+    raise exception 'Contrato não encontrado nesta loja' using errcode = '23503';
+  end if;
+  if new.signed_document_id is not null
+     and not exists (select 1 from public.customer_documents where id = new.signed_document_id and company_id = new.company_id) then
+    raise exception 'Documento não encontrado nesta loja' using errcode = '23503';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists signature_requests_check_refs on public.signature_requests;
+create trigger signature_requests_check_refs before insert or update on public.signature_requests
+for each row execute function public.signature_requests_check_refs();
+
+alter table public.signature_requests enable row level security;
+revoke insert, update, delete on public.signature_requests from anon, authenticated;
+
+drop policy if exists "Team can read signature requests" on public.signature_requests;
+create policy "Team can read signature requests"
+on public.signature_requests for select
+to authenticated
+using (company_id = public.current_company_id() and (public.is_company_staff() or sent_by = auth.uid()));
+
+-- Quem pode assinar pela loja: equipe ativa com e-mail (o do cadastro na
+-- Equipe ou, sem ele, o do login), sem repetir e-mail, fora a equipe WB.Dev
+create or replace function public.signature_team()
+returns table (name text, email text, role text)
+language sql stable security definer set search_path = public
+as $$
+  select t.name, t.email, t.role
+  from (
+    select distinct on (x.email) x.name, x.email, x.role
+    from (
+      select s.name, lower(trim(s.email)) as email, coalesce(uc.role, s.role) as role, 1 as pri
+      from public.sellers s
+      left join public.user_company uc on uc.user_id = s.user_id and uc.company_id = s.company_id
+      where s.company_id = public.current_company_id()
+        and s.active and s.deleted_at is null and trim(s.email) <> ''
+        and not exists (select 1 from public.platform_team pt where pt.user_id = s.user_id)
+      union all
+      select coalesce(nullif(trim(s.name), ''), split_part(u.email, '@', 1)), lower(trim(u.email)), uc.role, 2
+      from public.user_company uc
+      join auth.users u on u.id = uc.user_id
+      left join public.sellers s on s.user_id = uc.user_id and s.company_id = uc.company_id
+      where uc.company_id = public.current_company_id()
+        and (s.id is null or (s.active and s.deleted_at is null))
+        and coalesce(trim(u.email), '') <> ''
+        and not exists (select 1 from public.platform_team pt where pt.user_id = uc.user_id)
+    ) x
+    order by x.email, x.pri
+  ) t
+  where public.current_company_id() is not null
+  order by t.name
+$$;
+revoke execute on function public.signature_team() from anon, public;
+grant execute on function public.signature_team() to authenticated;
+
+-- Contador por loja: envios para assinar no uso das funções
+create or replace function public.platform_rows(p_start date, p_end date, p_company uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_prev_start date;
+  v_prev_end date;
+  v_result jsonb;
+begin
+  if p_start is null or p_end is null or p_end < p_start or p_end - p_start > 400 then
+    raise exception 'Período inválido' using errcode = '22023';
+  end if;
+  v_prev_end := p_start - 1;
+  v_prev_start := p_start - (p_end - p_start + 1);
+
+  select coalesce(jsonb_agg(s.store order by s.is_demo, s.name), '[]'::jsonb) into v_result
+  from (
+    select c.is_demo, c.name, jsonb_build_object(
+      'id', c.id,
+      'slug', c.slug,
+      'name', c.name,
+      'site_url', c.site_url,
+      'is_demo', c.is_demo,
+      'created_at', c.created_at,
+      'stock_alert_days', c.stock_alert_days,
+      'whatsapp_mode', c.whatsapp_mode,
+      'whatsapp_ok', c.whatsapp_main <> '',
+      'settings_customized', c.panel_settings <> '{}'::jsonb,
+      'site', (
+        select jsonb_build_object(
+          'visits', coalesce(sum(v.visits) filter (where v.day between p_start and p_end), 0),
+          'visitors', coalesce(sum(v.visitors) filter (where v.day between p_start and p_end), 0),
+          'visits_prev', coalesce(sum(v.visits) filter (where v.day between v_prev_start and v_prev_end), 0),
+          'visitors_prev', coalesce(sum(v.visitors) filter (where v.day between v_prev_start and v_prev_end), 0))
+        from public.site_visits_daily v
+        where v.company_id = c.id and v.day between v_prev_start and p_end),
+      'car_views', (
+        select jsonb_build_object(
+          'views', coalesce(sum(x.views) filter (where x.day between p_start and p_end), 0),
+          'views_prev', coalesce(sum(x.views) filter (where x.day between v_prev_start and v_prev_end), 0))
+        from public.car_views_daily x
+        where x.company_id = c.id and x.day between v_prev_start and p_end),
+      'leads', (
+        select jsonb_build_object(
+          'total', count(*) filter (where d between p_start and p_end),
+          'prev', count(*) filter (where d between v_prev_start and v_prev_end))
+        from (select (l.created_at at time zone 'America/Fortaleza')::date as d
+              from public.whatsapp_leads l where l.company_id = c.id) l),
+      'stock', (
+        select jsonb_build_object(
+          'available', count(*) filter (where k.status = 'disponivel' and not k.hidden),
+          'reserved', count(*) filter (where k.status = 'reservado'),
+          'maintenance', count(*) filter (where k.status = 'manutencao'),
+          'hidden', count(*) filter (where k.hidden and k.status <> 'vendido'),
+          'in_stock', count(*) filter (where k.status <> 'vendido'),
+          'no_photo', count(*) filter (where k.status = 'disponivel' and not k.hidden
+                                         and jsonb_array_length(coalesce(k.images, '[]'::jsonb)) = 0),
+          'stale', count(*) filter (where k.status = 'disponivel'
+                                      and current_date - coalesce(k.purchase_date, (k.created_at at time zone 'America/Fortaleza')::date) > c.stock_alert_days),
+          'added', count(*) filter (where (k.created_at at time zone 'America/Fortaleza')::date between p_start and p_end),
+          'added_prev', count(*) filter (where (k.created_at at time zone 'America/Fortaleza')::date between v_prev_start and v_prev_end),
+          'last_added_at', max(k.created_at),
+          'last_updated_at', max(k.updated_at))
+        from public.cars k
+        where k.company_id = c.id),
+      'sales', (
+        select jsonb_build_object(
+          'sold', count(*) filter (where x.sale_date between p_start and p_end),
+          'sold_prev', count(*) filter (where x.sale_date between v_prev_start and v_prev_end),
+          'sold_site', count(*) filter (where x.sale_date between p_start and p_end and x.from_site),
+          'sold_site_prev', count(*) filter (where x.sale_date between v_prev_start and v_prev_end and x.from_site),
+          'total', count(*))
+        from (
+          select s.sale_date, exists (
+            select 1 from public.whatsapp_leads l
+            where l.company_id = s.company_id and l.car_id = s.car_id
+              and (l.created_at at time zone 'America/Fortaleza')::date <= s.sale_date) as from_site
+          from public.sales s
+          where s.company_id = c.id) x),
+      'usage', (
+        select jsonb_build_object(
+          'last_activity_at', max(a.created_at),
+          'last_work_at', max(a.created_at) filter (where a.entity <> 'auth'),
+          'activities', count(*) filter (where a.entity <> 'auth' and a.d between p_start and p_end),
+          'activities_prev', count(*) filter (where a.entity <> 'auth' and a.d between v_prev_start and v_prev_end),
+          'logins', count(*) filter (where a.entity = 'auth' and a.d between p_start and p_end),
+          'active_users', count(distinct a.user_id) filter (where a.d between p_start and p_end),
+          'active_days', count(distinct a.d) filter (where a.entity <> 'auth' and a.d between p_start and p_end))
+        from (select x.*, (x.created_at at time zone 'America/Fortaleza')::date as d
+              from public.activity_log x where x.company_id = c.id) a),
+      'last_login_at', (
+        select max(u.last_sign_in_at)
+        from public.user_company uc join auth.users u on u.id = uc.user_id
+        where uc.company_id = c.id),
+      'team', jsonb_build_object(
+        'admins', (select count(*) from public.user_company uc where uc.company_id = c.id and uc.role = 'admin'),
+        'managers', (select count(*) from public.sellers t
+                     where t.company_id = c.id and t.role = 'manager' and t.active and t.deleted_at is null),
+        'sellers', (select count(*) from public.sellers t
+                    where t.company_id = c.id and t.role = 'seller' and t.active and t.deleted_at is null)),
+      'features', jsonb_build_object(
+        'customers', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customers x where x.company_id = c.id),
+        'customer_contacts', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customer_contacts x where x.company_id = c.id),
+        'customer_interests', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customer_interests x where x.company_id = c.id),
+        'reservations', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.car_reservations x where x.company_id = c.id),
+        'contracts', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.contracts x where x.company_id = c.id),
+        'contract_templates', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.contract_templates x where x.company_id = c.id),
+        'financings', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customer_financings x where x.company_id = c.id),
+        'external_financings', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.external_financings x where x.company_id = c.id),
+        'expenses', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.car_expenses x where x.company_id = c.id),
+        'customer_documents', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.customer_documents x where x.company_id = c.id),
+        'signatures', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where (x.created_at at time zone 'America/Fortaleza')::date between p_start and p_end)) from public.signature_requests x where x.company_id = c.id),
+        'sales', (select jsonb_build_object('total', count(*), 'period', count(*) filter (where x.sale_date between p_start and p_end)) from public.sales x where x.company_id = c.id),
+        'rotation', (select jsonb_build_object('total', count(*) filter (where x.active), 'period', 0) from public.whatsapp_rotation x where x.company_id = c.id))
+    ) as store
+    from public.companies c
+    where p_company is null or c.id = p_company
+  ) s;
+
+  return v_result;
+end $$;
+revoke execute on function public.platform_rows(date, date, uuid) from anon, authenticated, public;
+
+-- 54) Conferência: passou para a seção 56, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 55) RENAVE: entrada e saída de cada carro no estoque ----------------------------
+-- Resolução Contran 1.026/2026: a loja registra no RENAVE a entrada e a saída de
+-- cada veículo, por uma integradora autorizada. Enquanto a integração com a
+-- integradora não fica pronta, a equipe marca aqui a situação, a data e o
+-- protocolo, e o painel avisa o que falta (pendências do início e filtro no
+-- estoque). Situação: 'pendente', 'registrado' ou 'dispensado' (não precisa).
+-- A saída só conta como pendente depois de vendido, e o painel ignora os carros
+-- vendidos antes de 28/09/2026 (fim do prazo da resolução; regra em
+-- utils/renave.js), sem precisar mexer nos dados. O site público não lê estas
+-- colunas (fora da lista do "anon").
+alter table public.cars add column if not exists renave_entry_status text not null default 'pendente';
+alter table public.cars add column if not exists renave_exit_status text not null default 'pendente';
+alter table public.cars add column if not exists renave_entry_on date;
+alter table public.cars add column if not exists renave_entry_protocol text not null default '';
+alter table public.cars add column if not exists renave_exit_on date;
+alter table public.cars add column if not exists renave_exit_protocol text not null default '';
+
+alter table public.cars drop constraint if exists cars_renave_entry_status_check;
+alter table public.cars add constraint cars_renave_entry_status_check
+  check (renave_entry_status in ('pendente', 'registrado', 'dispensado'));
+alter table public.cars drop constraint if exists cars_renave_exit_status_check;
+alter table public.cars add constraint cars_renave_exit_status_check
+  check (renave_exit_status in ('pendente', 'registrado', 'dispensado'));
+
+-- Estoque da equipe (admin, gerente e vendedor): tudo menos o custo de compra.
+drop view if exists public.staff_cars;
+create view public.staff_cars as
+select
+  id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
+  category, condition, price, original_price, badge, status, highlights, description, images,
+  featured, hidden, sold_at, plate, chassis, renavam, documents, customer_id, stock_alert_days,
+  company_id, created_at, updated_at, internal_notes, intake_items, inspection,
+  entry_type, owner_customer_id, whatsapp_seller_id,
+  renave_entry_status, renave_entry_on, renave_entry_protocol,
+  renave_exit_status, renave_exit_on, renave_exit_protocol
+from public.cars
+where company_id = public.current_company_id() and public.can_edit_stock()
+with local check option;
+
+revoke all on public.staff_cars from anon, authenticated, public;
+grant select, insert, update on public.staff_cars to authenticated;
+
+-- 56) Conferência: passou para a seção 58, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 57) Dados fiscais da loja e endereço do cliente em partes ----------------------
+-- Preparação da NF-e (emissora Focus NFe, conta da WB.Dev; decisão de 06/10/2026):
+-- * companies.fiscal: razão social, CNPJ, Inscrição Estadual, regime (CRT da
+--   NF-e: 1 Simples Nacional, 2 Simples com excesso de sublimite, 3 Regime
+--   Normal, 4 MEI), endereço completo, telefone e e-mail da loja. Só o admin
+--   grava (save_company_fiscal, que confere CNPJ, CEP, UF e código IBGE); a
+--   equipe lê, e os documentos (contrato, termo de entrega, recibo) usam estes
+--   dados no lugar dos guardados no navegador. O site público não lê companies.
+-- * customers.address_parts: CEP, rua, número, complemento, bairro, cidade,
+--   código IBGE e UF do cliente, que a nota exige. O painel continua gravando o
+--   endereço completo em "address" (usado nos contratos).
+alter table public.companies add column if not exists fiscal jsonb not null default '{}';
+alter table public.companies drop constraint if exists companies_fiscal_check;
+alter table public.companies add constraint companies_fiscal_check check (jsonb_typeof(fiscal) = 'object');
+
+alter table public.customers add column if not exists address_parts jsonb not null default '{}';
+alter table public.customers drop constraint if exists customers_address_parts_check;
+alter table public.customers add constraint customers_address_parts_check check (jsonb_typeof(address_parts) = 'object');
+
+create or replace function public.save_company_fiscal(p jsonb)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v jsonb := '{}'::jsonb;
+  v_key text;
+  v_text text;
+begin
+  if v_company is null or not public.is_company_admin() then
+    raise exception 'Só o administrador altera os dados fiscais' using errcode = '42501';
+  end if;
+  -- Só as chaves conhecidas, sem espaços sobrando; vazio não é guardado
+  foreach v_key in array array['legal_name', 'trade_name', 'cnpj', 'ie', 'crt', 'zip', 'street', 'number', 'complement',
+                               'district', 'city', 'city_code', 'state', 'phone', 'email'] loop
+    v_text := left(btrim(coalesce(p->>v_key, '')), 160);
+    if v_key in ('cnpj', 'zip', 'city_code') then v_text := regexp_replace(v_text, '\D', '', 'g'); end if;
+    if v_key = 'ie' and upper(v_text) <> 'ISENTO' then v_text := regexp_replace(v_text, '\D', '', 'g'); end if;
+    if v_key in ('state', 'ie') then v_text := upper(v_text); end if;
+    if v_text <> '' then v := v || jsonb_build_object(v_key, v_text); end if;
+  end loop;
+  if v ? 'cnpj' and length(v->>'cnpj') <> 14 then raise exception 'CNPJ precisa ter 14 números' using errcode = '22023'; end if;
+  if v ? 'zip' and length(v->>'zip') <> 8 then raise exception 'CEP precisa ter 8 números' using errcode = '22023'; end if;
+  if v ? 'city_code' and length(v->>'city_code') <> 7 then raise exception 'Código IBGE da cidade precisa ter 7 números' using errcode = '22023'; end if;
+  if v ? 'state' and (v->>'state') !~ '^[A-Z]{2}$' then raise exception 'UF inválida' using errcode = '22023'; end if;
+  if v ? 'crt' and (v->>'crt') not in ('1', '2', '3', '4') then raise exception 'Regime inválido' using errcode = '22023'; end if;
+
+  update public.companies set fiscal = v where id = v_company;
+  insert into public.activity_log (company_id, user_id, user_email, action, entity, label, details)
+  values (v_company, auth.uid(), (select email from auth.users where id = auth.uid()), 'update', 'companies',
+          'Dados fiscais da loja', '');
+  return v;
+end;
+$$;
+revoke execute on function public.save_company_fiscal(jsonb) from anon, public;
+grant execute on function public.save_company_fiscal(jsonb) to authenticated;
+
+-- 58) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

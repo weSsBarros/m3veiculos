@@ -12,6 +12,7 @@ import CarCarousel from '../components/CarCarousel.jsx'
 import SetupNotice from '../components/SetupNotice.jsx'
 import FinancingModal from '../components/FinancingModal.jsx'
 import './CarDetail.css'
+import { useCarSeo } from '../utils/carSeo.js'
 
 const HIGHLIGHT_ICONS = {
   'Revisado na concessionária': Wrench,
@@ -80,6 +81,9 @@ export default function CarDetail() {
     }
   }, [car])
 
+  // Resumo e dados estruturados para o Google (preço, km, fotos)
+  useCarSeo(car, 'M&3 Veículos')
+
   if (!isSupabaseConfigured) return <SetupNotice />
 
   if (loading) {
@@ -115,7 +119,7 @@ export default function CarDetail() {
     ['Câmbio', car.transmission],
     ['Combustível', car.fuel],
     ['Cor', car.color],
-    ['Portas', car.doors],
+    ...(car.category === 'moto' ? [] : [['Portas', car.doors]]),
     ['Condição', car.condition],
   ]
 

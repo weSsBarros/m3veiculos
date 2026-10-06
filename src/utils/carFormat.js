@@ -7,6 +7,30 @@ export const CATEGORIES = [
   { slug: 'picape', label: 'Picape', image: '/categorias/picape.webp' },
 ]
 
+// Moto: aparece no painel sempre; no site, só nas lojas que têm moto no
+// estoque (siteCategories). Moto não tem portas (doors = 0).
+export const MOTO_CATEGORY = { slug: 'moto', label: 'Moto', image: '' }
+export const VEHICLE_CATEGORIES = [...CATEGORIES, MOTO_CATEGORY]
+
+export function vehicleCategoryLabel(slug) {
+  return VEHICLE_CATEGORIES.find((c) => c.slug === slug)?.label || slug
+}
+
+export function siteCategories(cars) {
+  return (cars || []).some((c) => c.category === 'moto') ? VEHICLE_CATEGORIES : CATEGORIES
+}
+
+// Como o carro entrou na loja (seção 49). Repasse não aparece no site.
+export const ENTRY_TYPES = [
+  { value: 'showroom', label: 'Showroom (veículo próprio)', short: 'Showroom' },
+  { value: 'consignado', label: 'Consignado (o dono deixa para a loja vender)', short: 'Consignado' },
+  { value: 'repasse', label: 'Repasse (venda para outras lojas, não aparece no site)', short: 'Repasse' },
+]
+
+export function entryTypeLabel(value) {
+  return ENTRY_TYPES.find((t) => t.value === value)?.short || 'Showroom'
+}
+
 export const BRANDS = [
   'Toyota', 'Honda', 'Volkswagen', 'Chevrolet', 'Jeep',
   'Fiat', 'Hyundai', 'Renault', 'Nissan', 'Ford',

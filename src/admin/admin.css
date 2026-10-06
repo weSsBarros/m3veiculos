@@ -1810,6 +1810,27 @@ a.admin-form-note {
   background: #f5a623;
 }
 
+.stock-card-badge.is-entry {
+  background: #2446c8;
+}
+
+.admin-hidden-badge.is-entry {
+  background: rgba(36, 70, 200, 0.12);
+  color: #1f3fae;
+  margin-left: 4px;
+}
+
+/* RENAVE pendente (seção 55) */
+.stock-card-badge.is-renave {
+  background: #b45309;
+}
+
+.admin-hidden-badge.is-renave {
+  background: rgba(245, 166, 35, 0.16);
+  color: #8a5300;
+  margin-left: 4px;
+}
+
 .stock-card-days {
   position: absolute;
   right: 10px;
@@ -4635,4 +4656,629 @@ span.car-plate {
 .client-reminders-title {
   margin: 18px 0 8px;
   font-size: 14px;
+}
+
+/* Editor de modelos de contrato (Contratos → Modelos → Editar) ------------- */
+.tpl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  margin-bottom: 14px;
+}
+
+.tpl-view-switch {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.tpl-view-switch button,
+.tpl-inline-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.tpl-view-switch button.is-active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+/* Ferramentas em cima do parágrafo aberto (não empurram o texto) */
+.tpl-inline-tools {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: -6px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: calc(100% + 12px);
+  background: #fff;
+  border: 1px solid #d5dbe5;
+  border-radius: 8px;
+  padding: 3px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+  font-family: inherit;
+}
+
+.tpl-inline-tools button {
+  border-radius: 6px;
+  color: #1b1b1b;
+  font-size: 12.5px;
+  padding: 5px 8px;
+}
+
+.tpl-inline-tools button:hover,
+.tpl-inline-tools button.is-active {
+  background: #eef1f6;
+}
+
+.tpl-float-save {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 30;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28);
+}
+
+.tpl-preview-data {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tpl-save {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.tpl-picker,
+.tpl-chip-panel {
+  margin: 4px -6px 10px;
+  background: #f7f8fb;
+  border: 1px solid #d5dbe5;
+  border-radius: 8px;
+  padding: 10px;
+  color: #1b1b1b;
+  font-size: 13px;
+}
+
+.tpl-picker-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.tpl-toggle {
+  border: 1px solid var(--color-border);
+  background: none;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.tpl-toggle.is-on {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.tpl-icon-btn {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.tpl-picker-group {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+  align-items: start;
+  margin-bottom: 6px;
+}
+
+.tpl-picker-group > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  padding-top: 5px;
+}
+
+.tpl-picker-group > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tpl-picker-group button {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.tpl-picker-group button:hover {
+  border-color: var(--color-primary);
+}
+
+.tpl-chip-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.tpl-chip-panel label {
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  min-width: 200px;
+}
+
+.tpl-chip-help {
+  flex: 1 1 260px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.tpl-check {
+  display: flex;
+  gap: 10px;
+  background: rgba(214, 140, 0, 0.1);
+  color: #8a5a00;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tpl-check p {
+  margin: 0 0 4px;
+}
+
+/* O documento parece papel, como no Word */
+.tpl-doc {
+  background: #fff;
+  color: #1b1b1b;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 40px clamp(14px, 6vw, 64px);
+  max-width: 860px;
+  margin: 0 auto 20px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.tpl-par-row {
+  position: relative;
+}
+
+.tpl-par {
+  min-height: 1.5em;
+  padding: 2px 6px;
+  margin: 0 -6px 4px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  outline: none;
+}
+
+.tpl-par:hover {
+  background: rgba(36, 70, 200, 0.05);
+}
+
+.tpl-par.is-changed {
+  box-shadow: inset 3px 0 0 rgba(36, 70, 200, 0.35);
+}
+
+.tpl-par.is-editing {
+  background: #fff;
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.tpl-par.is-table {
+  border-left: 2px dashed #c9ced6;
+  padding-left: 10px;
+}
+
+.tpl-par.is-readonly {
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.tpl-table-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a93a3;
+  margin: 8px 0 2px;
+}
+
+.tpl-lock {
+  position: absolute;
+  left: -20px;
+  top: 6px;
+  color: #8a93a3;
+}
+
+.tpl-chip {
+  display: inline-block;
+  padding: 0 7px;
+  margin: 0 1px;
+  border-radius: 999px;
+  background: #e7edff;
+  color: #1f3fae;
+  font-size: 0.86em;
+  line-height: 1.6;
+  font-weight: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tpl-chip-open,
+.tpl-chip-close,
+.tpl-chip-inverse {
+  background: #f1e8ff;
+  color: #6a2fb8;
+}
+
+.tpl-chip.is-selected {
+  outline: 2px solid #2446c8;
+  outline-offset: 1px;
+}
+
+.tpl-chip.is-unknown {
+  background: #fde5e3;
+  color: #b4231a;
+}
+
+.tpl-obj {
+  display: inline-block;
+  padding: 0 7px;
+  border: 1px dashed #b8bfcc;
+  border-radius: 4px;
+  font-size: 0.82em;
+  color: #6b7280;
+  user-select: none;
+}
+
+.tpl-obj::before {
+  content: '▣ ';
+}
+
+.tpl-tab {
+  display: inline-block;
+  width: 2.5em;
+  border-bottom: 1px dotted #b8bfcc;
+}
+
+/* Prévia do Word (DocxPreview.jsx) */
+.docx-preview {
+  position: relative;
+}
+
+.docx-preview-pages {
+  max-height: 72vh;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+}
+
+.docx-preview-pages .docx-wrapper {
+  background: transparent;
+  padding: 16px;
+}
+
+.docx-preview-pages .docx-wrapper > section.docx {
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.14);
+  margin-bottom: 16px;
+}
+
+.docx-preview-status {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 1;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 680px) {
+  .tpl-save {
+    margin-left: 0;
+    width: 100%;
+  }
+  .tpl-save .btn {
+    flex: 1;
+  }
+  .tpl-lock {
+    display: none;
+  }
+  .tpl-picker-group {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .tpl-picker-group > span {
+    padding-top: 0;
+  }
+}
+
+/* Textos com IA no cadastro do carro */
+.ai-texts-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ai-texts-head h2 {
+  margin: 0;
+}
+
+.ai-caption {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-alt);
+}
+
+.ai-caption-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13.5px;
+}
+
+/* Contratos da entrada (cadastro do carro) e tipo do modelo */
+.entry-contracts {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.entry-contracts h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.entry-contracts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.entry-contracts-actions label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 220px;
+}
+
+.template-kind-select {
+  font-size: 12px;
+  padding: 3px 6px;
+  max-width: 160px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface, #fff);
+}
+
+/* Assinatura digital dos contratos (Autentique, seção 53) */
+.signature-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.signature-status-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.signature-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signature-signers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.signature-signers li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface, #fff);
+  min-width: 0;
+}
+
+.signature-signers li strong,
+.signature-signers li .admin-table-sub {
+  overflow-wrap: anywhere;
+}
+
+.signature-signers li.is-assinou {
+  border-left-color: var(--color-success);
+}
+
+.signature-signers li.is-recusou {
+  border-left-color: var(--color-danger);
+}
+
+.signature-signers li.is-abriu {
+  border-left-color: #f5a623;
+}
+
+.signature-signer-state {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.signature-cancel {
+  color: var(--color-danger);
+}
+
+.signature-witness {
+  align-items: end;
+}
+
+.signature-witness .admin-action-btn {
+  justify-self: start;
+  width: fit-content;
+}
+
+.contract-history-table .signature-status.is-compact {
+  min-width: 220px;
+}
+
+.signature-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.signature-list > li {
+  list-style: none;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.signature-list-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.doc-list li > .signature-status {
+  flex-basis: 100%;
+  order: 3;
+}
+
+/* Endereço do cliente em partes (seção 57) */
+.customer-address {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px 4px;
+  margin: 0;
+  min-width: 0;
+}
+
+.customer-address legend {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 6px;
+}
+
+/* Biblioteca "Modelos prontos" (contratos) */
+.contract-library h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.contract-library-group h3 {
+  font-size: 14px;
+  font-weight: 800;
+  margin: 14px 0 8px;
+}
+
+.contract-library-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.contract-library-group li {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.contract-library-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+
+.contract-library-item > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.contract-library-item p {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 4px 0 0;
 }

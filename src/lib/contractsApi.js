@@ -29,6 +29,9 @@ function fromRow(row) {
     saleCity: row.sale_city || '',
     notes: row.notes || '',
     documentType: row.document_type || 'contrato',
+    // Modelo próprio usado (seção 47): o "Baixar" gera de novo com o mesmo arquivo
+    templateId: row.template_id || null,
+    templateFilePath: row.template_file_path || null,
     createdBy: row.created_by || null,
     createdAt: row.created_at,
   }
@@ -58,6 +61,8 @@ function toRow(contract) {
     sale_city: contract.saleCity || '',
     notes: contract.notes || '',
     document_type: contract.documentType || 'contrato',
+    template_id: contract.templateId || null,
+    template_file_path: contract.templateFilePath || null,
   }
 }
 

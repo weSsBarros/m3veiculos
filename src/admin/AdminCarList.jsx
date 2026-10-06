@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Pencil, Trash2, RefreshCcw, Receipt, Star, Eye, EyeOff, Search, Handshake, LayoutGrid, List, ExternalLink, BellRing, Bookmark, ListChecks } from 'lucide-react'
 import { fetchAllCarsAdmin, updateCarStatus, updateCarFeatured, updateCarHidden, deleteCar } from '../lib/carsApi.js'
 import { registerSaleFromDialog } from '../lib/saleFlow.js'
@@ -10,8 +10,9 @@ import { thumbUrl } from '../utils/carPhotos.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchSales, deleteSaleForCar } from '../lib/salesApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
-import { formatCurrency, CATEGORIES, daysInStock, isStockStale, stockAlertThreshold, matchesCarSearch, formatDateBR } from '../utils/carFormat.js'
+import { formatCurrency, VEHICLE_CATEGORIES, ENTRY_TYPES, entryTypeLabel, vehicleCategoryLabel, daysInStock, isStockStale, stockAlertThreshold, matchesCarSearch, formatDateBR } from '../utils/carFormat.js'
 import { DEFAULT_BANKS } from '../utils/payment.js'
+import { renavePending, renavePendingLabel } from '../utils/renave.js'
 import { applyStockAlertToAll, fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import { DEFAULT_SALE_CHECKLIST } from '../utils/saleChecklist.js'
 import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
@@ -123,6 +124,8 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
         <div className="stock-card-badges">
           {car.featured && <span className="stock-card-badge is-featured"><Star size={12} fill="currentColor" /> Destaque</span>}
           {car.hidden && <span className="stock-card-badge is-hidden"><EyeOff size={12} /> Oculto no site</span>}
+          {car.entryType && car.entryType !== 'showroom' && <span className="stock-card-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
+          {renavePendingLabel(car) && <span className="stock-card-badge is-renave">{renavePendingLabel(car)}</span>}
         </div>
         <span
           className={`stock-card-days ${stale ? 'is-stale' : ''}`}
@@ -257,10 +260,12 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                 <td>
                   <strong>{car.brand} {car.model}</strong>
                   <span className="admin-table-sub">
-                    {car.version} · {car.modelYear} · <span className="admin-table-capitalize">{car.category}</span>
+                    {car.version} · {car.modelYear} · {vehicleCategoryLabel(car.category)}
                   </span>
                   {car.plate && <span className="car-plate">{car.plate.toUpperCase()}</span>}
                   {car.hidden && <span className="admin-hidden-badge">Oculto</span>}
+                  {car.entryType && car.entryType !== 'showroom' && <span className="admin-hidden-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
+                  {renavePendingLabel(car) && <span className="admin-hidden-badge is-renave">{renavePendingLabel(car)}</span>}
                   {car.status === 'vendido' && soldLabel(sale, sellerName, canEditSales) && (
                     <span className="admin-table-sub">{soldLabel(sale, sellerName, canEditSales)}</span>
                   )}
@@ -322,13 +327,15 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   {car.plate && <> · <span className="car-plate">{car.plate.toUpperCase()}</span></>}
                 </span>
                 <span className="admin-card-meta">
-                  <span className="admin-table-capitalize">{car.category}</span> · {car.km.toLocaleString('pt-BR')} km ·{' '}
+                  {vehicleCategoryLabel(car.category)} · {car.km.toLocaleString('pt-BR')} km ·{' '}
                   <span className={isStockStale(car, alertDefault) ? 'stock-days-stale' : ''}>
                     {daysInStock(car)} {daysInStock(car) === 1 ? 'dia' : 'dias'} em estoque
                   </span>{' '}
                   · {formatViews(views)}
                 </span>
                 {car.hidden && <span className="admin-hidden-badge">Oculto</span>}
+                {car.entryType && car.entryType !== 'showroom' && <span className="admin-hidden-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
+                {renavePendingLabel(car) && <span className="admin-hidden-badge is-renave">{renavePendingLabel(car)}</span>}
                 {car.status === 'vendido' && soldLabel(sale, sellerName, canEditSales) && (
                   <span className="admin-card-meta">{soldLabel(sale, sellerName, canEditSales)}</span>
                 )}
@@ -387,6 +394,9 @@ export default function AdminCarList() {
   const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
   const [minDays, setMinDays] = useState('')
   const [onlyAlert, setOnlyAlert] = useState(false)
+  // RENAVE pendente (seção 55): vem marcado pelo aviso do início (?renave=pendente)
+  const [searchParams] = useSearchParams()
+  const [onlyRenave, setOnlyRenave] = useState(() => searchParams.get('renave') === 'pendente')
   const [alertDialogOpen, setAlertDialogOpen] = useState(false)
   const [alertDays, setAlertDays] = useState('')
   const [alertSaving, setAlertSaving] = useState(false)
@@ -398,6 +408,7 @@ export default function AdminCarList() {
   const [busyId, setBusyId] = useState(null)
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('todas')
+  const [entryFilter, setEntryFilter] = useState('todas')
   const [statusDialog, setStatusDialog] = useState(null)
   const [sales, setSales] = useState([])
   const [sellers, setSellers] = useState([])
@@ -508,20 +519,23 @@ export default function AdminCarList() {
     return rows.filter(({ car }) => {
       const matchesQuery = matchesCarSearch(car, search)
       const matchesCategory = categoryFilter === 'todas' || car.category === categoryFilter
+      const matchesEntry = entryFilter === 'todas' || (car.entryType || 'showroom') === entryFilter
       // Filtros de tempo em estoque só fazem sentido para carros não vendidos
       const matchesDays = !hasMinDays || (car.status !== 'vendido' && daysInStock(car) > minDaysValue)
       const matchesAlert = !onlyAlert || isStockStale(car, alertDefault)
-      return matchesQuery && matchesCategory && matchesDays && matchesAlert
+      const matchesRenave = !onlyRenave || renavePending(car)
+      return matchesQuery && matchesCategory && matchesEntry && matchesDays && matchesAlert && matchesRenave
     })
-  }, [rows, search, categoryFilter, hasMinDays, minDaysValue, onlyAlert, alertDefault])
+  }, [rows, search, categoryFilter, entryFilter, hasMinDays, minDaysValue, onlyAlert, onlyRenave, alertDefault])
 
   const staleCount = rows.filter(({ car }) => isStockStale(car, alertDefault)).length
+  const renaveCount = rows.filter(({ car }) => renavePending(car)).length
 
   const availableRows = filteredRows.filter((r) => r.car.status === 'disponivel')
   const maintenanceRows = filteredRows.filter((r) => r.car.status === 'manutencao')
   const reservedRows = filteredRows.filter((r) => r.car.status === 'reservado')
   const soldRows = filteredRows.filter((r) => r.car.status === 'vendido')
-  const isFiltering = search.trim() !== '' || categoryFilter !== 'todas' || hasMinDays || onlyAlert
+  const isFiltering = search.trim() !== '' || categoryFilter !== 'todas' || entryFilter !== 'todas' || hasMinDays || onlyAlert || onlyRenave
 
   useEffect(() => {
     load()
@@ -797,7 +811,11 @@ export default function AdminCarList() {
           </label>
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="todas">Todas as categorias</option>
-            {CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
+            {VEHICLE_CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
+          </select>
+          <select value={entryFilter} onChange={(e) => setEntryFilter(e.target.value)} aria-label="Tipo de entrada">
+            <option value="todas">Todos os tipos de entrada</option>
+            {ENTRY_TYPES.map((t) => <option key={t.value} value={t.value}>{t.short}</option>)}
           </select>
           <label className="admin-days-filter">
             Há mais de
@@ -818,6 +836,15 @@ export default function AdminCarList() {
             aria-pressed={onlyAlert}
           >
             <BellRing size={14} /> Em alerta ({staleCount})
+          </button>
+          <button
+            type="button"
+            className={`admin-alert-chip ${onlyRenave ? 'is-active' : ''}`}
+            onClick={() => setOnlyRenave((v) => !v)}
+            aria-pressed={onlyRenave}
+            title="Carros sem a entrada (ou, vendidos, sem a saída) registrada no RENAVE"
+          >
+            RENAVE pendente ({renaveCount})
           </button>
           {(hasMinDays || onlyAlert) && (
             <button type="button" className="admin-clear-filter" onClick={() => { setMinDays(''); setOnlyAlert(false) }}>

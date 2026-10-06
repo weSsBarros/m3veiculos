@@ -48,6 +48,7 @@ const PlatformBilling = lazy(() => import('./admin/platform/PlatformBilling.jsx'
 const PlatformFinance = lazy(() => import('./admin/platform/PlatformFinance.jsx'))
 const PlatformNotices = lazy(() => import('./admin/platform/PlatformNotices.jsx'))
 const PlatformPlans = lazy(() => import('./admin/platform/PlatformPlans.jsx'))
+const ContractTemplateEditor = lazy(() => import('./admin/ContractTemplateEditor.jsx'))
 
 function ScrollToTop() {
   const { pathname } = useLocation()
@@ -166,6 +167,14 @@ export default function App() {
           <Route element={<AdminOnly><Outlet /></AdminOnly>}>
             <Route path="financeiro" element={<AdminFinance />} />
             <Route path="contratos/modelos" element={<AdminContractTemplates />} />
+            <Route
+              path="contratos/modelos/:id"
+              element={
+                <Suspense fallback={<p className="admin-muted">Carregando…</p>}>
+                  <ContractTemplateEditor />
+                </Suspense>
+              }
+            />
             <Route path="configuracoes" element={<AdminSettings />} />
             <Route
               path="desempenho"

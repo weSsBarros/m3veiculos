@@ -8,6 +8,7 @@ import { friendlyUploadError } from './storageErrors.js'
 
 export const CUSTOMER_DOC_TYPES = [
   { value: 'compra', label: 'Contrato de compra' },
+  { value: 'entrada', label: 'Contrato de entrada do carro' },
   { value: 'entrega', label: 'Termo de entrega' },
   { value: 'pos_venda', label: 'Pós-venda' },
   { value: 'garantia', label: 'Garantia' },

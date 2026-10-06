@@ -10,6 +10,10 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
+
+  # robots.txt e sitemap.xml saem do PHP (endereço do próprio site e carros do banco)
+  RewriteRule ^robots\.txt$ api/robots.php [L]
+  RewriteRule ^sitemap\.xml$ api/sitemap.php [L]
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d

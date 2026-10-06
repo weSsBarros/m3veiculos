@@ -47,6 +47,8 @@ export const PENDENCY_TABS = {
   'car-photo': 'estoque',
   'car-price': 'estoque',
   'car-docs': 'estoque',
+  'renave-entry': 'estoque',
+  'renave-exit': 'estoque',
   'interest-match': 'clientes',
   'follow-up': 'clientes',
   'liked-car-gone': 'clientes',

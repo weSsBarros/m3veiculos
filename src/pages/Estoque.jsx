@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { SlidersHorizontal, X } from 'lucide-react'
 import CarCard from '../components/CarCard.jsx'
 import SetupNotice from '../components/SetupNotice.jsx'
-import { CATEGORIES, BRANDS, parseIntBR } from '../utils/carFormat.js'
+import { siteCategories, BRANDS, parseIntBR } from '../utils/carFormat.js'
 import { useCars } from '../context/CarsContext.jsx'
 import './Estoque.css'
 
@@ -96,7 +96,7 @@ export default function Estoque() {
             <SlidersHorizontal size={15} />
             <select value={categoria} onChange={(e) => updateParam('categoria', e.target.value)}>
               <option value="">Todas as categorias</option>
-              {CATEGORIES.map((c) => (
+              {siteCategories(cars).map((c) => (
                 <option key={c.slug} value={c.slug}>{c.label}</option>
               ))}
             </select>

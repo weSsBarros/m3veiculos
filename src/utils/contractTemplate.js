@@ -3,6 +3,17 @@ import { formatCurrency } from './carFormat.js'
 // Minuta padrão de contrato particular de compra e venda de veículo usado.
 // Aviso: é um modelo genérico de referência, não substitui análise jurídica —
 // vale revisar com um advogado/contador antes de usar oficialmente.
+//
+// Versão 2 (06/10/2026): ATPV-e e Renave no lugar do CRV/DUT, comunicação de
+// venda (art. 134 do CTB), indicação de condutor, garantia legal do CDC no lugar
+// do "no estado em que se encontra", dados pessoais (LGPD) e foro com a ressalva
+// do consumidor (art. 101, I, do CDC). Contrato salvo antes sai de novo na
+// versão 1, com o mesmo texto que foi assinado.
+export const CONTRACT_V2_SINCE = '2026-10-06T03:00:00Z'
+
+function versionFor(createdAt) {
+  return createdAt && new Date(createdAt) < new Date(CONTRACT_V2_SINCE) ? 1 : 2
+}
 
 function formatDateExtended(isoDate) {
   if (!isoDate) return ''
@@ -17,7 +28,7 @@ export function buildContractTitle() {
   return 'CONTRATO PARTICULAR DE COMPRA E VENDA DE VEÍCULO AUTOMOTOR'
 }
 
-export function buildContractParagraphs({ company, buyer, vehicle, sale }) {
+function buildContractParagraphsV1({ company, buyer, vehicle, sale }) {
   const vehicleDescription =
     `${vehicle.brand} ${vehicle.model} ${vehicle.version}`.trim() +
     ` — Ano Fab./Modelo: ${vehicle.modelYear || vehicle.year}` +
@@ -87,4 +98,92 @@ export function buildContractSignatures({ company, buyer }) {
     { role: 'VENDEDORA', name: company.name },
     { role: 'COMPRADOR(A)', name: buyer.name },
   ]
+}
+
+function vehicleText(vehicle) {
+  return (
+    `${vehicle.brand} ${vehicle.model} ${vehicle.version}`.trim() +
+    ` — Ano Fab./Modelo: ${vehicle.modelYear || vehicle.year || '—'}` +
+    `, Cor: ${vehicle.color || '—'}` +
+    `, Km: ${vehicle.km != null && vehicle.km !== '' ? Number(vehicle.km).toLocaleString('pt-BR') : '—'}` +
+    `, Placa: ${vehicle.plate || '—'}` +
+    `, Chassi: ${vehicle.chassis || '—'}` +
+    `, Renavam: ${vehicle.renavam || '—'}`
+  )
+}
+
+function buildContractParagraphsV2({ company, buyer, vehicle, sale }) {
+  const date = formatDateExtended(sale.date)
+  const forum = company.city || sale.city || '—'
+  const paragraphs = []
+  let n = 0
+  const clause = (title, text) => {
+    n += 1
+    paragraphs.push(`CLÁUSULA ${n}ª — ${title}\n${text}`)
+  }
+
+  paragraphs.push(
+    `Pelo presente instrumento particular, de um lado ${company.name}, inscrita no CNPJ sob o nº ${company.document}` +
+      `${company.address ? `, com sede em ${company.address}` : ''}` +
+      `${company.phone ? `, telefone ${company.phone}` : ''}` +
+      `${company.email ? `, e-mail ${company.email}` : ''}` +
+      `, doravante denominada VENDEDORA; e de outro lado ${buyer.name}, inscrito(a) no CPF/CNPJ sob o nº ${buyer.document}` +
+      `${buyer.rg ? `, RG nº ${buyer.rg}` : ''}` +
+      `${buyer.address ? `, residente e domiciliado(a) em ${buyer.address}` : ''}` +
+      `${buyer.phone ? `, telefone ${buyer.phone}` : ''}` +
+      `${buyer.email ? `, e-mail ${buyer.email}` : ''}` +
+      `, doravante denominado(a) COMPRADOR(A), têm entre si justo e contratado o seguinte:`
+  )
+
+  clause('DO OBJETO', `O presente contrato tem por objeto a compra e venda do veículo abaixo descrito, com a quilometragem conferida pelo COMPRADOR na entrega: ${vehicleText(vehicle)}.`)
+
+  clause(
+    'DO PREÇO E DA FORMA DE PAGAMENTO',
+    `O veículo é vendido pelo valor de ${formatCurrency(sale.price)}, pago da seguinte forma: ${sale.paymentMethod || 'a combinar entre as partes'}.` +
+      `${sale.paymentDetails ? ` ${sale.paymentDetails}` : ''}` +
+      ' A entrega do veículo e dos documentos de transferência fica condicionada à compensação integral dos valores.'
+  )
+
+  clause(
+    'DA VISTORIA E DO ESTADO DO VEÍCULO',
+    'O COMPRADOR declara que examinou o veículo e teve a oportunidade de testá-lo e de submetê-lo a profissional de sua confiança antes desta compra, que foi informado sobre o seu estado de conservação, compatível com o ano e a quilometragem, e que as avarias aparentes lhe foram apresentadas e consideradas no preço.'
+  )
+
+  clause(
+    'DOS DÉBITOS, DAS MULTAS E DAS RESPONSABILIDADES',
+    `São de responsabilidade da VENDEDORA os débitos (IPVA, licenciamento e taxas) e as multas por infrações cometidas até a data da entrega${date ? ` (${date})` : ''}. A partir da entrega, o COMPRADOR responde por todos os débitos, multas, pontuações, danos e responsabilidades decorrentes do uso, da posse e da propriedade do veículo, ainda que a transferência não tenha sido concluída, obrigando-se a assinar a indicação de condutor e a reembolsar à VENDEDORA o que ela vier a pagar referente a esse período.`
+  )
+
+  clause(
+    'DA TRANSFERÊNCIA',
+    'A VENDEDORA entregará a Autorização para Transferência de Propriedade do Veículo (ATPV-e) ou o documento exigido pelo Detran e registrará a saída do veículo de seu estoque no Registro Nacional de Veículos em Estoque (Renave), quando aplicável. O COMPRADOR deve concluir a transferência para o seu nome em até 30 (trinta) dias (art. 123, § 1º, do Código de Trânsito Brasileiro), arcando com as taxas e a vistoria. Não feita a transferência no prazo, a VENDEDORA poderá comunicar a venda ao Detran (art. 134 do Código de Trânsito Brasileiro), e o COMPRADOR responderá pelas multas e demais consequências do atraso.'
+  )
+
+  clause(
+    'DA GARANTIA',
+    'O veículo tem a garantia legal de 90 (noventa) dias para vícios não informados ao COMPRADOR, contados da entrega (art. 26, II, do Código de Defesa do Consumidor), além da garantia contratual que a VENDEDORA conceder por termo escrito. Não constituem vício o desgaste natural compatível com o ano e a quilometragem nem os danos causados por mau uso, acidente ou falta de manutenção. Constatado um vício, o COMPRADOR deve comunicá-lo à VENDEDORA e apresentar o veículo para o reparo, que será feito em até 30 (trinta) dias (art. 18, § 1º, do Código de Defesa do Consumidor).'
+  )
+
+  if (sale.notes) clause('DAS OBSERVAÇÕES ADICIONAIS', sale.notes)
+
+  clause(
+    'DOS DADOS PESSOAIS',
+    'As partes autorizam o tratamento dos dados pessoais deste contrato para a sua execução, para o cumprimento de obrigações legais e regulatórias (Detran, Senatran/Renave, Receita Federal e instituições financeiras envolvidas) e para o exercício regular de direitos, nos termos da Lei nº 13.709/2018 (LGPD).'
+  )
+
+  clause(
+    'DO FORO',
+    `Fica eleito o foro da comarca de ${forum} para dirimir as questões deste contrato, ressalvado ao COMPRADOR, quando consumidor, o direito de propor ação no foro do seu domicílio (art. 101, I, do Código de Defesa do Consumidor).`
+  )
+
+  paragraphs.push(
+    'E por estarem assim justos e contratados, firmam o presente instrumento em 2 (duas) vias de igual teor, na presença das testemunhas abaixo.'
+  )
+  paragraphs.push(`${sale.city || '—'}, ${date}.`)
+  return paragraphs
+}
+
+// createdAt: contrato já salvo (sai na versão em que foi feito); sem ele, a atual
+export function buildContractParagraphs(parts, { createdAt } = {}) {
+  return versionFor(createdAt) === 1 ? buildContractParagraphsV1(parts) : buildContractParagraphsV2(parts)
 }

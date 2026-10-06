@@ -16,6 +16,8 @@ import CustomerFileDialog from './CustomerFileDialog.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
+import AddressFields from '../components/AddressFields.jsx'
+import { hasAddress } from '../utils/fiscal.js'
 
 function emptyCustomer(responsibleSellerId = '') {
   return {
@@ -25,6 +27,7 @@ function emptyCustomer(responsibleSellerId = '') {
     phone: '',
     email: '',
     address: '',
+    addressParts: {},
     notes: '',
     responsibleSellerId,
     tradeIn: { model: '', year: '', km: '', expectedValue: '' },
@@ -232,6 +235,7 @@ export default function AdminCustomers() {
       phone: customer.phone,
       email: customer.email,
       address: customer.address,
+      addressParts: customer.addressParts || {},
       notes: customer.notes,
       responsibleSellerId: customer.responsibleSellerId || '',
       tradeIn: {
@@ -347,11 +351,14 @@ export default function AdminCustomers() {
             E-mail
             <input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} />
           </label>
-          <label>
-            Endereço
-            <input value={form.address} onChange={(e) => update('address', e.target.value)} />
-          </label>
         </div>
+        <fieldset className="customer-address">
+          <legend>Endereço</legend>
+          <AddressFields value={form.addressParts} onChange={(parts) => update('addressParts', parts)} disabled={saving} />
+          {form.address && !hasAddress(form.addressParts) && (
+            <p className="admin-form-note">Endereço anotado antes: {form.address}. Preencha as partes acima (a nota fiscal exige).</p>
+          )}
+        </fieldset>
         <label>
           Observações
           <textarea rows={3} value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Opcional" />

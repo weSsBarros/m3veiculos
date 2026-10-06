@@ -2,7 +2,8 @@
 // engordar o bundle do site público.
 
 // headingPrefixes: linhas que começam com um destes textos saem em negrito
-export async function generateContractPdf({ title, paragraphs, signatures, filename, logo, headingPrefixes = ['CLÁUSULA'] }) {
+// asBlob: devolve o PDF (Blob) em vez de baixar (envio para assinatura)
+export async function generateContractPdf({ title, paragraphs, signatures, filename, logo, headingPrefixes = ['CLÁUSULA'], asBlob = false }) {
   const { jsPDF } = await import('jspdf')
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
 
@@ -62,5 +63,6 @@ export async function generateContractPdf({ title, paragraphs, signatures, filen
     y += 13
   }
 
+  if (asBlob) return doc.output('blob')
   doc.save(filename)
 }

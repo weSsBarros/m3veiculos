@@ -4,7 +4,7 @@
 // { title, subtitle, sections: [{ title, columns: [{ key, label, type }], rows, totals }] }
 // type: 'text' | 'money' | 'int' | 'date'
 
-import { daysInStock, carStatusLabel } from '../carFormat.js'
+import { daysInStock, carStatusLabel, ENTRY_TYPES } from '../carFormat.js'
 import { inRange } from '../period.js'
 import { describePayment } from '../payment.js'
 import { summarizeFinancing } from '../financing.js'
@@ -422,6 +422,81 @@ export function buildLeadsReport({ leads, team = [], rotation = [], cars = [], r
         ],
         rows: listRows,
         totals: null,
+      },
+    ],
+  }
+}
+
+// Margem por tipo de entrada (showroom, consignado, repasse): vendas do período
+// com custo (compra ou valor do dono + gastos), margem e dias até vender; e o
+// estoque de agora por tipo (no consignado a loja não tem dinheiro parado).
+export function buildEntryTypeReport({ sales, cars, expenses = [], range }) {
+  const carsById = byId(cars)
+  const expensesByCar = {}
+  for (const e of expenses) expensesByCar[e.carId] = (expensesByCar[e.carId] || 0) + e.amount
+  const typeOf = (car) => car?.entryType || 'showroom'
+  const pct = (margin, base) => (base ? `${((margin / base) * 100).toFixed(1).replace('.', ',')}%` : '')
+
+  const periodSales = sales.filter((s) => inRange(s.saleDate, range) && carsById[s.carId])
+  const soldRows = ENTRY_TYPES.map((t) => {
+    const list = periodSales.filter((s) => typeOf(carsById[s.carId]) === t.value)
+    const withCost = list.filter((s) => carsById[s.carId].purchasePrice)
+    const revenue = withCost.reduce((total, s) => total + s.salePrice, 0)
+    const cost = withCost.reduce((total, s) => total + carsById[s.carId].purchasePrice + (expensesByCar[s.carId] || 0), 0)
+    const days = list.map((s) => daysInStock(carsById[s.carId]))
+    return {
+      type: t.short,
+      count: list.length,
+      sold: list.reduce((total, s) => total + s.salePrice, 0),
+      cost: withCost.length ? cost : null,
+      margin: withCost.length ? revenue - cost : null,
+      marginPct: withCost.length ? pct(revenue - cost, revenue) : '',
+      avgDays: days.length ? Math.round(days.reduce((a, b) => a + b, 0) / days.length) : null,
+    }
+  })
+
+  const inStock = cars.filter((c) => c.status !== 'vendido')
+  const stockRows = ENTRY_TYPES.map((t) => {
+    const list = inStock.filter((c) => typeOf(c) === t.value)
+    const days = list.map((c) => daysInStock(c))
+    return {
+      type: t.short,
+      count: list.length,
+      price: list.reduce((total, c) => total + (c.price || 0), 0),
+      invested: t.value === 'consignado' ? 0 : list.reduce((total, c) => total + (c.purchasePrice || 0) + (expensesByCar[c.id] || 0), 0),
+      avgDays: days.length ? Math.round(days.reduce((a, b) => a + b, 0) / days.length) : null,
+    }
+  })
+
+  return {
+    title: 'Margem por tipo de entrada',
+    subtitle: periodSubtitle(range),
+    sections: [
+      {
+        title: 'Vendidos no período',
+        columns: [
+          { key: 'type', label: 'Tipo de entrada', type: 'text' },
+          { key: 'count', label: 'Vendidos', type: 'int' },
+          { key: 'sold', label: 'Total vendido', type: 'money' },
+          { key: 'cost', label: 'Custo (com gastos)', type: 'money' },
+          { key: 'margin', label: 'Margem', type: 'money' },
+          { key: 'marginPct', label: 'Margem %', type: 'text' },
+          { key: 'avgDays', label: 'Dias até vender (média)', type: 'int' },
+        ],
+        rows: soldRows,
+        totals: { type: 'Total', count: sum(soldRows, 'count'), sold: sum(soldRows, 'sold'), cost: sum(soldRows, 'cost'), margin: sum(soldRows, 'margin') },
+      },
+      {
+        title: 'Em estoque agora',
+        columns: [
+          { key: 'type', label: 'Tipo de entrada', type: 'text' },
+          { key: 'count', label: 'Carros', type: 'int' },
+          { key: 'price', label: 'Valor anunciado', type: 'money' },
+          { key: 'invested', label: 'Dinheiro da loja parado', type: 'money' },
+          { key: 'avgDays', label: 'Dias em estoque (média)', type: 'int' },
+        ],
+        rows: stockRows,
+        totals: { type: 'Total', count: sum(stockRows, 'count'), price: sum(stockRows, 'price'), invested: sum(stockRows, 'invested') },
       },
     ],
   }

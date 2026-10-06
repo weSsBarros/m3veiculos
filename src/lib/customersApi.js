@@ -1,4 +1,5 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
+import { cleanAddress, formatAddress, hasAddress } from '../utils/fiscal.js'
 
 function fromRow(row) {
   return {
@@ -9,6 +10,8 @@ function fromRow(row) {
     phone: row.phone || '',
     email: row.email || '',
     address: row.address || '',
+    // Seção 57: endereço em partes (CEP, rua, número, bairro, cidade, IBGE, UF)
+    addressParts: obj(row.address_parts),
     notes: row.notes || '',
     // Vendedor responsável (recebe os avisos de carro que combina)
     responsibleSellerId: row.responsible_seller_id || null,
@@ -37,6 +40,11 @@ function toRow(customer) {
   if (customer.responsibleSellerId !== undefined) row.responsible_seller_id = customer.responsibleSellerId || null
   if (customer.tradeIn !== undefined) row.trade_in = cleanObject(customer.tradeIn)
   if (customer.paymentIntent !== undefined) row.payment_intent = cleanObject(customer.paymentIntent)
+  // Com o endereço em partes, o endereço completo (contratos) é montado dele
+  if (customer.addressParts !== undefined) {
+    row.address_parts = cleanAddress(customer.addressParts)
+    if (hasAddress(row.address_parts)) row.address = formatAddress(row.address_parts)
+  }
   return row
 }
 

@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchCompanySettings } from '../lib/companyApi.js'
 import { DEFAULT_BANKS, contractPaymentText } from '../utils/payment.js'
 import BankSelect from './BankSelect.jsx'
 import { Link, useSearchParams } from 'react-router-dom'
-import { RefreshCcw, FileDown, FileText, Settings } from 'lucide-react'
+import { RefreshCcw, FileDown, FileText, Settings, PenLine } from 'lucide-react'
 import { fetchAllCarsAdmin, fetchSellerCars } from '../lib/carsApi.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchAllCustomers } from '../lib/customersApi.js'
@@ -15,10 +15,16 @@ import { buildReceiptTitle, buildReceiptParagraphs, buildReceiptSignatures } fro
 import { buildContractTemplateData } from '../utils/contractTemplateTags.js'
 import { generateContractPdf } from '../utils/contractPdf.js'
 import { generateContractDocx } from '../utils/contractDocx.js'
-import { fillContractTemplate } from '../utils/fillContractTemplate.js'
+import { fillContractTemplateBlob, downloadBlob } from '../utils/fillContractTemplate.js'
+import DocxPreview from '../components/DocxPreview.jsx'
 import { loadContractLogo } from '../utils/contractLogo.js'
 import { loadStoredCompany, saveStoredCompany } from '../utils/contractCompany.js'
-import { downloadSavedContract } from '../utils/contractDownload.js'
+import { companyFromFiscal } from '../utils/fiscal.js'
+import { downloadSavedContract, buildSavedContractFile, savedContractTitle } from '../utils/contractDownload.js'
+import { fetchSignatureRequests, refreshSignatures } from '../lib/signaturesApi.js'
+import { latestByContract, pendingToRefresh } from '../utils/signatures.js'
+import SignatureDialog from './SignatureDialog.jsx'
+import SignatureStatus from './SignatureStatus.jsx'
 import DateInputBR from '../components/DateInputBR.jsx'
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
 import './admin.css'
@@ -49,10 +55,22 @@ export default function AdminContracts() {
   const [sale, setSale] = useState(EMPTY_SALE)
   const [logo, setLogo] = useState(null)
   const [banks, setBanks] = useState(DEFAULT_BANKS)
+  const [templatePreview, setTemplatePreview] = useState({ blob: null, error: '', loading: false })
+  const templateFiles = useRef(new Map())
+  // Assinatura digital (seção 53): envios dos contratos e o contrato sendo enviado
+  const [signRequests, setSignRequests] = useState([])
+  const [signing, setSigning] = useState(null)
 
   useEffect(() => {
     loadContractLogo().then(setLogo)
-    fetchCompanySettings().then((settings) => setBanks(settings.bankList)).catch(() => {})
+    fetchCompanySettings()
+      .then((settings) => {
+        setBanks(settings.bankList)
+        // Dados fiscais da loja (Configurações) passam na frente do que ficou neste navegador
+        const official = companyFromFiscal(settings.fiscal, settings.name)
+        if (official) setCompany(official)
+      })
+      .catch(() => {})
   }, [])
 
   // Financiado com banco escolhido: "Financiado pelo Banco do Brasil"
@@ -71,7 +89,9 @@ export default function AdminContracts() {
       setCars(carsData)
       setContracts(contractsData)
       setCustomers(customersData)
-      setTemplates(templatesData)
+      // Modelos de entrada ficam no cadastro do carro
+      setTemplates(templatesData.filter((t) => t.kind !== 'entrada'))
+      loadSignatures()
     } catch (err) {
       setError(err.message || 'Erro ao carregar os contratos.')
     } finally {
@@ -83,6 +103,24 @@ export default function AdminContracts() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Envios para assinar; os que aguardam são conferidos na Autentique em segundo plano
+  async function loadSignatures() {
+    try {
+      const list = await fetchSignatureRequests({ kind: 'venda' })
+      setSignRequests(list)
+      const ids = pendingToRefresh(list)
+      if (ids.length) refreshSignatures(ids).then((updated) => updated.forEach(updateSignature)).catch(() => {})
+    } catch {
+      setSignRequests([])
+    }
+  }
+
+  function updateSignature(updated) {
+    setSignRequests((prev) => [updated, ...prev.filter((r) => r.id !== updated.id)])
+  }
+
+  const signatureByContract = useMemo(() => latestByContract(signRequests), [signRequests])
 
   // Vindo do estoque do vendedor ("Gerar contrato"): já seleciona o carro
   useEffect(() => {
@@ -162,6 +200,40 @@ export default function AdminContracts() {
     [contractData, isReceipt]
   )
 
+  const selectedTemplate = !isReceipt ? templates.find((t) => t.id === selectedTemplateId) || null : null
+
+  // Arquivo do modelo (baixado uma vez por modelo)
+  async function templateFile(template) {
+    if (!templateFiles.current.has(template.filePath)) {
+      templateFiles.current.set(template.filePath, await downloadContractTemplateFile(template.filePath))
+    }
+    return templateFiles.current.get(template.filePath)
+  }
+
+  // Prévia do modelo próprio: o Word preenchido com o que está no formulário
+  useEffect(() => {
+    if (!selectedTemplate) {
+      setTemplatePreview({ blob: null, error: '', loading: false })
+      return
+    }
+    let cancelled = false
+    setTemplatePreview((p) => ({ ...p, loading: true, error: '' }))
+    const timer = setTimeout(async () => {
+      try {
+        const file = await templateFile(selectedTemplate)
+        const blob = await fillContractTemplateBlob(file, buildContractTemplateData(contractData))
+        if (!cancelled) setTemplatePreview({ blob, error: '', loading: false })
+      } catch (err) {
+        if (!cancelled) setTemplatePreview({ blob: null, error: 'Não foi possível montar a prévia: ' + (err.message || err), loading: false })
+      }
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplate, contractData])
+
   function validate() {
     if (!company.name || !company.document) return 'Preencha nome e CNPJ/CPF da empresa vendedora.'
     if (!buyer.name || !buyer.document) return 'Preencha nome e CPF do comprador.'
@@ -171,9 +243,11 @@ export default function AdminContracts() {
     return ''
   }
 
-  async function saveContractRecord() {
+  async function saveContractRecord(template = null) {
     saveStoredCompany(company)
     const saved = await createContract({
+      templateId: template?.id || null,
+      templateFilePath: template?.filePath || null,
       carId: selectedCarId || null,
       // Fica na ficha do cliente (Clientes → Ficha e contratos)
       customerId: selectedCustomerId || null,
@@ -189,6 +263,7 @@ export default function AdminContracts() {
       notes: sale.notes,
     })
     setContracts((prev) => [saved, ...prev])
+    return saved
   }
 
   async function persistAndSave(fn, filename) {
@@ -227,14 +302,31 @@ export default function AdminContracts() {
       alert(validationError)
       return
     }
-    const template = templates.find((t) => t.id === selectedTemplateId)
+    const template = selectedTemplate
     if (!template) return
     setGenerating(true)
     try {
-      const arrayBuffer = await downloadContractTemplateFile(template.filePath)
+      const arrayBuffer = await templateFile(template)
       const data = buildContractTemplateData(contractData)
-      await fillContractTemplate(arrayBuffer, data, contractFilename('docx'))
-      await saveContractRecord()
+      downloadBlob(await fillContractTemplateBlob(arrayBuffer, data), contractFilename('docx'))
+      await saveContractRecord(template)
+    } catch (err) {
+      alert('Não foi possível gerar o contrato: ' + err.message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  // Guarda o contrato (sem baixar) e abre o envio para assinatura
+  async function handleSendForSignature() {
+    const validationError = validate()
+    if (validationError) {
+      alert(validationError)
+      return
+    }
+    setGenerating(true)
+    try {
+      setSigning(await saveContractRecord(selectedTemplate))
     } catch (err) {
       alert('Não foi possível gerar o contrato: ' + err.message)
     } finally {
@@ -469,19 +561,24 @@ export default function AdminContracts() {
           )}
         </section>
 
-        {!selectedTemplateId && (
-          <section className="admin-form-section">
-            <h2>Prévia do {isReceipt ? 'recibo' : 'contrato'}</h2>
+        <section className="admin-form-section">
+          <h2>Prévia do {isReceipt ? 'recibo' : 'contrato'}</h2>
+          {selectedTemplate ? (
+            <DocxPreview blob={templatePreview.blob} error={templatePreview.error} loading={templatePreview.loading} />
+          ) : (
             <div className="contract-preview">
               <h3>{title}</h3>
               {paragraphs.map((p, i) => (
                 <p key={i}>{p}</p>
               ))}
             </div>
-          </section>
-        )}
+          )}
+        </section>
 
         <div className="admin-form-actions">
+          <button type="button" className="btn btn-outline" onClick={handleSendForSignature} disabled={generating}>
+            <PenLine size={15} /> Enviar para assinatura digital
+          </button>
           {selectedTemplateId ? (
             <button type="button" className="btn btn-primary" onClick={handleDownloadCustomTemplate} disabled={generating}>
               <FileText size={15} /> {generating ? 'Gerando…' : 'Baixar Word (modelo próprio)'}
@@ -499,7 +596,7 @@ export default function AdminContracts() {
         </div>
         <p className="admin-form-note">
           {selectedCustomerId
-            ? 'O documento gerado fica na ficha do cliente. Depois de assinado, anexe a via assinada em Clientes → Ficha e contratos.'
+            ? 'O documento gerado fica na ficha do cliente. Pela assinatura digital, a via assinada entra lá sozinha; assinado no papel, anexe em Clientes → Ficha e contratos.'
             : 'Escolha um cliente cadastrado para o documento ficar guardado na ficha dele.'}
         </p>
       </form>
@@ -519,6 +616,7 @@ export default function AdminContracts() {
                 <th>Comprador</th>
                 <th>Veículo</th>
                 <th>Valor</th>
+                <th>Assinatura digital</th>
                 <th></th>
               </tr>
             </thead>
@@ -531,10 +629,21 @@ export default function AdminContracts() {
                   <td>{c.vehicle.brand} {c.vehicle.model}</td>
                   <td>{formatCurrency(c.salePrice)}</td>
                   <td>
-                    <div className="admin-row-actions">
-                      <button type="button" className="admin-action-btn" onClick={() => redownload(c, 'pdf')}>
-                        <FileDown size={15} /> Baixar PDF
+                    {signatureByContract.get(c.id) && signatureByContract.get(c.id).status !== 'cancelado' ? (
+                      <SignatureStatus request={signatureByContract.get(c.id)} onChange={updateSignature} compact />
+                    ) : (
+                      <button type="button" className="admin-action-btn" onClick={() => setSigning(c)}>
+                        <PenLine size={15} /> {signatureByContract.get(c.id) ? 'Enviar de novo' : 'Enviar para assinar'}
                       </button>
+                    )}
+                  </td>
+                  <td>
+                    <div className="admin-row-actions">
+                      {!c.templateFilePath && (
+                        <button type="button" className="admin-action-btn" onClick={() => redownload(c, 'pdf')}>
+                          <FileDown size={15} /> Baixar PDF
+                        </button>
+                      )}
                       <button type="button" className="admin-action-btn" onClick={() => redownload(c, 'docx')}>
                         <FileText size={15} /> Baixar Word
                       </button>
@@ -545,6 +654,21 @@ export default function AdminContracts() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {signing && (
+        <SignatureDialog
+          kind="venda"
+          contractId={signing.id}
+          defaultTitle={savedContractTitle(signing)}
+          party={{ name: signing.buyer.name, email: signing.buyer.email }}
+          buildFile={() => buildSavedContractFile(signing, logo)}
+          onClose={() => setSigning(null)}
+          onSent={(request) => {
+            updateSignature(request)
+            setSigning(null)
+          }}
+        />
       )}
     </div>
   )

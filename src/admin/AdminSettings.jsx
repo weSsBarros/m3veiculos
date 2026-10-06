@@ -16,6 +16,7 @@ import {
   Plus,
   RotateCcw,
   Eye,
+  Landmark,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import {
@@ -30,6 +31,7 @@ import {
 } from '../lib/storeSettingsApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
 import CustomRolesSettings from './CustomRolesSettings.jsx'
+import FiscalSettings from './FiscalSettings.jsx'
 import { applyStockAlertToAll, fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import {
   PANEL_TABS,
@@ -319,7 +321,7 @@ export default function AdminSettings() {
       <div className="admin-page-head">
         <div>
           <h1>Configurações</h1>
-          <p>Painel, WhatsApp do site, mensagens prontas e opções da loja</p>
+          <p>Painel, WhatsApp do site, mensagens prontas, opções e dados fiscais da loja</p>
         </div>
         <button type="button" className="btn btn-outline" onClick={load}>
           <RefreshCcw size={15} /> Atualizar
@@ -335,6 +337,7 @@ export default function AdminSettings() {
         <a href="#estoque">Estoque</a>
         <a href="#vendas">Vendas</a>
         <a href="#financeiro">Financeiro</a>
+        <a href="#fiscal">Dados fiscais</a>
       </nav>
 
       <div id="painel">
@@ -644,6 +647,21 @@ export default function AdminSettings() {
           <div className="settings-buttons">
             <button type="button" className="btn btn-outline" onClick={() => setLateFeeOpen(true)}>Multa e juros por atraso</button>
           </div>
+        </Section>
+      </div>
+
+      <div id="fiscal">
+        <Section
+          icon={Landmark}
+          title="Dados fiscais da loja"
+          description="Razão social, CNPJ, Inscrição Estadual, regime e endereço. Os contratos, o termo de entrega e os recibos já usam estes dados; depois, a nota fiscal também. Confirme com o contador da loja."
+        >
+          {company && (
+            <FiscalSettings
+              fiscal={company.fiscal || {}}
+              onSaved={(fiscal) => setCompany((prev) => ({ ...prev, fiscal }))}
+            />
+          )}
         </Section>
       </div>
 

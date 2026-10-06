@@ -20,6 +20,7 @@ import {
   buildFinancingReport,
   buildCustomersReport,
   buildLeadsReport,
+  buildEntryTypeReport,
 } from '../utils/reports/build.js'
 import { exportReportPdf, exportReportExcel } from '../utils/reports/export.js'
 import PeriodFilter from './PeriodFilter.jsx'
@@ -83,6 +84,17 @@ export default function AdminReports() {
       build: async () => {
         const [cars, expenses] = await Promise.all([fetchAllCarsAdmin(), canSeeCosts ? fetchAllExpensesAdmin() : Promise.resolve([])])
         return buildStockReport({ cars, expenses, showCosts: canSeeCosts })
+      },
+    },
+    {
+      id: 'tipo-entrada',
+      title: 'Margem por tipo de entrada',
+      description: 'Showroom, consignado e repasse: vendidos no período com custo, margem e dias até vender, e o estoque de agora por tipo.',
+      usesPeriod: true,
+      show: canSeeCosts,
+      build: async () => {
+        const [sales, cars, expenses] = await Promise.all([fetchSales(), fetchAllCarsAdmin(), fetchAllExpensesAdmin()])
+        return buildEntryTypeReport({ sales, cars, expenses, range })
       },
     },
     {

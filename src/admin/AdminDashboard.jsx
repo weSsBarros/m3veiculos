@@ -7,6 +7,7 @@ import { fetchCustomerDocuments } from '../lib/customerDocumentsApi.js'
 import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
 import { fetchReservations } from '../lib/reservationsApi.js'
 import { stockGaps, saleGaps, externalGaps, unpaidCommissions, reservationGaps, RECENT_SALES_DAYS } from '../utils/dashboardAlerts.js'
+import { renaveGaps } from '../utils/renave.js'
 import { transferAlert } from '../utils/transfer.js'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
@@ -261,9 +262,12 @@ export default function AdminDashboard() {
     const ext = externalGaps(externals)
     const unpaid = unpaidCommissions(sales, externals)
     const res = reservationGaps(reservations)
+    const renave = renaveGaps(cars)
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
     const items = [
       { key: 'res-exp', count: res.expired, danger: true, icon: Bookmark, to: '/admin/vendas', cta: 'Resolver', text: `${plural(res.expired, 'reserva passou', 'reservas passaram')} do prazo — converta em venda ou cancele.` },
+      { key: 'renave-exit', count: renave.exit, danger: true, icon: FileWarning, to: '/admin/estoque?renave=pendente', cta: 'Registrar', text: `${plural(renave.exit, 'carro vendido está', 'carros vendidos estão')} sem a saída registrada no RENAVE.` },
+      { key: 'renave-entry', count: renave.entry, icon: FileWarning, to: '/admin/estoque?renave=pendente', cta: 'Registrar', text: `${plural(renave.entry, 'carro está', 'carros estão')} sem a entrada registrada no RENAVE.` },
       { key: 'res-soon', count: res.dueSoon, icon: Bookmark, to: '/admin/vendas', cta: 'Ver', text: `${plural(res.dueSoon, 'reserva vence', 'reservas vencem')} em até 2 dias.` },
       { key: 'inst-soon', count: upcomingInstallments.length, icon: BellRing, to: '/admin/financeiro/clientes', cta: 'Lembrar', text: `${plural(upcomingInstallments.length, 'parcela de cliente vence', 'parcelas de clientes vencem')} nos próximos 7 dias.` },
       { key: 'ext-stale', count: ext.staleAnalysis, icon: Landmark, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.staleAnalysis, 'financiamento externo está', 'financiamentos externos estão')} em análise há mais de 7 dias.` },

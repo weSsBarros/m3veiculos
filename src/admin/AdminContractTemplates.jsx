@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, FileText, Trash2, Upload } from 'lucide-react'
+import { ArrowLeft, FileText, PencilLine, Trash2, Upload } from 'lucide-react'
 import {
   fetchAllContractTemplates,
   uploadContractTemplate,
   deleteContractTemplate,
+  updateContractTemplateKind,
 } from '../lib/contractTemplatesApi.js'
 import { CONTRACT_TEMPLATE_TAGS } from '../utils/contractTemplateTags.js'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
+import ContractLibrary from './ContractLibrary.jsx'
 
 export default function AdminContractTemplates() {
   const { confirm, confirmDialog } = useConfirm()
@@ -17,6 +19,7 @@ export default function AdminContractTemplates() {
   const [error, setError] = useState('')
   const [name, setName] = useState('')
   const [file, setFile] = useState(null)
+  const [kind, setKind] = useState('venda')
   const [uploading, setUploading] = useState(false)
   const inputRef = useRef(null)
 
@@ -53,7 +56,7 @@ export default function AdminContractTemplates() {
     setUploading(true)
     setError('')
     try {
-      const created = await uploadContractTemplate(name.trim() || file.name, file)
+      const created = await uploadContractTemplate(name.trim() || file.name, file, kind)
       setTemplates((prev) => [created, ...prev])
       setName('')
       setFile(null)
@@ -65,8 +68,17 @@ export default function AdminContractTemplates() {
     }
   }
 
+  async function handleKind(template, value) {
+    try {
+      await updateContractTemplateKind(template.id, value)
+      setTemplates((prev) => prev.map((t) => (t.id === template.id ? { ...t, kind: value } : t)))
+    } catch (err) {
+      setError('Não foi possível mudar: ' + err.message)
+    }
+  }
+
   async function handleDelete(template) {
-    if (!(await confirm(`Excluir o modelo "${template.name}"? Contratos já gerados com ele não são afetados.`))) return
+    if (!(await confirm(`Excluir o modelo "${template.name}" e as versões anteriores dele? Contratos já gerados com ele continuam podendo ser baixados.`))) return
     try {
       await deleteContractTemplate(template)
       setTemplates((prev) => prev.filter((t) => t.id !== template.id))
@@ -83,11 +95,13 @@ export default function AdminContractTemplates() {
             <ArrowLeft size={15} /> Voltar para contratos
           </Link>
           <h1>Modelos de contrato</h1>
-          <p>Envie modelos próprios em .docx (com garantia, sem garantia, repasse etc.) que a loja usa na hora de gerar um contrato.</p>
+          <p>Use os modelos prontos ou envie modelos próprios em .docx que a loja usa na hora de gerar um contrato. Depois de adicionado, o modelo pode ser editado aqui mesmo, em “Editar”.</p>
         </div>
       </div>
 
       {error && <p className="admin-error">{error}</p>}
+
+      {!loading && <ContractLibrary templates={templates} onAdded={(created) => setTemplates((prev) => [created, ...prev])} />}
 
       <form className="admin-form admin-form-section" onSubmit={handleSubmit}>
         <h2>Novo modelo</h2>
@@ -95,6 +109,13 @@ export default function AdminContractTemplates() {
           <label>
             Nome do modelo
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Contrato com garantia" />
+          </label>
+          <label>
+            Usado em
+            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="venda">Venda (tela Contratos)</option>
+              <option value="entrada">Entrada do veículo (compra do particular, consignação)</option>
+            </select>
           </label>
         </div>
 
@@ -122,6 +143,7 @@ export default function AdminContractTemplates() {
         <h2>Marcadores disponíveis</h2>
         <p className="admin-form-hint">
           No Word, escreva os marcadores entre chaves onde quiser que o sistema preencha automaticamente, ex: <code>{'{cliente_nome}'}</code>.
+          Nos modelos de entrada do veículo, os campos do cliente trazem o dono do carro (o mesmo que os de “Dono do carro”).
         </p>
         <div className="admin-table-wrap">
           <table className="admin-table">
@@ -156,7 +178,20 @@ export default function AdminContractTemplates() {
                 <span>
                   <FileText size={13} style={{ marginRight: 6, verticalAlign: -2 }} />
                   {t.name}
+                  {t.updatedAt && <small className="admin-table-sub"> · editado em {new Date(t.updatedAt).toLocaleDateString('pt-BR')}</small>}
                 </span>
+                <select
+                  className="template-kind-select"
+                  value={t.kind}
+                  onChange={(e) => handleKind(t, e.target.value)}
+                  aria-label="Usado em"
+                >
+                  <option value="venda">Venda</option>
+                  <option value="entrada">Entrada do veículo</option>
+                </select>
+                <Link to={`/admin/contratos/modelos/${t.id}`} className="admin-action-btn">
+                  <PencilLine size={13} /> Editar
+                </Link>
                 <button type="button" onClick={() => handleDelete(t)} aria-label="Excluir modelo">
                   <Trash2 size={13} />
                 </button>

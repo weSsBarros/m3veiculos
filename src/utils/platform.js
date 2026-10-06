@@ -131,6 +131,7 @@ export const FEATURES = [
   { key: 'external_financings', label: 'Financ. externos' },
   { key: 'expenses', label: 'Gastos' },
   { key: 'customer_documents', label: 'Documentos' },
+  { key: 'signatures', label: 'Assinaturas digitais' },
   { key: 'rotation', label: 'Rodízio do WhatsApp' },
 ]
 

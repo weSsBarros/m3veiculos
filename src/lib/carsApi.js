@@ -50,6 +50,17 @@ function fromRow(row) {
     internalNotes: row.internal_notes || '',
     intakeItems: Array.isArray(row.intake_items) ? row.intake_items : [],
     inspection: Array.isArray(row.inspection) ? row.inspection : [],
+    // Seção 49: como entrou (showroom, consignado, repasse), dono e WhatsApp do carro
+    entryType: row.entry_type || 'showroom',
+    ownerCustomerId: row.owner_customer_id || null,
+    whatsappSellerId: row.whatsapp_seller_id || null,
+    // Seção 55: entrada e saída no RENAVE (pendente, registrado ou dispensado)
+    renaveEntryStatus: row.renave_entry_status || 'pendente',
+    renaveEntryOn: row.renave_entry_on || null,
+    renaveEntryProtocol: row.renave_entry_protocol || '',
+    renaveExitStatus: row.renave_exit_status || 'pendente',
+    renaveExitOn: row.renave_exit_on || null,
+    renaveExitProtocol: row.renave_exit_protocol || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -105,6 +116,16 @@ function toRow(car) {
     internal_notes: car.internalNotes || '',
     intake_items: car.intakeItems || [],
     inspection: car.inspection || [],
+    entry_type: car.entryType || 'showroom',
+    owner_customer_id: car.ownerCustomerId || null,
+    whatsapp_seller_id: car.whatsappSellerId || null,
+    // Data e protocolo só ficam guardados com a situação "registrado"
+    renave_entry_status: car.renaveEntryStatus || 'pendente',
+    renave_entry_on: car.renaveEntryStatus === 'registrado' ? car.renaveEntryOn || null : null,
+    renave_entry_protocol: car.renaveEntryStatus === 'registrado' ? (car.renaveEntryProtocol || '').trim() : '',
+    renave_exit_status: car.renaveExitStatus || 'pendente',
+    renave_exit_on: car.renaveExitStatus === 'registrado' ? car.renaveExitOn || null : null,
+    renave_exit_protocol: car.renaveExitStatus === 'registrado' ? (car.renaveExitProtocol || '').trim() : '',
   }
   if (staffTable !== 'cars') {
     delete row.purchase_price

@@ -1035,6 +1035,284 @@ select test.check('dono da plataforma: vê a prévia dos lembretes e o históric
   and test.denied($$insert into client_reminders (company_id, kind, reference_month) values ('eeeeeeee-0000-0000-0000-00000000000e', 'atraso_1', '2026-12-01')$$));
 reset role;
 
+-- ============================ modelos de contrato: edição e versões (47)
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: não edita modelo de contrato nem vê as versões',
+  test.denied($$select save_contract_template_file((select id from contract_templates where name = 'Modelo A'), current_company_id() || '/vendedor.docx')$$)
+  and test.denied($$update contract_templates set name = 'x'$$)
+  and test.count('select * from contract_template_versions') = 0);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente: não edita modelo de contrato',
+  test.denied($$select save_contract_template_file((select id from contract_templates where name = 'Modelo A'), current_company_id() || '/gerente.docx')$$)
+  and test.denied($$update contract_templates set name = 'x'$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: salva o arquivo novo do modelo',
+  test.allowed($$select save_contract_template_file((select id from contract_templates where name = 'Modelo A'), current_company_id() || '/modelo-v2.docx')$$));
+select test.check('admin A: o modelo aponta para o arquivo novo e o anterior vira versão',
+  (select file_path from contract_templates where name = 'Modelo A') = current_company_id() || '/modelo-v2.docx'
+  and (select updated_at from contract_templates where name = 'Modelo A') is not null
+  and test.count($$select * from contract_template_versions where file_path = current_company_id() || '/modelo.docx'$$) = 1);
+select test.check('admin A: não aponta o modelo para arquivo de outra loja nem para o mesmo arquivo',
+  test.denied($$select save_contract_template_file((select id from contract_templates where name = 'Modelo A'), 'bbbbbbbb-0000-0000-0000-00000000000b/modelo.docx')$$)
+  and test.denied($$select save_contract_template_file((select id from contract_templates where name = 'Modelo A'), current_company_id() || '/modelo-v2.docx')$$));
+select test.check('admin A: renomeia o modelo',
+  test.allowed($$update contract_templates set name = 'Modelo A' where name = 'Modelo A'$$));
+select test.check('admin A: restaura a versão anterior (a atual vira versão)',
+  test.allowed($$select restore_contract_template_version((select id from contract_template_versions where file_path = current_company_id() || '/modelo.docx'))$$));
+select test.check('admin A: depois de restaurar, volta ao arquivo antigo e guarda o que estava',
+  (select file_path from contract_templates where name = 'Modelo A') = current_company_id() || '/modelo.docx'
+  and test.count($$select * from contract_template_versions where file_path = current_company_id() || '/modelo-v2.docx'$$) = 1
+  and test.count($$select * from contract_template_versions where file_path = current_company_id() || '/modelo.docx'$$) = 0);
+select test.check('admin A: o contrato guarda o modelo e a versão usados',
+  test.allowed($$insert into contracts (company_id, company_name, company_document, buyer_name, buyer_document, sale_price, template_id, template_file_path)
+                 select current_company_id(), 'Loja A', '1', 'Cliente', '2', 1000, id, file_path from contract_templates where name = 'Modelo A'$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê as versões nem edita o modelo da loja A',
+  test.count('select * from contract_template_versions') = 0
+  and test.denied($$select save_contract_template_file((select id from contract_templates where name = 'Modelo A' limit 1), current_company_id() || '/x.docx')$$)
+  and test.denied($$select restore_contract_template_version(id) from contract_template_versions$$)
+  and (select file_path from public.contract_templates where name = 'Modelo B') = current_company_id() || '/modelo.docx');
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: não edita modelos nem vê versões',
+  test.denied($$select save_contract_template_file('00000000-0000-0000-0000-000000000000', 'x/y.docx')$$)
+  and test.count('select * from contract_template_versions') <= 0);
+reset role;
+
+-- ============================ estoque: tipo de entrada, dono e WhatsApp do carro (49)
+update public.sellers set phone = '(98) 95555-0004' where id = '5e000000-0000-0000-0000-000000000004';
+insert into public.cars (id, company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, category, price, status, entry_type, owner_customer_id, whatsapp_seller_id)
+values
+  ('ca000000-0000-0000-0000-0000000000a5', test.company_a(), 'repasse-a', 'Marca', 'Modelo', 'V', 2020, '2020/2020', 1000, 'Manual', 'Flex', 'Preto', 'hatch', 30000, 'disponivel', 'repasse', 'c0000000-0000-0000-0000-0000000000a1', null),
+  ('ca000000-0000-0000-0000-0000000000a6', test.company_a(), 'consignado-a', 'Marca', 'Modelo', 'V', 2021, '2021/2021', 1000, 'Manual', 'Flex', 'Preto', 'moto', 30000, 'disponivel', 'consignado', 'c0000000-0000-0000-0000-0000000000a2', '5e000000-0000-0000-0000-000000000004');
+
+select test.check('estoque: tipo de entrada só showroom, consignado ou repasse (padrão showroom)',
+  test.denied($$update public.cars set entry_type = 'outro' where id = 'ca000000-0000-0000-0000-0000000000a6'$$)
+  and (select entry_type from public.cars where id = 'ca000000-0000-0000-0000-0000000000a2') = 'showroom');
+select test.check('estoque: o dono e o WhatsApp do carro têm que ser desta loja',
+  test.denied($$update public.cars set owner_customer_id = 'c0000000-0000-0000-0000-0000000000b1' where id = 'ca000000-0000-0000-0000-0000000000a6'$$)
+  and test.denied($$update public.cars set whatsapp_seller_id = '5e000000-0000-0000-0000-0000000000b2' where id = 'ca000000-0000-0000-0000-0000000000a6'$$));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: escolhe o tipo de entrada, o dono e o WhatsApp do carro',
+  test.allowed($$update staff_cars set entry_type = 'consignado', owner_customer_id = 'c0000000-0000-0000-0000-0000000000a2',
+                 whatsapp_seller_id = '5e000000-0000-0000-0000-000000000004' where id = 'ca000000-0000-0000-0000-0000000000a6'$$)
+  and test.count($$select * from staff_cars where entry_type = 'repasse'$$) = 1);
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('site: carro de repasse não aparece; consignado aparece',
+  test.count($$select id from cars where slug = 'repasse-a'$$) = 0
+  and test.count($$select id from cars where slug = 'consignado-a'$$) = 1);
+select test.check('site: WhatsApp do carro vai para a pessoa definida, passando por cima do rodízio',
+  right(whatsapp_contact(test.company_a(), 'consignado-a') ->> 'phone', 4) = '0004'
+  and whatsapp_contact(test.company_a(), 'consignado-a') ->> 'mode' = 'carro');
+reset role;
+
+update public.sellers set phone = '' where id = '5e000000-0000-0000-0000-000000000004';
+set role anon;
+select test.check('site: pessoa do carro sem telefone, segue o rodízio da loja',
+  whatsapp_contact(test.company_a(), 'consignado-a') ->> 'mode' = 'rodizio');
+reset role;
+
+-- ============================ modelos de contrato da entrada (51)
+select test.check('modelos: tipo venda por padrão e só venda ou entrada',
+  (select kind from public.contract_templates where name = 'Modelo A') = 'venda'
+  and test.denied($$update public.contract_templates set kind = 'outro' where name = 'Modelo A'$$));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: vê os modelos, mas não muda o tipo',
+  test.count('select * from contract_templates') >= 1
+  and test.denied($$update contract_templates set kind = 'entrada'$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: marca um modelo como de entrada',
+  test.allowed($$update contract_templates set kind = 'entrada' where name = 'Modelo A'$$)
+  and test.allowed($$update contract_templates set kind = 'venda' where name = 'Modelo A'$$));
+reset role;
+
+-- ============================ assinatura digital (53)
+insert into public.signature_requests (company_id, kind, contract_id, car_id, customer_id, title, external_id, sent_by)
+select test.company_a(), 'venda', (select id from public.contracts where created_by = 'aaaaaaaa-0000-0000-0000-000000000004' limit 1),
+       null::uuid, 'c0000000-0000-0000-0000-0000000000a1'::uuid, 'Contrato do vendedor', 'doc-a-vendedor', 'aaaaaaaa-0000-0000-0000-000000000004'::uuid
+union all select test.company_a(), 'entrada', null, 'ca000000-0000-0000-0000-0000000000a6', 'c0000000-0000-0000-0000-0000000000a2',
+       'Consignação', 'doc-a-admin', 'aaaaaaaa-0000-0000-0000-000000000001'
+union all select 'bbbbbbbb-0000-0000-0000-00000000000b', 'venda', null, null, 'c0000000-0000-0000-0000-0000000000b1',
+       'Contrato B', 'doc-b', 'bbbbbbbb-0000-0000-0000-000000000001';
+
+select test.check('assinaturas: contrato e cliente têm que ser da mesma loja; situação só as previstas',
+  test.denied($$insert into public.signature_requests (company_id, contract_id)
+                select test.company_a(), id from public.contracts where company_id = 'bbbbbbbb-0000-0000-0000-00000000000b'$$)
+  and test.denied($$insert into public.signature_requests (company_id, customer_id) values (test.company_a(), 'c0000000-0000-0000-0000-0000000000b1')$$)
+  and test.denied($$insert into public.signature_requests (company_id, status) values (test.company_a(), 'outro')$$)
+  and test.denied($$insert into public.signature_requests (company_id, external_id) values (test.company_a(), 'doc-b')$$));
+select test.check('documentos do cliente: aceita o tipo entrada (via assinada da entrada do carro)',
+  test.allowed($$update public.customer_documents set doc_type = 'entrada' where file_path like '%/c-a1/admin.pdf'$$)
+  and test.allowed($$update public.customer_documents set doc_type = 'garantia' where file_path like '%/c-a1/admin.pdf'$$));
+select test.check('plataforma: conta os envios para assinar de cada loja',
+  (public.platform_rows(current_date - 1, current_date, test.company_a()) -> 0 -> 'features' -> 'signatures' ->> 'total')::int = 2
+  and (public.platform_rows(current_date - 1, current_date, 'bbbbbbbb-0000-0000-0000-00000000000b') -> 0 -> 'features' -> 'signatures' ->> 'period')::int = 1);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+insert into public.platform_team (user_id) values ('aaaaaaaa-0000-0000-0000-000000000003');
+select test.check('assinaturas: login da equipe WB.Dev não aparece para assinar pela loja',
+  not exists (select 1 from public.signature_team() where email = 'gerente-quantidades@loja-a')
+  and exists (select 1 from public.signature_team() where email = 'admin@loja-a'));
+delete from public.platform_team where user_id = 'aaaaaaaa-0000-0000-0000-000000000003';
+
+set role authenticated;
+select test.check('admin A: vê todos os envios da loja A e nenhum da B',
+  test.count('select * from signature_requests') = 2
+  and test.count($$select * from signature_requests where company_id = 'bbbbbbbb-0000-0000-0000-00000000000b'$$) = 0);
+select test.check('admin A: nem o admin grava ou muda a situação pela API',
+  test.denied($$update signature_requests set status = 'assinado'$$)
+  and test.denied($$delete from signature_requests$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente: vê todos os envios da loja',
+  test.count('select * from signature_requests') = 2);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: vê só os envios que ele mandou',
+  test.count('select * from signature_requests') = 1
+  and (select title from signature_requests limit 1) = 'Contrato do vendedor');
+select test.check('vendedor: não grava, não marca assinado nem apaga envios',
+  test.denied($$insert into signature_requests (company_id, title) values (current_company_id(), 'x')$$)
+  and test.denied($$update signature_requests set status = 'assinado'$$)
+  and test.denied($$delete from signature_requests$$));
+select test.check('vendedor: vê quem pode assinar pela loja (só da loja dele, sem os desativados)',
+  exists (select 1 from signature_team() where email = 'admin@loja-a' and role = 'admin')
+  and exists (select 1 from signature_team() where email = 'vendedor@loja-a' and name = 'Vendedor A')
+  and not exists (select 1 from signature_team() where email = 'desativado@loja-a')
+  and not exists (select 1 from signature_team() where email like '%@loja-b'));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000006');
+set role authenticated;
+select test.check('vendedor desativado: não vê envios nem a equipe',
+  test.count('select * from signature_requests') = 0
+  and test.count('select * from signature_team()') = 0);
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: vê só o envio da loja B',
+  test.count('select * from signature_requests') = 1
+  and not exists (select 1 from signature_team() where email like '%@loja-a'));
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: não vê envios para assinar nem a equipe',
+  test.count('select * from signature_requests') <= 0
+  and test.denied('select * from signature_team()'));
+reset role;
+
+-- ============================ RENAVE por carro (55)
+select test.check('renave: carro novo começa pendente; situação só pendente, registrado ou dispensado',
+  (select renave_entry_status from public.cars where id = 'ca000000-0000-0000-0000-0000000000a1') = 'pendente'
+  and test.denied($$update public.cars set renave_entry_status = 'feito' where id = 'ca000000-0000-0000-0000-0000000000a1'$$)
+  and test.denied($$update public.cars set renave_exit_status = 'outro' where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: marca a entrada no RENAVE com data e protocolo',
+  test.allowed($$update staff_cars set renave_entry_status = 'registrado', renave_entry_on = current_date,
+                 renave_entry_protocol = 'PROT-1' where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+select test.check('vendedor: lê o que marcou no RENAVE',
+  (select renave_entry_protocol from staff_cars where id = 'ca000000-0000-0000-0000-0000000000a1') = 'PROT-1'
+  and (select renave_entry_status from staff_cars where id = 'ca000000-0000-0000-0000-0000000000a1') = 'registrado');
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não muda o RENAVE de carro da loja A',
+  test.denied($$update cars set renave_entry_status = 'dispensado' where id = 'ca000000-0000-0000-0000-0000000000a1'$$)
+  and test.denied($$update staff_cars set renave_entry_status = 'dispensado' where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: o site não lê o RENAVE dos carros',
+  test.count('select renave_entry_status from cars') = -1
+  and test.count('select renave_exit_protocol from cars') = -1);
+reset role;
+
+-- ============================ dados fiscais e endereço em partes (57)
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: grava os dados fiscais (só números no CNPJ e no CEP, UF em maiúscula)',
+  test.allowed($$select save_company_fiscal('{"legal_name": " Loja A Ltda ", "cnpj": "12.345.678/0001-90", "ie": "12.345.678-9",
+                  "crt": "1", "zip": "65000-000", "state": "ma", "city_code": "2111300", "extra": "x"}')$$));
+reset role;
+select test.check('admin A: os dados ficaram normalizados e sem chave estranha',
+  (select fiscal from public.companies where id = test.company_a())
+    = '{"legal_name": "Loja A Ltda", "cnpj": "12345678000190", "ie": "123456789", "crt": "1", "zip": "65000000",
+        "state": "MA", "city_code": "2111300"}'::jsonb);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: CNPJ, CEP, UF, regime e código IBGE errados são recusados',
+  test.denied($$select save_company_fiscal('{"cnpj": "123"}')$$)
+  and test.denied($$select save_company_fiscal('{"zip": "6500"}')$$)
+  and test.denied($$select save_company_fiscal('{"state": "Maranhão"}')$$)
+  and test.denied($$select save_company_fiscal('{"crt": "9"}')$$)
+  and test.denied($$select save_company_fiscal('{"city_code": "21"}')$$));
+select test.check('admin A: não grava os dados fiscais direto na tabela',
+  test.denied($$update companies set fiscal = '{}' where id = current_company_id()$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente: lê os dados fiscais, mas não altera',
+  (select fiscal ->> 'cnpj' from companies where id = current_company_id()) = '12345678000190'
+  and test.denied($$select save_company_fiscal('{"legal_name": "Outra"}')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: lê os dados fiscais (contratos) e grava o endereço em partes do cliente',
+  (select fiscal ->> 'legal_name' from companies where id = current_company_id()) = 'Loja A Ltda'
+  and test.denied($$select save_company_fiscal('{"legal_name": "Outra"}')$$)
+  and test.allowed($$update customers set address_parts = '{"zip": "65000000", "number": "10"}' where id = 'c0000000-0000-0000-0000-0000000000a1'$$));
+select test.check('vendedor: endereço em partes tem que ser um objeto',
+  test.denied($$update customers set address_parts = '[]' where id = 'c0000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê os dados fiscais da loja A',
+  test.count($$select fiscal from companies where id = test.company_a()$$) = 0);
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: não lê dados fiscais nem grava',
+  test.count('select fiscal from companies') <= 0
+  and test.denied($$select save_company_fiscal('{"legal_name": "x"}')$$));
+reset role;
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;
