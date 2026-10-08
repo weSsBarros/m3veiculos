@@ -49,7 +49,8 @@ function dailyBars(daily, key) {
 // Números de uma loja. Na Plataforma (platform), o dono do sistema vê qualquer
 // loja; na aba Desempenho, o admin vê só a dele. loadStore(range) devolve a
 // loja no formato de lib/platformApi.js; reloadKey recarrega quando muda.
-export default function StoreReport({ loadStore, reloadKey = '', platform = false }) {
+// children: blocos só da própria loja (ex.: o lucro do mês no Desempenho)
+export default function StoreReport({ loadStore, reloadKey = '', platform = false, children = null }) {
   const [period, setPeriod] = useState('30d')
   const [store, setStore] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -111,7 +112,7 @@ export default function StoreReport({ loadStore, reloadKey = '', platform = fals
   return (
     <div className="admin-page platform-page">
       {platform && (
-        <Link to="/admin/plataforma" className="platform-back">
+        <Link to="/wbdev" className="platform-back">
           <ArrowLeft size={16} /> Todas as lojas
         </Link>
       )}
@@ -176,6 +177,8 @@ export default function StoreReport({ loadStore, reloadKey = '', platform = fals
                 </p>
               )}
             </div>
+
+            {children}
 
             <div className="platform-report-bar">
               <span>{platform ? 'Relatório mensal para o cliente (PDF, assinado WB.Dev):' : 'Relatório do mês (PDF):'}</span>

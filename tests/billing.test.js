@@ -8,11 +8,17 @@ import {
   billingTotals,
   receivedByMonth,
   domainAlert,
+  domainExpiryFrom,
+  domainRegistrarLabel,
+  domainPayerLabel,
   onboardingStatus,
   monthName,
   isCharged,
   firstAutoDue,
   firstDueDate,
+  dueInMonth,
+  payableMonths,
+  monthsText,
   implantationDays,
 } from '../src/utils/billing.js'
 
@@ -53,11 +59,23 @@ test('cobrança: aviso no painel da loja só quando vence logo ou atrasou', () =
   assert.match(late.text, /2 mensalidades em atraso/)
   assert.match(late.text, /há 27 dias/)
   assert.match(storeBillingNotice({ ...atrasado, open: [atrasado.open[0]], days_late: 1 }, today).text, /setembro de 2026 está em atraso há 1 dia/)
+  // "Já paguei" de todos os meses do aviso: só o aviso de que a WB.Dev está conferindo
+  const claim = (months, status = 'pendente') => ({ months, status })
+  const informed = storeBillingNotice(vencendo, today, [claim(['2026-10-01'])])
+  assert.equal(informed.informed, true)
+  assert.match(informed.text, /informou o pagamento de outubro de 2026/)
+  assert.equal(storeBillingNotice(atrasado, today, [claim(['2026-09-01', '2026-10-01'])]).informed, true)
+  // Falta um mês, ou o informado foi recusado: continua cobrando
+  assert.equal(storeBillingNotice(atrasado, today, [claim(['2026-09-01'])]).level, 'urgente')
+  assert.equal(storeBillingNotice(vencendo, today, [claim(['2026-10-01'], 'recusado')]).informed, undefined)
 })
 
 test('cobrança: mensagem do WhatsApp e link', () => {
   const msg = chargeMessage({ storeName: 'Loja X', responsibleName: 'Ana Souza', billing: atrasado })
   assert.match(msg, /^Olá, Ana!/)
+  const withPix = chargeMessage({ storeName: 'Loja X', responsibleName: '', billing: atrasado, pixKey: 'chave@pix', siteUrl: 'https://lojax.com/' })
+  assert.match(withPix, /PIX, chave chave@pix\./)
+  assert.match(withPix, /https:\/\/lojax\.com\/admin\/mensalidade/)
   assert.match(msg, /setembro de 2026 \(venceu em 10\/09\/2026\), outubro de 2026/)
   assert.match(chargeMessage({ storeName: 'Loja X', responsibleName: '', billing: vencendo }), /^Olá! .*vence em 10\/10\/2026/)
   assert.equal(whatsappLink('(98) 98129-5577', 'oi'), 'https://wa.me/5598981295577?text=oi')
@@ -104,22 +122,53 @@ test('implantação: sem cobrança, sem aviso e fora dos totais', () => {
   assert.equal(billingTotals([{ billing: impl }], [], today).clients, 0)
 })
 
-test('vencimento automático: 30 dias após ativar; dia 29 a 31 vira dia 1 do mês seguinte', () => {
-  assert.equal(firstAutoDue('2026-10-10'), '2026-11-09')
-  assert.equal(firstAutoDue('2026-10-01'), '2026-11-01')
-  assert.equal(firstAutoDue('2026-01-30'), '2026-03-01')
-  assert.equal(firstAutoDue('2026-12-31'), '2027-02-01')
+test('vencimento automático: no dia da ativação, todo mês; 29 a 31 viram o último dia nos meses curtos', () => {
+  assert.equal(firstAutoDue('2026-10-10'), '2026-10-10')
   assert.equal(firstAutoDue(null), null)
-  assert.equal(firstDueDate({ activatedOn: '2026-10-10' }), '2026-11-09')
-  // o dia escolhido à mão vale no lugar do automático
-  assert.equal(firstDueDate({ activatedOn: '2026-10-10', dueDay: 5 }), '2026-11-05')
+  assert.equal(firstDueDate({ activatedOn: '2026-10-10' }), '2026-10-10')
+  // o dia escolhido à mão vale no lugar do automático (no mês da ativação)
+  assert.equal(firstDueDate({ activatedOn: '2026-10-10', dueDay: 5 }), '2026-10-05')
   assert.equal(firstDueDate({ activatedOn: '2026-10-10', dueDay: 5, billingStart: '2026-12-01' }), '2026-12-05')
   assert.equal(firstDueDate({ dueDay: 10, billingStart: '2026-01-01' }), '2026-01-10')
+  assert.equal(firstDueDate({ dueDay: 31, billingStart: '2027-02-01' }), '2027-02-28')
   assert.equal(firstDueDate({}), null)
+  assert.equal(dueInMonth('2026-11', 31), '2026-11-30')
+  assert.equal(dueInMonth('2028-02-01', 30), '2028-02-29')
+  assert.equal(dueInMonth('2026-10', 3), '2026-10-03')
 })
 
 test('dias em implantação: contando e quanto levou até ativar', () => {
   assert.deepEqual(implantationDays({ status: 'implantacao', implantationStartedOn: '2026-10-01' }, today), { days: 6, done: false })
   assert.deepEqual(implantationDays({ status: 'ativo', implantationStartedOn: '2026-10-01', activatedOn: '2026-10-20' }, today), { days: 19, done: true })
   assert.equal(implantationDays({ status: 'ativo', implantationStartedOn: null }, today), null)
+})
+
+test('mensalidade: meses para pagar (atrasados e o próximo) e o texto dos meses', () => {
+  const b = { open: [{ month: '2026-09-01', due: '2026-09-10', amount: 100 }], next: { month: '2026-10-01', due: '2026-10-10', amount: 100 } }
+  assert.deepEqual(payableMonths(b), [
+    { month: '2026-09-01', due: '2026-09-10', amount: 100, late: true },
+    { month: '2026-10-01', due: '2026-10-10', amount: 100, late: false },
+  ])
+  assert.deepEqual(payableMonths({ situation: 'implantacao' }), [])
+  assert.equal(monthsText(['2026-10-01', '2026-09-01']), 'setembro e outubro de 2026')
+  assert.equal(monthsText(['2026-10-01']), 'outubro de 2026')
+  assert.equal(monthsText(['2026-08-01', '2026-09-01', '2026-10-01']), 'agosto, setembro e outubro de 2026')
+  assert.equal(monthsText(['2026-12-01', '2027-01-01']), 'dezembro de 2026 e janeiro de 2027')
+  assert.equal(monthsText([]), '')
+})
+
+test('domínio: vencimento pela compra + anos e aviso com 60 dias', () => {
+  assert.equal(domainExpiryFrom('2026-10-07', 1), '2027-10-07')
+  assert.equal(domainExpiryFrom('2026-10-07', 10), '2036-10-07')
+  // 29/02 num ano comum vira 28/02
+  assert.equal(domainExpiryFrom('2028-02-29', 1), '2029-02-28')
+  assert.equal(domainExpiryFrom('2028-02-29', 4), '2032-02-29')
+  assert.equal(domainExpiryFrom('', 2), null)
+  assert.equal(domainExpiryFrom('2026-10-07', ''), null)
+  assert.equal(domainAlert({ domainExpiresOn: '2026-12-01' }, today), 'Domínio vence em 55 dias')
+  assert.equal(domainAlert({ domainExpiresOn: '2026-12-10' }, today), null)
+  assert.equal(domainAlert({ domainExpiresOn: null }, today), null)
+  assert.equal(domainRegistrarLabel('registro_br'), 'Registro.br')
+  assert.equal(domainRegistrarLabel(''), '')
+  assert.equal(domainPayerLabel('wbdev'), 'WB.Dev')
 })

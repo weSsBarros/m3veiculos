@@ -22,6 +22,11 @@ function accountFromRow(a = {}) {
     responsibleEmail: a.responsible_email || '',
     domain: a.domain || '',
     domainExpiresOn: a.domain_expires_on || null,
+    // Seção 67: compra do domínio, anos, onde está registrado e quem paga
+    domainRegisteredOn: a.domain_registered_on || null,
+    domainYears: a.domain_years ? Number(a.domain_years) : null,
+    domainRegistrar: a.domain_registrar || '',
+    domainPaidBy: a.domain_paid_by || '',
     notes: a.notes || '',
     onboarding: a.onboarding && typeof a.onboarding === 'object' ? a.onboarding : {},
     implantationStartedOn: a.implantation_started_on || null,
@@ -47,6 +52,7 @@ function clientFromRow(row) {
     slug: row.slug,
     name: row.name,
     siteUrl: row.site_url || '',
+    whatsapp: row.whatsapp || '',
     account: accountFromRow(row.account),
     plan: row.plan ? planFromRow(row.plan) : null,
     billing: row.billing || { situation: 'sem_cobranca' },
@@ -111,6 +117,10 @@ const ACCOUNT_COLUMNS = {
   responsibleEmail: 'responsible_email',
   domain: 'domain',
   domainExpiresOn: 'domain_expires_on',
+  domainRegisteredOn: 'domain_registered_on',
+  domainYears: 'domain_years',
+  domainRegistrar: 'domain_registrar',
+  domainPaidBy: 'domain_paid_by',
   notes: 'notes',
   onboarding: 'onboarding',
   activatedOn: 'activated_on',
@@ -122,7 +132,7 @@ export async function updateClientAccount(companyId, fields) {
   const row = {}
   for (const [key, column] of Object.entries(ACCOUNT_COLUMNS)) {
     if (fields[key] === undefined) continue
-    row[column] = fields[key] === '' && ['monthlyPrice', 'dueDay', 'billingStart', 'domainExpiresOn', 'planId', 'activatedOn'].includes(key) ? null : fields[key]
+    row[column] = fields[key] === '' && ['monthlyPrice', 'dueDay', 'billingStart', 'domainExpiresOn', 'domainRegisteredOn', 'domainYears', 'planId', 'activatedOn'].includes(key) ? null : fields[key]
   }
   const data = await run(supabase.from('client_accounts').update(row).eq('company_id', companyId).select().single())
   return accountFromRow(data)
@@ -310,9 +320,30 @@ export async function deleteExpense(id) {
 }
 
 // ------------------------------------------------------- lado das lojas
-// Painel da loja: situação, abas do plano, avisos e (admin) a mensalidade
+function claimFromRow(c) {
+  return {
+    id: c.id,
+    companyId: c.company_id || null,
+    months: Array.isArray(c.months) ? c.months : [],
+    amount: Number(c.amount) || 0,
+    paidOn: c.paid_on,
+    receipt: c.receipt || null,
+    note: c.note || '',
+    status: c.status || 'pendente',
+    response: c.response || '',
+    createdByEmail: c.created_by_email || '',
+    createdAt: c.created_at,
+    reviewedAt: c.reviewed_at || null,
+  }
+}
+
+// Painel da loja: situação, abas do plano, avisos, contrato de adesão e (admin)
+// a mensalidade com os dados do PIX
 export async function fetchMyAccount() {
   const data = await run(supabase.rpc('my_account'))
+  const terms = data?.terms
+  const payment = data?.payment
+  const support = data?.support || {}
   return {
     status: data?.status || 'ativo',
     planName: data?.plan_name || '',
@@ -320,10 +351,225 @@ export async function fetchMyAccount() {
     features: Array.isArray(data?.features) ? data.features : null,
     notices: (data?.notices || []).map((n) => ({ id: n.id, title: n.title, message: n.message || '', level: n.level || 'info' })),
     billing: data?.billing || null,
+    // null = nenhuma versão publicada (nada a aceitar)
+    terms: terms
+      ? {
+          version: terms.version,
+          title: terms.title || '',
+          accepted: Boolean(terms.accepted),
+          body: terms.body || '',
+          acceptance: terms.acceptance
+            ? {
+                version: terms.acceptance.version,
+                acceptedAt: terms.acceptance.accepted_at,
+                userName: terms.acceptance.user_name || '',
+                userEmail: terms.acceptance.user_email || '',
+              }
+            : null,
+        }
+      : null,
+    // Login da equipe WB.Dev (suporte) dentro da loja: não aceita os termos pelo cliente
+    platformTeam: Boolean(data?.platform_team),
+    payment: payment
+      ? {
+          pixKey: payment.pix_key || '',
+          pixName: payment.pix_name || '',
+          pixCity: payment.pix_city || '',
+          bankName: payment.bank_name || '',
+          bankAgency: payment.bank_agency || '',
+          bankAccount: payment.bank_account || '',
+          bankHolder: payment.bank_holder || '',
+          bankDocument: payment.bank_document || '',
+          claims: (payment.claims || []).map(claimFromRow),
+        }
+      : null,
+    support: {
+      phone: support.phone || '',
+      email: support.email || '',
+      hours: support.hours || '',
+      unread: Number(support.unread) || 0,
+    },
   }
 }
 
+// Contrato de adesão: o admin da loja aceita a versão publicada
+export async function acceptPlatformTerms(version) {
+  return run(supabase.rpc('accept_platform_terms', { p_version: version }))
+}
+
+// Comprovante do aceite (texto + registro). companyId só para a plataforma.
+export async function fetchTermsReceipt(companyId = null) {
+  return run(supabase.rpc('terms_receipt', companyId ? { p_company: companyId } : {}))
+}
+
+// "Já paguei": comprovante (opcional) no bucket privado payment-receipts
+export async function uploadPaymentReceipt(file) {
+  const ext = (file.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '') || 'pdf'
+  const path = `${COMPANY_ID}/${crypto.randomUUID()}.${ext}`
+  const { error } = await supabase.storage.from('payment-receipts').upload(path, file, { cacheControl: '3600', upsert: false })
+  if (error) throw error
+  return { path, name: file.name, type: file.type }
+}
+
+export async function paymentReceiptUrl(path) {
+  const { data, error } = await supabase.storage.from('payment-receipts').createSignedUrl(path, 120)
+  if (error) throw error
+  return data.signedUrl
+}
+
+export async function informPayment({ months, amount, paidOn, receipt = null, note = '' }) {
+  return claimFromRow(await run(supabase.rpc('inform_payment', { p_months: months, p_amount: amount, p_paid_on: paidOn, p_receipt: receipt, p_note: note })))
+}
+
+// Pagamentos confirmados da própria loja (página Mensalidade)
+export async function fetchMyPayments() {
+  const data = await run(supabase.rpc('my_payments'))
+  return (data || []).map((p) => ({ id: p.id, referenceMonth: p.reference_month, amount: Number(p.amount) || 0, paidOn: p.paid_on, method: p.method || '' }))
+}
+
+// Avisa a WB.Dev no WhatsApp (pagamento informado ou mensagem de chamado).
+// Falhar aqui não atrapalha: o pagamento e o chamado já estão gravados.
+export async function notifyWbdev(action, id) {
+  try {
+    const { data } = await supabase.functions.invoke('wbdev-email', { body: { action, id } })
+    return Boolean(data?.notified)
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------- plataforma: PIX, contrato e contatos
+function settingsFromRow(s = {}) {
+  return {
+    pixKey: s.pix_key || '',
+    pixName: s.pix_name || '',
+    pixCity: s.pix_city || '',
+    bankName: s.bank_name || '',
+    bankAgency: s.bank_agency || '',
+    bankAccount: s.bank_account || '',
+    bankHolder: s.bank_holder || '',
+    bankDocument: s.bank_document || '',
+    notifyPhone: s.notify_phone || '',
+    supportEmail: s.support_email || '',
+    supportHours: s.support_hours || '',
+  }
+}
+
+export async function fetchPlatformSettings() {
+  return settingsFromRow((await run(supabase.from('platform_settings').select('*').eq('id', 1).maybeSingle())) || {})
+}
+
+export async function savePlatformSettings(s) {
+  const row = {
+    pix_key: s.pixKey.trim(),
+    pix_name: s.pixName.trim(),
+    pix_city: s.pixCity.trim(),
+    bank_name: s.bankName.trim(),
+    bank_agency: s.bankAgency.trim(),
+    bank_account: s.bankAccount.trim(),
+    bank_holder: s.bankHolder.trim(),
+    bank_document: s.bankDocument.trim(),
+    notify_phone: s.notifyPhone.replace(/\D/g, ''),
+    support_email: s.supportEmail.trim(),
+    support_hours: s.supportHours.trim(),
+  }
+  return settingsFromRow(await run(supabase.from('platform_settings').update(row).eq('id', 1).select().single()))
+}
+
+export async function fetchPaymentClaims() {
+  const data = await run(supabase.from('client_payment_claims').select('*').order('created_at', { ascending: false }).limit(100))
+  return (data || []).map(claimFromRow)
+}
+
+// Pagamentos informados ainda não conferidos (número na aba Cobrança)
+export async function countPendingClaims() {
+  const { count, error } = await supabase.from('client_payment_claims').select('id', { count: 'exact', head: true }).eq('status', 'pendente')
+  if (error) throw error
+  return count || 0
+}
+
+export async function reviewPaymentClaim(id, confirm, response = '') {
+  return run(supabase.rpc('platform_review_payment_claim', { p_id: id, p_confirm: confirm, p_response: response }))
+}
+
+function termsFromRow(t) {
+  return { id: t.id, version: t.version, title: t.title, body: t.body, status: t.status, publishedAt: t.published_at, updatedAt: t.updated_at }
+}
+
+export async function fetchPlatformTerms() {
+  const data = await run(supabase.from('platform_terms').select('*').order('version', { ascending: false, nullsFirst: true }))
+  return (data || []).map(termsFromRow)
+}
+
+export async function saveTermsDraft({ id = null, title, body }) {
+  const query = id
+    ? supabase.from('platform_terms').update({ title, body }).eq('id', id).eq('status', 'rascunho')
+    : supabase.from('platform_terms').insert({ title, body, status: 'rascunho' })
+  return termsFromRow(await run(query.select().single()))
+}
+
+export async function publishPlatformTerms() {
+  return run(supabase.rpc('publish_platform_terms'))
+}
+
+export async function fetchTermsOverview() {
+  const data = await run(supabase.rpc('platform_terms_overview'))
+  return (data || []).map((c) => ({
+    companyId: c.company_id,
+    slug: c.slug,
+    name: c.name,
+    status: c.status || '',
+    acceptance: c.acceptance
+      ? { version: c.acceptance.version, acceptedAt: c.acceptance.accepted_at, userName: c.acceptance.user_name || '', userEmail: c.acceptance.user_email || '', ip: c.acceptance.ip || '' }
+      : null,
+  }))
+}
+
+function contactNoteFromRow(n) {
+  return { id: n.id, companyId: n.company_id, channel: n.channel, note: n.note, contactedOn: n.contacted_on, createdAt: n.created_at }
+}
+
+export async function fetchContactNotes(companyId = null) {
+  let query = supabase.from('client_contact_notes').select('*').order('contacted_on', { ascending: false }).order('created_at', { ascending: false })
+  if (companyId) query = query.eq('company_id', companyId)
+  return ((await run(query.limit(500))) || []).map(contactNoteFromRow)
+}
+
+export async function addContactNote({ companyId, channel, note, contactedOn }) {
+  return contactNoteFromRow(
+    await run(supabase.from('client_contact_notes').insert({ company_id: companyId, channel, note: note.trim(), contacted_on: contactedOn }).select().single())
+  )
+}
+
+export async function deleteContactNote(id) {
+  await run(supabase.from('client_contact_notes').delete().eq('id', id))
+}
+
 // Site e login: a loja deste site está bloqueada?
+// Loja bloqueada: no login, o admin vê o que está em aberto e o PIX para pagar
+// (o resto da equipe só fica sabendo que é com o admin). null = loja liberada.
+export async function fetchSuspendedAccount(companyId = COMPANY_ID) {
+  const data = await run(supabase.rpc('suspended_account', { p_company: companyId }))
+  if (!data) return null
+  return {
+    admin: Boolean(data.admin),
+    name: data.name || '',
+    billing: data.billing || null,
+    payment: data.admin
+      ? {
+          pixKey: data.pix_key || '',
+          pixName: data.pix_name || '',
+          pixCity: data.pix_city || '',
+          bankName: data.bank_name || '',
+          bankAgency: data.bank_agency || '',
+          bankAccount: data.bank_account || '',
+          bankHolder: data.bank_holder || '',
+          bankDocument: data.bank_document || '',
+        }
+      : null,
+  }
+}
+
 export async function fetchCompanyStatus(companyId = COMPANY_ID) {
   const { data, error } = await publicSupabase.rpc('company_status', { p_company: companyId })
   if (error) return { blocked: false, name: '' }

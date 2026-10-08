@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { RefreshCcw, Search, PlusCircle, Percent, Eye } from 'lucide-react'
+import { RefreshCcw, Search, PlusCircle, Percent, Eye, FileText, FileSpreadsheet } from 'lucide-react'
 import { fetchFinancings } from '../lib/financingApi.js'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchSales } from '../lib/salesApi.js'
 import { fetchCompanySettings } from '../lib/companyApi.js'
 import { formatCurrencyCents, formatDateBR, normalizePlate, todayISO } from '../utils/carFormat.js'
-import { FINANCING_STATUS_LABELS, summarizeFinancing } from '../utils/financing.js'
+import { FINANCING_STATUS_LABELS, summarizeFinancing, financingInPeriod } from '../utils/financing.js'
+import { DUE_PERIODS, duePeriodRange } from '../utils/period.js'
+import { buildInstallmentsReport } from '../utils/reports/build.js'
+import { exportReportPdf, exportReportExcel } from '../utils/reports/export.js'
+import PeriodFilter from './PeriodFilter.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import FinanceTabs from './FinanceTabs.jsx'
 import FinancingFormDialog from './FinancingFormDialog.jsx'
@@ -41,6 +45,11 @@ export default function AdminCustomerFinance() {
   const [filter, setFilter] = useState(() => (FILTERS.some((f) => f.value === searchParams.get('filtro')) ? searchParams.get('filtro') : 'todos'))
   const [formOpen, setFormOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Período: o que vence (a receber) e o que foi recebido; "Todo o período" = como antes
+  const [period, setPeriod] = useState('tudo')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const [exporting, setExporting] = useState('')
 
   async function load() {
     setLoading(true)
@@ -78,9 +87,12 @@ export default function AdminCustomerFinance() {
     [cars]
   )
 
+  const range = useMemo(() => duePeriodRange(period, customStart, customEnd, today), [period, customStart, customEnd, today])
+  const hasPeriod = period !== 'tudo'
+
   const rows = useMemo(
-    () => financings.map((financing) => ({ financing, summary: summarizeFinancing(financing, today) })),
-    [financings, today]
+    () => financings.map((financing) => ({ financing, summary: summarizeFinancing(financing, today), inPeriod: financingInPeriod(financing, range) })),
+    [financings, today, range]
   )
 
   const financedCarIds = useMemo(
@@ -95,30 +107,39 @@ export default function AdminCustomerFinance() {
     let overdueAmount = 0
     let receivedThisMonth = 0
     let active = 0
-    for (const { financing, summary } of rows) {
+    let dueInPeriod = 0
+    let dueInPeriodCount = 0
+    let receivedInPeriod = 0
+    for (const { financing, summary, inPeriod } of rows) {
       for (const inst of financing.installments) {
         if (inst.paidOn && inst.paidOn.startsWith(monthPrefix)) receivedThisMonth += inst.paidAmount || 0
       }
+      receivedInPeriod += inPeriod.paidAmount
       if (summary.status === 'cancelado') continue
       open += summary.open
       overdueCount += summary.overdueCount
       overdueAmount += summary.overdueAmount
+      dueInPeriod += inPeriod.dueOpenAmount
+      dueInPeriodCount += inPeriod.dueOpenCount
       if (summary.status === 'em_dia' || summary.status === 'em_atraso') active += 1
     }
-    return { open, overdueCount, overdueAmount, receivedThisMonth, active }
+    return { open, overdueCount, overdueAmount, receivedThisMonth, active, dueInPeriod, dueInPeriodCount, receivedInPeriod }
   }, [rows, today])
 
   const counts = useMemo(() => {
-    const result = { todos: rows.length }
-    for (const f of FILTERS) if (f.value !== 'todos') result[f.value] = rows.filter((r) => r.summary.status === f.value).length
+    // Com um período escolhido, só os financiamentos com parcela nele (como a lista)
+    const inScope = hasPeriod ? rows.filter((r) => r.inPeriod.active) : rows
+    const result = { todos: inScope.length }
+    for (const f of FILTERS) if (f.value !== 'todos') result[f.value] = inScope.filter((r) => r.summary.status === f.value).length
     return result
-  }, [rows])
+  }, [rows, hasPeriod])
 
   const visibleRows = useMemo(() => {
     const query = search.trim().toLowerCase()
     const plateQuery = normalizePlate(query)
-    return rows.filter(({ financing, summary }) => {
+    return rows.filter(({ financing, summary, inPeriod }) => {
       if (filter !== 'todos' && summary.status !== filter) return false
+      if (hasPeriod && !inPeriod.active) return false
       if (!query) return true
       const customer = financing.customerId ? customersById.get(financing.customerId) : null
       return (
@@ -126,7 +147,7 @@ export default function AdminCustomerFinance() {
         (plateQuery.length >= 2 && normalizePlate(financing.vehiclePlate).includes(plateQuery))
       )
     })
-  }, [rows, filter, search, customersById])
+  }, [rows, filter, search, customersById, hasPeriod])
 
   function changeFilter(value) {
     setFilter(value)
@@ -149,6 +170,20 @@ export default function AdminCustomerFinance() {
     const next = new URLSearchParams(searchParams)
     next.delete('financiamento')
     setSearchParams(next)
+  }
+
+  // Relatório das parcelas (PDF ou planilha), com o período, a busca e o filtro da tela
+  async function exportReport(format) {
+    setExporting(format)
+    try {
+      const report = buildInstallmentsReport({ financings: visibleRows.map((r) => r.financing), customersById, range, today })
+      if (format === 'pdf') await exportReportPdf(report, { companyName: settings.name })
+      else await exportReportExcel(report, { companyName: settings.name })
+    } catch (err) {
+      alert('Não foi possível gerar o relatório: ' + err.message)
+    } finally {
+      setExporting('')
+    }
   }
 
   function applyFinancing(updated) {
@@ -187,14 +222,44 @@ export default function AdminCustomerFinance() {
 
       {error && <p className="admin-error">{error}</p>}
 
-      <div className="expense-summary">
-        <div className="expense-summary-card">
-          <span>A receber (saldo em aberto)</span>
-          <strong>{formatCurrencyCents(totals.open)}</strong>
+      {financings.length > 0 && (
+        <div className="customer-finance-toolbar">
+          <PeriodFilter
+            periods={DUE_PERIODS}
+            period={period}
+            onPeriodChange={setPeriod}
+            customStart={customStart}
+            customEnd={customEnd}
+            onCustomStartChange={setCustomStart}
+            onCustomEndChange={setCustomEnd}
+          />
+          <div className="customer-finance-report">
+            <span>Relatório{hasPeriod ? ' do período' : ''}:</span>
+            <button type="button" className="btn btn-outline" onClick={() => exportReport('pdf')} disabled={Boolean(exporting)}>
+              <FileText size={15} /> {exporting === 'pdf' ? 'Gerando…' : 'PDF'}
+            </button>
+            <button type="button" className="btn btn-outline" onClick={() => exportReport('xlsx')} disabled={Boolean(exporting)}>
+              <FileSpreadsheet size={15} /> {exporting === 'xlsx' ? 'Gerando…' : 'Excel'}
+            </button>
+          </div>
         </div>
+      )}
+
+      <div className="expense-summary">
+        {hasPeriod ? (
+          <div className="expense-summary-card">
+            <span>A receber no período ({totals.dueInPeriodCount} {totals.dueInPeriodCount === 1 ? 'parcela' : 'parcelas'})</span>
+            <strong>{formatCurrencyCents(totals.dueInPeriod)}</strong>
+          </div>
+        ) : (
+          <div className="expense-summary-card">
+            <span>A receber (saldo em aberto)</span>
+            <strong>{formatCurrencyCents(totals.open)}</strong>
+          </div>
+        )}
         <div className="expense-summary-card is-positive">
-          <span>Recebido este mês</span>
-          <strong>{formatCurrencyCents(totals.receivedThisMonth)}</strong>
+          <span>{hasPeriod ? 'Recebido no período' : 'Recebido este mês'}</span>
+          <strong>{formatCurrencyCents(hasPeriod ? totals.receivedInPeriod : totals.receivedThisMonth)}</strong>
         </div>
         <div className={`expense-summary-card ${totals.overdueCount ? 'is-negative' : ''}`}>
           <span>
@@ -246,7 +311,7 @@ export default function AdminCustomerFinance() {
           </button>
         </div>
       ) : visibleRows.length === 0 ? (
-        <p className="admin-muted">Nenhum financiamento encontrado.</p>
+        <p className="admin-muted">{hasPeriod ? 'Nenhum financiamento com parcela neste período.' : 'Nenhum financiamento encontrado.'}</p>
       ) : (
         <>
           <div className="admin-table-wrap">
@@ -259,13 +324,13 @@ export default function AdminCustomerFinance() {
                   <th>Parcelas</th>
                   <th>Pago</th>
                   <th>Saldo</th>
-                  <th>Próximo vencimento</th>
+                  <th>{hasPeriod ? 'No período' : 'Próximo vencimento'}</th>
                   <th>Situação</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map(({ financing, summary }) => (
+                {visibleRows.map(({ financing, summary, inPeriod }) => (
                   <tr key={financing.id}>
                     <td className="admin-nowrap">
                       <strong>{financing.customerName}</strong>
@@ -282,9 +347,18 @@ export default function AdminCustomerFinance() {
                     </td>
                     <td className="admin-nowrap">{formatCurrencyCents(summary.paid)}</td>
                     <td className="admin-nowrap">{formatCurrencyCents(summary.open)}</td>
-                    <td className={`admin-nowrap ${summary.nextDue && summary.nextDue.dueDate < today && summary.status !== 'cancelado' ? 'expense-margin-negative' : ''}`}>
-                      {summary.nextDue && summary.status !== 'cancelado' ? formatDateBR(summary.nextDue.dueDate) : '—'}
-                    </td>
+                    {hasPeriod ? (
+                      <td className="admin-nowrap">
+                        {inPeriod.dueCount > 0 ? `${inPeriod.dueCount} ${inPeriod.dueCount === 1 ? 'parcela' : 'parcelas'} · ${formatCurrencyCents(inPeriod.dueAmount)}` : '—'}
+                        {inPeriod.paidCount > 0 && (
+                          <span className="admin-table-sub">recebido {formatCurrencyCents(inPeriod.paidAmount)}</span>
+                        )}
+                      </td>
+                    ) : (
+                      <td className={`admin-nowrap ${summary.nextDue && summary.nextDue.dueDate < today && summary.status !== 'cancelado' ? 'expense-margin-negative' : ''}`}>
+                        {summary.nextDue && summary.status !== 'cancelado' ? formatDateBR(summary.nextDue.dueDate) : '—'}
+                      </td>
+                    )}
                     <td>
                       <span className={`admin-pill ${STATUS_PILL[summary.status]}`}>{FINANCING_STATUS_LABELS[summary.status]}</span>
                       {summary.overdueCount > 0 && summary.status !== 'cancelado' && (

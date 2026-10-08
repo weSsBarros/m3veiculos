@@ -3,6 +3,8 @@ import { scopeCars, assertCanWrite } from './viewScope.js'
 import { slugify } from '../utils/carFormat.js'
 import { compressCarPhoto, hasThumb, thumbUrl } from '../utils/carPhotos.js'
 import { friendlyUploadError } from './storageErrors.js'
+import { olxSyncSoon } from './olxApi.js'
+import { webmotorsSyncSoon } from './webmotorsApi.js'
 
 // Colunas visíveis para o site público (chave "anon"). "purchase_price" e
 // "purchase_date" (custo de aquisição) ficam de fora — são bloqueadas a nível
@@ -61,6 +63,12 @@ function fromRow(row) {
     renaveExitStatus: row.renave_exit_status || 'pendente',
     renaveExitOn: row.renave_exit_on || null,
     renaveExitProtocol: row.renave_exit_protocol || '',
+    // Seção 59: publicar na OLX e marca, modelo e versão do catálogo da OLX
+    olxPublish: row.olx_publish !== false,
+    olxCatalog: row.olx_catalog && typeof row.olx_catalog === 'object' ? row.olx_catalog : {},
+    // Seção 61: publicar na Webmotors e marca, modelo e versão (e, se escolhidos, cor, câmbio e combustível) da Webmotors
+    webmotorsPublish: row.webmotors_publish !== false,
+    webmotorsCatalog: row.webmotors_catalog && typeof row.webmotors_catalog === 'object' ? row.webmotors_catalog : {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -126,6 +134,10 @@ function toRow(car) {
     renave_exit_status: car.renaveExitStatus || 'pendente',
     renave_exit_on: car.renaveExitStatus === 'registrado' ? car.renaveExitOn || null : null,
     renave_exit_protocol: car.renaveExitStatus === 'registrado' ? (car.renaveExitProtocol || '').trim() : '',
+    olx_publish: car.olxPublish !== false,
+    olx_catalog: car.olxCatalog || {},
+    webmotors_publish: car.webmotorsPublish !== false,
+    webmotors_catalog: car.webmotorsCatalog || {},
   }
   if (staffTable !== 'cars') {
     delete row.purchase_price
@@ -249,6 +261,7 @@ export async function createCar(car) {
   if (staffTable !== 'cars' && canSetPurchase && (car.purchasePrice || car.purchaseDate)) {
     await setCarPurchase(data.id, car.purchasePrice, car.purchaseDate)
   }
+  portalsSyncSoon()
   return fromRow(data)
 }
 
@@ -256,12 +269,15 @@ export async function updateCar(id, car) {
   requireSupabase()
   const { data, error } = await supabase.from(staffTable).update(toRow(car)).eq('id', id).eq('company_id', COMPANY_ID).select().single()
   if (error) throw error
+  portalsSyncSoon()
   return fromRow(data)
 }
 
+// Status, visibilidade e o resto também chegam aos portais (só age com a conta do portal conectada)
 async function patchCar(id, patch) {
   const { data, error } = await supabase.from(staffTable).update(patch).eq('id', id).eq('company_id', COMPANY_ID).select().single()
   if (error) throw error
+  portalsSyncSoon()
   return fromRow(data)
 }
 
@@ -297,6 +313,30 @@ export async function updateCarFeatured(id, featured) {
 export async function updateCarHidden(id, hidden) {
   requireSupabase()
   return patchCar(id, { hidden })
+}
+
+// Depois de mudar um carro: concilia com a OLX e a Webmotors (cada uma só com a conta conectada)
+function portalsSyncSoon() {
+  olxSyncSoon()
+  webmotorsSyncSoon()
+}
+
+// "Publicar na OLX" e a versão do catálogo da OLX (aba Portais)
+export async function updateCarOlx(id, { olxPublish, olxCatalog }) {
+  requireSupabase()
+  const patch = {}
+  if (olxPublish !== undefined) patch.olx_publish = olxPublish
+  if (olxCatalog !== undefined) patch.olx_catalog = olxCatalog || {}
+  return patchCar(id, patch)
+}
+
+// "Publicar na Webmotors" e a versão da Webmotors (aba Portais)
+export async function updateCarWebmotors(id, { webmotorsPublish, webmotorsCatalog }) {
+  requireSupabase()
+  const patch = {}
+  if (webmotorsPublish !== undefined) patch.webmotors_publish = webmotorsPublish
+  if (webmotorsCatalog !== undefined) patch.webmotors_catalog = webmotorsCatalog || {}
+  return patchCar(id, patch)
 }
 
 // Custo de aquisição. O admin pode sempre; o gerente só quando ainda está em
@@ -338,6 +378,7 @@ export async function deleteCar(id) {
   requireSupabase()
   const { error } = await supabase.from('cars').delete().eq('id', id).eq('company_id', COMPANY_ID)
   if (error) throw error
+  portalsSyncSoon()
 }
 
 // -- Fotos (no próprio site da loja, pasta /uploads/carros) --------------------

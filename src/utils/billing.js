@@ -67,9 +67,15 @@ export function situationText(billing, today = new Date()) {
 }
 
 // Aviso automático no painel do admin da loja (null = nada a avisar)
-export function storeBillingNotice(billing, today = new Date()) {
+export function storeBillingNotice(billing, today = new Date(), claims = []) {
   const s = billing?.situation
   if (!s || s === 'implantacao' || s === 'sem_cobranca' || s === 'em_dia') return null
+  // Já informou ("Já paguei") todos os meses do aviso: só falta a WB.Dev conferir
+  const due = s === 'atrasado' ? (billing.open || []).map((o) => o.month) : [billing.next?.month].filter(Boolean)
+  const informed = new Set(claims.filter((c) => c.status === 'pendente').flatMap((c) => c.months || []))
+  if (due.length > 0 && due.every((m) => informed.has(m))) {
+    return { level: 'info', informed: true, text: `Você informou o pagamento de ${monthsText(due)}. A WB.Dev está conferindo.` }
+  }
   if (s === 'atrasado') {
     const n = Number(billing.days_late) || 0
     const oldest = billing.open?.[0]
@@ -90,21 +96,27 @@ export function storeBillingNotice(billing, today = new Date()) {
   }
 }
 
-// Mensagem de cobrança para o WhatsApp do responsável
-export function chargeMessage({ storeName, responsibleName, billing }) {
+// Mensagem de cobrança para o WhatsApp do responsável. pixKey e siteUrl
+// (opcionais): a chave PIX e o link da página Mensalidade do painel da loja
+export function chargeMessage({ storeName, responsibleName, billing, pixKey = '', siteUrl = '' }) {
   const hello = responsibleName ? `Olá, ${responsibleName.split(' ')[0]}!` : 'Olá!'
+  const page = siteUrl ? `${siteUrl.replace(/\/+$/, '')}/admin/mensalidade` : ''
+  const howToPay = [
+    pixKey ? ` Para pagar: PIX, chave ${pixKey}.` : '',
+    page ? ` Pelo painel, em Mensalidade, tem o QR code e o botão "Já paguei": ${page}` : '',
+  ].join('')
   const open = billing?.open || []
   if (open.length > 0) {
     const list = open.map((o) => `${monthName(o.month)} (venceu em ${dateBR(o.due)})`).join(', ')
     return (
       `${hello} Aqui é da WB.Dev. Consta em aberto a mensalidade do sistema da ${storeName}: ${list}, ` +
-      `total de ${money(billing.open_total)}. Pode me enviar o comprovante quando pagar? Obrigado!`
+      `total de ${money(billing.open_total)}.${howToPay} Pode me enviar o comprovante quando pagar? Obrigado!`
     )
   }
   if (billing?.next) {
     return (
       `${hello} Aqui é da WB.Dev. Passando para lembrar que a mensalidade do sistema da ${storeName} ` +
-      `(${money(billing.next.amount)}) vence em ${dateBR(billing.next.due)}. Qualquer dúvida, estou à disposição!`
+      `(${money(billing.next.amount)}) vence em ${dateBR(billing.next.due)}.${howToPay} Qualquer dúvida, estou à disposição!`
     )
   }
   return `${hello} Aqui é da WB.Dev, sobre o sistema da ${storeName}.`
@@ -151,10 +163,39 @@ export function receivedByMonth(payments, months) {
   return months.map((m) => ({ month: m, value: sums[m] }))
 }
 
-// Domínio vencendo em até 30 dias (ou vencido)
+// Domínio do cliente (seção 67): onde está registrado e quem paga a renovação
+export const DOMAIN_REGISTRARS = [
+  { value: 'registro_br', label: 'Registro.br' },
+  { value: 'hostinger_cliente', label: 'Hostinger do cliente' },
+  { value: 'hostinger_wbdev', label: 'Hostinger da WB.Dev' },
+  { value: 'outro', label: 'Outro' },
+]
+
+export const DOMAIN_PAYERS = [
+  { value: 'cliente', label: 'Cliente' },
+  { value: 'wbdev', label: 'WB.Dev' },
+]
+
+export const DOMAIN_ALERT_DAYS = 60
+
+const labelIn = (list, value) => list.find((x) => x.value === value)?.label || ''
+export const domainRegistrarLabel = (value) => labelIn(DOMAIN_REGISTRARS, value)
+export const domainPayerLabel = (value) => labelIn(DOMAIN_PAYERS, value)
+
+// Vencimento = data da compra + anos comprados (29/02 vira 28/02 em ano comum)
+export function domainExpiryFrom(registeredOn, years) {
+  const n = Number(years)
+  if (!registeredOn || !n) return null
+  const [y, m, d] = registeredOn.split('-').map(Number)
+  const year = y + n
+  const last = new Date(Date.UTC(year, m, 0)).getUTCDate()
+  return `${year}-${String(m).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`
+}
+
+// Domínio vencendo em até 60 dias (ou vencido)
 export function domainAlert(account, today = new Date()) {
   const days = daysUntil(account?.domainExpiresOn, today)
-  if (days === null || days > 30) return null
+  if (days === null || days > DOMAIN_ALERT_DAYS) return null
   return days < 0 ? `Domínio venceu há ${-days} ${days === -1 ? 'dia' : 'dias'}` : `Domínio vence em ${days} ${days === 1 ? 'dia' : 'dias'}`
 }
 
@@ -183,14 +224,17 @@ export function isCharged(billing) {
   return Boolean(billing?.situation) && !['implantacao', 'sem_cobranca'].includes(billing.situation)
 }
 
-// 1º vencimento automático: 30 dias depois da ativação; se cair no dia 29, 30
-// ou 31, vira o dia 1 do mês seguinte (a mesma regra do client_billing, seção 43)
+// Dia do vencimento num mês 'AAAA-MM': 29 a 31 viram o último dia nos meses mais
+// curtos (a mesma regra do client_billing, seção 65)
+export function dueInMonth(month, day) {
+  const [y, m] = month.split('-').map(Number)
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  return `${month.slice(0, 7)}-${String(Math.min(day, last)).padStart(2, '0')}`
+}
+
+// 1º vencimento automático: o próprio dia da ativação; depois, todo mês nesse dia
 export function firstAutoDue(activatedOn) {
-  if (!activatedOn) return null
-  const [y, m, d] = activatedOn.split('-').map(Number)
-  let due = new Date(Date.UTC(y, m - 1, d + 30))
-  if (due.getUTCDate() > 28) due = new Date(Date.UTC(due.getUTCFullYear(), due.getUTCMonth() + 1, 1))
-  return due.toISOString().slice(0, 10)
+  return activatedOn || null
 }
 
 // Dias em implantação: contando (ainda em implantação) ou quanto levou até ativar
@@ -208,13 +252,14 @@ export function firstDueDate({ activatedOn, dueDay, billingStart }) {
   const auto = firstAutoDue(activatedOn)
   if (!auto && !(dueDay && billingStart)) return null
   const month = billingStart ? billingStart.slice(0, 7) : auto.slice(0, 7)
-  const day = dueDay || Number(auto.slice(8, 10))
-  return `${month}-${String(day).padStart(2, '0')}`
+  const day = Number(dueDay) || Number(auto.slice(8, 10))
+  return dueInMonth(month, day)
 }
 
 // Nome de cada tipo de e-mail (histórico dos lembretes)
 export const REMINDER_KINDS = {
-  antes_5: 'Lembrete antes do vencimento',
+  antes_3: 'Lembrete antes do vencimento',
+  antes_5: 'Lembrete antes do vencimento (5 dias)',
   no_dia: 'Vence hoje',
   atraso_1: 'Atraso (1 dia)',
   atraso_3: 'Atraso (3 dias)',
@@ -224,4 +269,26 @@ export const REMINDER_KINDS = {
 
 export function reminderLabel(kind) {
   return REMINDER_KINDS[kind] || kind
+}
+
+// Meses que a loja pode pagar agora (página Mensalidade e "Já paguei"): os
+// atrasados e o próximo, com o vencimento e o valor. late = já venceu.
+export function payableMonths(billing) {
+  const items = (billing?.open || []).map((o) => ({ month: o.month, due: o.due, amount: Number(o.amount) || 0, late: true }))
+  if (billing?.next) items.push({ month: billing.next.month, due: billing.next.due, amount: Number(billing.next.amount) || 0, late: false })
+  return items
+}
+
+// Meses escolhidos em texto curto: "10/2026, 11/2026"
+// ['2026-09-01', '2026-10-01'] → "setembro e outubro de 2026"
+export function monthsText(months) {
+  const names = [...months].sort().map((m) => {
+    const [y, mm] = m.split('-').map(Number)
+    return { year: y, name: new Date(Date.UTC(y, mm - 1, 15)).toLocaleDateString('pt-BR', { month: 'long', timeZone: 'UTC' }) }
+  })
+  if (names.length === 0) return ''
+  const sameYear = names.every((n) => n.year === names[0].year)
+  const parts = names.map((n) => (sameYear ? n.name : `${n.name} de ${n.year}`))
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} e ${parts.at(-1)}` : parts[0]
+  return sameYear ? `${list} de ${names[0].year}` : list
 }

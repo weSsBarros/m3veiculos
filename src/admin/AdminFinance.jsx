@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw, Download, Receipt } from 'lucide-react'
+import { RefreshCcw, Download, Receipt, Search } from 'lucide-react'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchAllSuppliers } from '../lib/suppliersApi.js'
 import { fetchSales } from '../lib/salesApi.js'
-import { expenseCategoryLabel, formatCurrency, carStatusLabel, daysInStock, isStockStale, slugify } from '../utils/carFormat.js'
+import { expenseCategoryLabel, formatCurrency, carStatusLabel, daysInStock, isStockStale, slugify, normalizePlate } from '../utils/carFormat.js'
 import { fetchStockAlertDefault, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import { downloadCsv } from '../utils/exportCsv.js'
+import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExpensesApi.js'
+import StoreResultCard from './StoreResultCard.jsx'
 import FinanceTabs from './FinanceTabs.jsx'
 import './admin.css'
 
@@ -18,26 +20,31 @@ export default function AdminFinance() {
   const [expenses, setExpenses] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [sales, setSales] = useState([])
+  const [companyExpenses, setCompanyExpenses] = useState([])
   const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [exportCarId, setExportCarId] = useState(ALL_CARS_VALUE)
+  const [search, setSearch] = useState('')
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const [carsData, expensesData, suppliersData, salesData] = await Promise.all([
+      const [carsData, expensesData, suppliersData, salesData, companyExpensesData] = await Promise.all([
         fetchAllCarsAdmin(),
         fetchAllExpensesAdmin(),
         fetchAllSuppliers(),
         fetchSales(),
+        // Despesas da empresa (aluguel, contas...) para o lucro do mês
+        generateCompanyExpenses().catch(() => {}).then(fetchCompanyExpenses).catch(() => []),
       ])
       fetchStockAlertDefault().then(setAlertDefault)
       setCars(carsData)
       setExpenses(expensesData)
       setSuppliers(suppliersData)
       setSales(salesData)
+      setCompanyExpenses(companyExpensesData)
     } catch (err) {
       setError(err.message || 'Erro ao carregar o painel.')
     } finally {
@@ -74,6 +81,17 @@ export default function AdminFinance() {
       }),
     [cars, expensesByCar, salesByCar]
   )
+
+  // Busca na lista de carros: marca, modelo, versão, ano, situação ou placa
+  const visibleRows = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return rows
+    const plateQuery = normalizePlate(query)
+    return rows.filter(({ car }) => {
+      const text = `${car.brand} ${car.model} ${car.version || ''} ${car.year || ''} ${car.modelYear || ''} ${carStatusLabel(car.status)}`.toLowerCase()
+      return text.includes(query) || (plateQuery.length >= 2 && normalizePlate(car.plate || '').includes(plateQuery))
+    })
+  }, [rows, search])
 
   const availableRows = rows.filter((r) => r.car.status === 'disponivel')
   const availableRowsWithMargin = availableRows.filter((r) => r.margin != null)
@@ -191,6 +209,8 @@ export default function AdminFinance() {
         </div>
       </div>
 
+      <StoreResultCard data={{ cars, sales, carExpenses: expenses, companyExpenses }} />
+
       {byCategory.length > 0 && (
         <>
           <h2 className="admin-section-title">Gastos por categoria</h2>
@@ -218,8 +238,29 @@ export default function AdminFinance() {
       )}
 
       <h2 className="admin-section-title">Custo e margem por carro</h2>
+      {rows.length > 0 && (
+        <div className="admin-search-bar">
+          <label className="admin-search-input">
+            <Search size={15} />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por marca, modelo, versão, ano, placa ou situação…"
+              aria-label="Buscar carro no financeiro"
+            />
+          </label>
+          {search.trim() && (
+            <span className="admin-muted">
+              {visibleRows.length} de {rows.length} {rows.length === 1 ? 'carro' : 'carros'}
+            </span>
+          )}
+        </div>
+      )}
       {rows.length === 0 ? (
         <p className="admin-muted">Nenhum carro cadastrado ainda.</p>
+      ) : visibleRows.length === 0 ? (
+        <p className="admin-muted">Nenhum carro encontrado para “{search.trim()}”.</p>
       ) : (
         <>
           <div className="admin-table-wrap">
@@ -236,7 +277,7 @@ export default function AdminFinance() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ car, totalCost, margin, sale, revenue }) => (
+                {visibleRows.map(({ car, totalCost, margin, sale, revenue }) => (
                   <tr key={car.id}>
                     <td>
                       <strong>{car.brand} {car.model}</strong>
@@ -266,7 +307,7 @@ export default function AdminFinance() {
           </div>
 
           <div className="admin-card-list">
-            {rows.map(({ car, totalCost, margin, sale, revenue }) => (
+            {visibleRows.map(({ car, totalCost, margin, sale, revenue }) => (
               <div className="admin-card" key={car.id}>
                 <div className="admin-card-top">
                   <div className="admin-card-title">

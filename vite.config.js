@@ -23,7 +23,7 @@ function photoApiConfig(env) {
       const lines = Object.entries(values).map(([key, value]) => `  '${key}' => '${value}',`)
       const app = readFileSync(resolve(process.cwd(), 'src/App.jsx'), 'utf8')
       const pages = [...new Set([...app.matchAll(/<Route\s+path="(\/[^"]*)"/g)].map((m) => m[1]))].filter(
-        (p) => !p.startsWith('/admin') && !p.includes(':') && !p.includes('*')
+        (p) => !p.startsWith('/admin') && !p.startsWith('/wbdev') && !p.includes(':') && !p.includes('*')
       )
       lines.push(`  'site_pages' => [${pages.map((p) => `'${p}'`).join(', ')}],`)
       this.emitFile({

@@ -4,7 +4,6 @@ import { fetchClients, fetchNotices, saveNotice, deleteNotice } from '../../lib/
 import { dateBR } from '../../utils/billing.js'
 import { todayISO } from '../../utils/carFormat.js'
 import useConfirm from '../../components/useConfirm.jsx'
-import PlatformTabs from './PlatformTabs.jsx'
 import DateInputBR from '../../components/DateInputBR.jsx'
 import '../admin.css'
 
@@ -106,11 +105,10 @@ export default function PlatformNotices() {
     <div className="admin-page platform-page">
       <div className="admin-page-head">
         <div>
-          <h1>Plataforma</h1>
+          <h1>Avisos</h1>
           <p>Avisos que aparecem no topo do painel das lojas.</p>
         </div>
       </div>
-      <PlatformTabs />
 
       <form className="admin-form admin-form-section" onSubmit={submit}>
         <h2>{form.id ? 'Editar aviso' : 'Novo aviso'}</h2>

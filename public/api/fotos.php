@@ -123,6 +123,8 @@ if ($action === 'delete') {
     }
     @unlink("$root/{$m[1]}");
     @unlink("$thumbs/{$m[1]}");
+    // Cópia em JPG feita para a OLX (api/foto-jpg.php)
+    @unlink("$root/jpg/" . preg_replace('/\.(webp|jpg|png)$/', '', $m[1]) . '.jpg');
     reply(200, ['ok' => true]);
 }
 

@@ -724,8 +724,9 @@ insert into public.client_payments (company_id, reference_month, amount, paid_on
 select test.check('cobrança: tudo pago = em dia, próximo vencimento em abril',
   public.client_billing(test.company_a(), '2026-03-12') ->> 'situation' = 'em_dia'
   and public.client_billing(test.company_a(), '2026-03-12') -> 'next' ->> 'due' = '2026-04-10');
-select test.check('cobrança: 4 dias antes = vence em breve; no dia = vence hoje',
-  public.client_billing(test.company_a(), '2026-04-06') ->> 'situation' = 'vence_em_breve'
+select test.check('cobrança: 3 dias antes = vence em breve (4 dias antes ainda em dia); no dia = vence hoje',
+  public.client_billing(test.company_a(), '2026-04-07') ->> 'situation' = 'vence_em_breve'
+  and public.client_billing(test.company_a(), '2026-04-06') ->> 'situation' = 'em_dia'
   and public.client_billing(test.company_a(), '2026-04-10') ->> 'situation' = 'vence_hoje');
 select test.check('cobrança: sem valor ou sem vencimento = sem cobrança',
   public.client_billing('bbbbbbbb-0000-0000-0000-00000000000b', '2026-04-10') ->> 'situation' = 'sem_cobranca');
@@ -798,12 +799,21 @@ set role authenticated;
 select test.check('loja bloqueada: o admin perde o acesso a tudo',
   current_company_id() is null and test.count('select * from cars') = 0 and test.count('select * from customers') = 0
   and test.denied($$select my_account()$$));
+select test.check('loja bloqueada: no login, o admin vê a cobrança e o PIX para pagar',
+  (suspended_account(test.company_a()) ->> 'admin')::boolean
+  and suspended_account(test.company_a()) ? 'billing'
+  and suspended_account(test.company_a()) ? 'pix_key'
+  and suspended_account(test.company_a()) ->> 'name' is not null);
 reset role;
 
 select test.login('aaaaaaaa-0000-0000-0000-000000000004');
 set role authenticated;
 select test.check('loja bloqueada: o vendedor perde o acesso a tudo',
   current_company_id() is null and test.count('select * from staff_cars') = 0);
+select test.check('loja bloqueada: o vendedor não vê a cobrança nem o PIX no login',
+  (suspended_account(test.company_a()) ->> 'admin')::boolean = false
+  and not (suspended_account(test.company_a()) ? 'billing')
+  and not (suspended_account(test.company_a()) ? 'pix_key'));
 reset role;
 
 select test.login(null);
@@ -811,19 +821,26 @@ set role anon;
 select test.check('loja bloqueada: o site não vê os carros dela e sabe que está bloqueada',
   test.count('select id from cars where company_id = test.company_a()') = 0
   and (company_status(test.company_a()) ->> 'blocked')::boolean);
+select test.check('loja bloqueada: sem login, não vê a cobrança',
+  test.denied($$select suspended_account(test.company_a())$$));
 reset role;
 
 select test.login('bbbbbbbb-0000-0000-0000-000000000001');
 set role authenticated;
 select test.check('loja bloqueada: as outras lojas continuam normais',
   current_company_id() = 'bbbbbbbb-0000-0000-0000-00000000000b');
+select test.check('loja bloqueada: o admin de outra loja não vê a cobrança dela; a própria loja, liberada, não tem nada',
+  (suspended_account(test.company_a()) ->> 'admin')::boolean = false
+  and not (suspended_account(test.company_a()) ? 'billing')
+  and suspended_account('bbbbbbbb-0000-0000-0000-00000000000b') is null);
 reset role;
 
 update public.client_accounts set status = 'ativo' where company_id = test.company_a();
 select test.login('aaaaaaaa-0000-0000-0000-000000000001');
 set role authenticated;
 select test.check('loja liberada: o admin volta a ter acesso',
-  current_company_id() = test.company_a() and test.count('select * from cars') > 0);
+  current_company_id() = test.company_a() and test.count('select * from cars') > 0
+  and suspended_account(test.company_a()) is null);
 reset role;
 select test.check('liberada: a data do bloqueio é apagada',
   (select blocked_at is null from public.client_accounts where company_id = test.company_a()));
@@ -878,23 +895,30 @@ select test.check('implantação: não cobra (mesmo com valor) e não bloqueia a
   public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-10') ->> 'situation' = 'implantacao'
   and not public.company_blocked('dddddddd-0000-0000-0000-00000000000d'));
 
--- Ativou em 10/10/2026: 1º vencimento 30 dias depois (09/11), todo dia 9
+-- Ativou em 10/10/2026: vence no próprio dia e depois todo dia 10 (seção 65)
 update public.client_accounts set status = 'ativo', activated_on = '2026-10-10' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
-select test.check('ativação: grava a data escolhida; 1º vencimento 30 dias depois e todo mês no mesmo dia',
+select test.check('ativação: grava a data escolhida; 1º vencimento no dia da ativação e todo mês no mesmo dia',
   (select activated_on = '2026-10-10' from public.client_accounts where company_id = 'dddddddd-0000-0000-0000-00000000000d')
-  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'situation' = 'em_dia'
-  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') -> 'next' ->> 'due' = '2026-11-09'
-  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'due_day')::int = 9
-  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'due_day_auto')::boolean
-  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-11-09') ->> 'situation' = 'vence_hoje'
-  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-11-12') ->> 'days_late')::int = 3
-  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-12-10') -> 'next' ->> 'due' = '2027-01-09');
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-06') ->> 'situation' = 'em_dia'
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-08') ->> 'situation' = 'vence_em_breve'
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-08') -> 'next' ->> 'due' = '2026-10-10'
+  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-08') ->> 'due_day')::int = 10
+  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-08') ->> 'due_day_auto')::boolean
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-10') ->> 'situation' = 'vence_hoje'
+  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-13') ->> 'days_late')::int = 3);
+insert into public.client_payments (company_id, reference_month, amount, paid_on) values ('dddddddd-0000-0000-0000-00000000000d', '2026-10-01', 150, '2026-10-10');
+select test.check('ativação: pago o mês da ativação, o próximo vence no mesmo dia do mês seguinte',
+  public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'situation' = 'em_dia'
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') -> 'next' ->> 'due' = '2026-11-10');
 
--- Ativou em 01/10: os 30 dias caem em 31/10, então vence no dia 1
-update public.client_accounts set activated_on = '2026-10-01' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
-select test.check('ativação: se os 30 dias caem no dia 29, 30 ou 31, vence no dia 1 do mês seguinte',
-  public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') -> 'next' ->> 'due' = '2026-11-01'
-  and (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2026-10-20') ->> 'due_day')::int = 1);
+-- Ativou dia 31: nos meses mais curtos, vence no último dia do mês
+update public.client_accounts set activated_on = '2027-01-31' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
+select test.check('ativação no dia 31: vence no último dia dos meses mais curtos',
+  (public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2027-01-31') ->> 'due_day')::int = 31
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2027-01-31') -> 'next' ->> 'due' = '2027-01-31'
+  and public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2027-02-01') -> 'next' ->> 'due' = '2027-02-28'
+  and exists (select 1 from jsonb_array_elements(public.client_billing('dddddddd-0000-0000-0000-00000000000d', '2027-05-01') -> 'open') o
+              where o ->> 'due' = '2027-04-30'));
 
 -- O dia escolhido à mão vale no lugar do automático
 update public.client_accounts set due_day = 5, activated_on = '2026-10-10' where company_id = 'dddddddd-0000-0000-0000-00000000000d';
@@ -959,31 +983,32 @@ create function test.lembrete(p_day date) returns text language sql as $$
 $$;
 select set_config('request.jwt.claim.role', 'service_role', false);
 
-select test.check('lembretes: de 5 a 1 dia antes, no dia e com 1, 3 e 7 dias de atraso',
-  test.lembrete('2026-10-04') = ''
-  and test.lembrete('2026-10-05') = 'antes_5'
-  and test.lembrete('2026-10-09') = 'antes_5'
+select test.check('lembretes: de 3 a 1 dia antes, no dia e com 1, 3 e 7 dias de atraso',
+  test.lembrete('2026-10-06') = ''
+  and test.lembrete('2026-10-07') = 'antes_3'
+  and test.lembrete('2026-10-09') = 'antes_3'
   and test.lembrete('2026-10-10') = 'no_dia'
   and test.lembrete('2026-10-11') = 'atraso_1'
   and test.lembrete('2026-10-13') = 'atraso_3'
   and test.lembrete('2026-10-17') = 'atraso_7'
   and test.lembrete('2026-10-24') = ''
-  and test.lembrete('2026-11-05') = 'antes_5');
-select test.check('lembretes: vão para o e-mail do responsável (minúsculo, sem espaços), com valor e vencimento',
-  exists (select 1 from jsonb_array_elements(public.billing_reminders_due('2026-10-05')) x
+  and test.lembrete('2026-11-07') = 'antes_3');
+select test.check('lembretes: vão para o e-mail do responsável (minúsculo, sem espaços), com valor, vencimento e o site da loja',
+  exists (select 1 from jsonb_array_elements(public.billing_reminders_due('2026-10-07')) x
           where x ->> 'company_id' = 'eeeeeeee-0000-0000-0000-00000000000e'
             and x -> 'to' = '["dono@lembrete.teste"]'::jsonb
-            and (x ->> 'amount')::numeric = 100 and x ->> 'due' = '2026-10-10' and (x ->> 'days')::int = 5));
+            and (x ->> 'amount')::numeric = 100 and x ->> 'due' = '2026-10-10' and (x ->> 'days')::int = 3
+            and x ? 'site_url'));
 
 -- Lembrete já enviado não sai de novo; com erro, tenta de novo
 insert into public.client_reminders (company_id, kind, reference_month, sent_to, status) values
-  ('eeeeeeee-0000-0000-0000-00000000000e', 'antes_5', '2026-10-01', 'dono@lembrete.teste', 'enviado'),
+  ('eeeeeeee-0000-0000-0000-00000000000e', 'antes_3', '2026-10-01', 'dono@lembrete.teste', 'enviado'),
   ('eeeeeeee-0000-0000-0000-00000000000e', 'no_dia', '2026-10-01', 'dono@lembrete.teste', 'erro');
 select test.check('lembretes: o mesmo lembrete do mesmo mês sai uma vez só (o que deu erro tenta de novo)',
   test.lembrete('2026-10-08') = ''
   and test.lembrete('2026-10-10') = 'no_dia'
   and test.denied($$insert into public.client_reminders (company_id, kind, reference_month, status)
-                    values ('eeeeeeee-0000-0000-0000-00000000000e', 'antes_5', '2026-10-01', 'enviado')$$));
+                    values ('eeeeeeee-0000-0000-0000-00000000000e', 'antes_3', '2026-10-01', 'enviado')$$));
 
 -- Pagou outubro: nada de atraso
 insert into public.client_payments (company_id, reference_month, amount, paid_on) values ('eeeeeeee-0000-0000-0000-00000000000e', '2026-10-01', 100, '2026-10-10');
@@ -991,9 +1016,9 @@ select test.check('lembretes: mês pago não gera aviso de atraso',
   test.lembrete('2026-10-11') = '' and test.lembrete('2026-10-17') = '');
 
 update public.client_accounts set reminders_enabled = false where company_id = 'eeeeeeee-0000-0000-0000-00000000000e';
-select test.check('lembretes: desligados na ficha, não sai nada', test.lembrete('2026-11-05') = '');
+select test.check('lembretes: desligados na ficha, não sai nada', test.lembrete('2026-11-07') = '');
 update public.client_accounts set reminders_enabled = true, status = 'implantacao' where company_id = 'eeeeeeee-0000-0000-0000-00000000000e';
-select test.check('lembretes: cliente em implantação não recebe', test.lembrete('2026-11-05') = '');
+select test.check('lembretes: cliente em implantação não recebe', test.lembrete('2026-11-07') = '');
 
 select test.check('lembretes: sem e-mail do responsável, vão para os admins da loja (fora o dono da plataforma)',
   'admin@loja-a' = any(public.client_reminder_recipients(test.company_a()))
@@ -1311,6 +1336,608 @@ set role anon;
 select test.check('anon: não lê dados fiscais nem grava',
   test.count('select fiscal from companies') <= 0
   and test.denied($$select save_company_fiscal('{"legal_name": "x"}')$$));
+reset role;
+
+-- ============================ publicação na OLX (59)
+insert into public.olx_accounts (company_id, access_token, user_name, user_email, settings)
+values (test.company_a(), 'token-secreto-a', 'Loja A na OLX', 'olx@loja-a', '{"publish_default": true}');
+insert into public.olx_oauth_states (state, company_id) values ('state-secreto-a', test.company_a());
+insert into public.olx_catalog (path, data) values ('car_info', '{"TOYOTA": 51}');
+insert into public.olx_ads (company_id, car_id, ad_id, status, list_id, url)
+values (test.company_a(), 'ca000000-0000-0000-0000-0000000000a1', 'ca00000000000000000', 'publicado', '8000001', 'https://www.olx.com.br/vi/8000001.htm'),
+       ('bbbbbbbb-0000-0000-0000-00000000000b', 'ca000000-0000-0000-0000-0000000000b1', 'ca00000000000000001', 'aguardando', null, '');
+
+select test.check('olx: carro vem marcado para a OLX; a versão da OLX tem que ser um objeto',
+  (select olx_publish from public.cars where id = 'ca000000-0000-0000-0000-0000000000a1')
+  and test.denied($$update public.cars set olx_catalog = '[]' where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+select test.check('olx: anúncio com carro de outra loja, id fora do formato ou situação desconhecida é recusado',
+  test.denied($$insert into public.olx_ads (company_id, car_id, ad_id) values (test.company_a(), 'ca000000-0000-0000-0000-0000000000b1', 'x1')$$)
+  and test.denied($$insert into public.olx_ads (company_id, ad_id) values (test.company_a(), 'id inválido!')$$)
+  and test.denied($$insert into public.olx_ads (company_id, ad_id) values (test.company_a(), 'abc12345678901234567')$$)
+  and test.denied($$insert into public.olx_ads (company_id, ad_id, status) values (test.company_a(), 'x2', 'outro')$$));
+-- (o plano "Básico" foi criado pelos testes depois do schema.sql)
+select test.check('olx: a aba Portais fica fora dos planos até a Webmotors ficar pronta (seção 65)',
+  (select not ('portais' = any(features)) and 'estoque' = any(features) from public.plans where name = 'Completo')
+  and (select not ('portais' = any(features)) from public.plans where name = 'Básico'));
+select test.check('plataforma: conta os anúncios no ar na OLX de cada loja',
+  (public.platform_rows(current_date - 1, current_date, test.company_a()) -> 0 -> 'features' -> 'olx' ->> 'total')::int = 1
+  and (public.platform_rows(current_date - 1, current_date, 'bbbbbbbb-0000-0000-0000-00000000000b') -> 0 -> 'features' -> 'olx' ->> 'total')::int = 1);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não lê o token, o state, o catálogo nem a trava da OLX',
+  test.count('select * from olx_accounts') <= 0
+  and test.count('select access_token from olx_accounts') <= 0
+  and test.count('select * from olx_oauth_states') <= 0
+  and test.count('select * from olx_catalog') <= 0
+  and test.count('select * from olx_state') <= 0);
+select test.check('admin A: vê a situação da conta OLX sem o token',
+  (olx_account_info() ->> 'connected')::boolean
+  and olx_account_info() ->> 'user_name' = 'Loja A na OLX'
+  and olx_account_info()::text not like '%token-secreto-a%');
+select test.check('admin A: grava os ajustes da OLX e liga a publicação automática',
+  test.allowed($$select save_olx_settings('{"footer": " Aceitamos troca ", "exchange": "sim", "publish_default": false, "auto_publish": true, "extra": 1}')$$));
+select test.check('admin A: ajustes errados da OLX são recusados',
+  test.denied($$select save_olx_settings('{"exchange": "talvez"}')$$)
+  and test.denied($$select save_olx_settings('{"auto_publish": "sim"}')$$)
+  and test.denied($$select save_olx_settings('{"publish_default": 1}')$$)
+  and test.denied($$select save_olx_settings(jsonb_build_object('footer', repeat('x', 1001)))$$));
+select test.check('admin A: vê só os anúncios da loja A e não grava neles pela API',
+  test.count('select * from olx_ads') = 1
+  and test.denied($$update olx_ads set status = 'publicado'$$)
+  and test.denied($$insert into olx_ads (company_id, ad_id) values (current_company_id(), 'x3')$$)
+  and test.denied($$delete from olx_ads$$));
+select test.check('admin A: muda "Publicar na OLX" e a versão da OLX do carro',
+  test.allowed($$update cars set olx_publish = false, olx_catalog = '{"brandId": 51}' where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+select test.check('admin A: ajustes da OLX gravados sem chave estranha e com registro em Atividades',
+  (select settings from public.olx_accounts where company_id = test.company_a())
+    = '{"publish_default": false, "footer": "Aceitamos troca", "exchange": "sim"}'::jsonb
+  and (select auto_publish from public.olx_accounts where company_id = test.company_a())
+  and exists (select 1 from public.activity_log where company_id = test.company_a() and entity = 'olx'
+              and label = 'Ligou a publicação automática na OLX'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente: vê a conta e os anúncios da OLX, mas não muda os ajustes',
+  (olx_account_info() ->> 'connected')::boolean
+  and test.count('select * from olx_ads') = 1
+  and test.denied($$select save_olx_settings('{"auto_publish": false}')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: vê os anúncios e muda "Publicar na OLX" e a versão pela staff_cars',
+  test.count('select * from olx_ads') = 1
+  and test.allowed($$update staff_cars set olx_publish = true, olx_catalog = '{"brandId": 1, "modelId": 2}'
+                    where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+select test.check('vendedor: lê o que marcou e não lê o token da OLX',
+  (select olx_catalog ->> 'modelId' from staff_cars where id = 'ca000000-0000-0000-0000-0000000000a1') = '2'
+  and test.count('select * from olx_accounts') <= 0
+  and test.denied($$select save_olx_settings('{"auto_publish": false}')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000006');
+set role authenticated;
+select test.check('vendedor desativado: não vê a conta nem os anúncios da OLX',
+  olx_account_info() is null
+  and test.count('select * from olx_ads') = 0);
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: sem conta OLX própria, não vê a da loja A nem os anúncios dela',
+  olx_account_info() ->> 'connected' = 'false'
+  and test.count('select * from olx_ads') = 1
+  and test.count($$select * from olx_ads where company_id = test.company_a()$$) = 0
+  and test.denied($$select save_olx_settings('{"auto_publish": true}')$$)
+  and test.denied($$update cars set olx_publish = false where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: não lê nada da OLX nem as colunas novas do carro',
+  test.count('select * from olx_accounts') <= 0
+  and test.count('select * from olx_ads') <= 0
+  and test.count('select olx_publish from cars') = -1
+  and test.count('select olx_catalog from cars') = -1
+  and test.denied('select olx_account_info()')
+  and test.denied($$select save_olx_settings('{"auto_publish": true}')$$));
+reset role;
+
+-- ============================ publicação na Webmotors (61)
+insert into public.wm_accounts (company_id, cnpj, email, session_hash, gateway_token, modalities, settings)
+values (test.company_a(), '12345678000190', 'integracao@loja-a', 'hash-secreto-a', 'token-gw-a',
+        '[{"code": 2943, "name": "Usados", "type": "U", "total": 30, "used": 2, "photos": true}]', '{"publish_default": true}');
+select public.wm_save_password(test.company_a(), 'senha-secreta-a');
+insert into public.wm_catalog (path, data) values ('marcas', '[{"id": 26, "name": "TOYOTA"}]');
+insert into public.wm_ads (company_id, car_id, ad_code, status, photos)
+values (test.company_a(), 'ca000000-0000-0000-0000-0000000000a1', 123456, 'publicado', '[{"url": "https://x/1.jpg", "code": 9}]'),
+       ('bbbbbbbb-0000-0000-0000-00000000000b', 'ca000000-0000-0000-0000-0000000000b1', 123457, 'publicado', '[]');
+
+select test.check('webmotors: carro vem marcado para a Webmotors; o catálogo da Webmotors tem que ser um objeto',
+  (select webmotors_publish from public.cars where id = 'ca000000-0000-0000-0000-0000000000a1')
+  and test.denied($$update public.cars set webmotors_catalog = '[]' where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+select test.check('webmotors: anúncio com carro de outra loja, código repetido ou inválido e situação desconhecida são recusados; CNPJ com 14 números',
+  test.denied($$insert into public.wm_ads (company_id, car_id) values (test.company_a(), 'ca000000-0000-0000-0000-0000000000b1')$$)
+  and test.denied($$insert into public.wm_ads (company_id, ad_code) values (test.company_a(), 0)$$)
+  and test.denied($$insert into public.wm_ads (company_id, ad_code) values (test.company_a(), 123456)$$)
+  and test.denied($$insert into public.wm_ads (company_id, status) values (test.company_a(), 'outro')$$)
+  and test.denied($$insert into public.wm_accounts (company_id, cnpj) values ('bbbbbbbb-0000-0000-0000-00000000000b', '123')$$));
+select test.check('webmotors: a senha fica no Vault e só volta pela função',
+  public.wm_password(test.company_a()) = 'senha-secreta-a'
+  and (select count(*) from vault.secrets where name = 'webmotors-' || test.company_a()::text) = 1
+  and not exists (select 1 from public.wm_accounts a where to_jsonb(a)::text like '%senha-secreta-a%'));
+select public.wm_save_password(test.company_a(), 'senha-nova-a');
+select test.check('webmotors: trocar a senha não cria outro segredo; senha vazia é recusada',
+  public.wm_password(test.company_a()) = 'senha-nova-a'
+  and (select count(*) from vault.secrets where name = 'webmotors-' || test.company_a()::text) = 1
+  and test.denied($$select public.wm_save_password(test.company_a(), '')$$));
+select test.check('plataforma: conta os anúncios no ar na Webmotors de cada loja',
+  (public.platform_rows(current_date - 1, current_date, test.company_a()) -> 0 -> 'features' -> 'webmotors' ->> 'total')::int = 1
+  and (public.platform_rows(current_date - 1, current_date, 'bbbbbbbb-0000-0000-0000-00000000000b') -> 0 -> 'features' -> 'webmotors' ->> 'total')::int = 1);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não lê a conta, a senha, o catálogo nem a trava da Webmotors',
+  test.count('select * from wm_accounts') <= 0
+  and test.count('select session_hash from wm_accounts') <= 0
+  and test.count('select * from wm_catalog') <= 0
+  and test.count('select * from wm_state') <= 0
+  and test.count('select * from vault.decrypted_secrets') <= 0
+  and test.denied($$select wm_password(current_company_id())$$)
+  and test.denied($$select wm_save_password(current_company_id(), 'x')$$)
+  and test.denied($$select wm_delete_password(current_company_id())$$));
+select test.check('admin A: vê a situação da conta Webmotors sem a senha, o hash e o token',
+  (webmotors_account_info() ->> 'connected')::boolean
+  and webmotors_account_info() ->> 'cnpj' = '12345678000190'
+  and jsonb_array_length(webmotors_account_info() -> 'modalities') = 1
+  and webmotors_account_info()::text not like '%hash-secreto-a%'
+  and webmotors_account_info()::text not like '%token-gw-a%'
+  and webmotors_account_info()::text not like '%senha%');
+select test.check('admin A: grava os ajustes da Webmotors, a modalidade e liga a publicação automática',
+  test.allowed($$select save_webmotors_settings('{"footer": " Aceitamos troca ", "exchange": "nao", "publish_default": false, "auto_publish": true, "modality_code": "2943", "extra": 1}')$$));
+select test.check('admin A: ajustes errados da Webmotors são recusados',
+  test.denied($$select save_webmotors_settings('{"exchange": "talvez"}')$$)
+  and test.denied($$select save_webmotors_settings('{"auto_publish": "sim"}')$$)
+  and test.denied($$select save_webmotors_settings('{"publish_default": 1}')$$)
+  and test.denied($$select save_webmotors_settings('{"modality_code": "9999"}')$$)
+  and test.denied($$select save_webmotors_settings(jsonb_build_object('footer', repeat('x', 1001)))$$));
+select test.check('admin A: vê só os anúncios da loja A na Webmotors e não grava neles pela API',
+  test.count('select * from wm_ads') = 1
+  and test.denied($$update wm_ads set status = 'publicado'$$)
+  and test.denied($$insert into wm_ads (company_id) values (current_company_id())$$)
+  and test.denied($$delete from wm_ads$$));
+select test.check('admin A: muda "Publicar na Webmotors" e a versão da Webmotors do carro',
+  test.allowed($$update cars set webmotors_publish = false, webmotors_catalog = '{"brandId": 26}' where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+select test.check('admin A: ajustes da Webmotors gravados sem chave estranha e com registro em Atividades',
+  (select settings from public.wm_accounts where company_id = test.company_a())
+    = '{"publish_default": false, "footer": "Aceitamos troca", "exchange": "nao"}'::jsonb
+  and (select auto_publish and modality_code = '2943' from public.wm_accounts where company_id = test.company_a())
+  and exists (select 1 from public.activity_log where company_id = test.company_a() and entity = 'webmotors'
+              and label = 'Ligou a publicação automática na Webmotors')
+  and exists (select 1 from public.activity_log where company_id = test.company_a() and entity = 'webmotors'
+              and label = 'Trocou a modalidade do plano da Webmotors' and details = 'Usados'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente: vê a conta e os anúncios da Webmotors, mas não muda os ajustes',
+  (webmotors_account_info() ->> 'connected')::boolean
+  and test.count('select * from wm_ads') = 1
+  and test.denied($$select save_webmotors_settings('{"auto_publish": false}')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: vê os anúncios e muda "Publicar na Webmotors" e a versão pela staff_cars',
+  test.count('select * from wm_ads') = 1
+  and test.allowed($$update staff_cars set webmotors_publish = true, webmotors_catalog = '{"brandId": 26, "modelId": 730}'
+                    where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+select test.check('vendedor: lê o que marcou e não lê a conta da Webmotors',
+  (select webmotors_catalog ->> 'modelId' from staff_cars where id = 'ca000000-0000-0000-0000-0000000000a1') = '730'
+  and test.count('select * from wm_accounts') <= 0
+  and test.denied($$select save_webmotors_settings('{"auto_publish": false}')$$)
+  and test.denied($$select wm_password(current_company_id())$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000006');
+set role authenticated;
+select test.check('vendedor desativado: não vê a conta nem os anúncios da Webmotors',
+  webmotors_account_info() is null
+  and test.count('select * from wm_ads') = 0);
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: sem conta Webmotors própria, não vê a da loja A nem os anúncios dela',
+  webmotors_account_info() ->> 'connected' = 'false'
+  and test.count('select * from wm_ads') = 1
+  and test.count($$select * from wm_ads where company_id = test.company_a()$$) = 0
+  and test.denied($$select save_webmotors_settings('{"auto_publish": true}')$$)
+  and test.denied($$update cars set webmotors_publish = false where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: não lê nada da Webmotors nem as colunas novas do carro',
+  test.count('select * from wm_accounts') <= 0
+  and test.count('select * from wm_ads') <= 0
+  and test.count('select webmotors_publish from cars') = -1
+  and test.count('select webmotors_catalog from cars') = -1
+  and test.denied('select webmotors_account_info()')
+  and test.denied($$select save_webmotors_settings('{"auto_publish": true}')$$)
+  and test.denied($$select wm_password('aaaaaaaa-0000-0000-0000-00000000000a')$$));
+reset role;
+
+select public.wm_delete_password(test.company_a());
+select test.check('webmotors: ao desconectar, a senha sai do Vault',
+  public.wm_password(test.company_a()) is null
+  and (select count(*) from vault.secrets where name = 'webmotors-' || test.company_a()::text) = 0);
+
+-- ============================ despesas da empresa (63)
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: lança despesa da empresa e uma que se repete todo mês (cria o modelo junto)',
+  test.allowed($$insert into company_expenses (category, description, amount, due_on) values ('agua', 'Conta de água', 87.53, current_date - 40)$$)
+  and (create_company_expense('{"category": "aluguel", "description": "Aluguel do galpão", "amount": 2000, "due_on": "2026-07-31"}', true)).recurrence_id is not null
+  and test.count('select * from company_expense_recurrences') = 1);
+select test.check('admin A: despesa com categoria vazia, valor negativo, fornecedor de outra loja ou modelo de outra loja é recusada',
+  test.denied($$insert into company_expenses (category, amount, due_on) values ('', 1, current_date)$$)
+  and test.denied($$insert into company_expenses (category, amount, due_on) values ('agua', -1, current_date)$$)
+  and test.denied($$insert into company_expenses (category, amount, due_on, supplier_id) select 'agua', 1, current_date, id from suppliers where company_id <> current_company_id() limit 1$$)
+  and test.denied($$insert into company_expenses (company_id, category, amount, due_on) values ('bbbbbbbb-0000-0000-0000-00000000000b', 'agua', 1, current_date)$$));
+reset role;
+select test.check('despesas: lançar fica no registro de atividades com o rótulo da despesa',
+  exists (select 1 from public.activity_log where company_id = test.company_a() and entity = 'company_expenses'
+          and label like 'Despesa da empresa: Conta de água — R$ 87.53'));
+
+-- Modelo de dia 31 que já criou até três meses atrás: criar os meses que faltam
+insert into public.company_expense_recurrences (id, company_id, category, description, amount, day, starts_on, last_generated_month)
+values ('ce000000-0000-0000-0000-0000000000a1', test.company_a(), 'internet', 'Internet', 99.9, 31,
+        (date_trunc('month', now() at time zone 'America/Fortaleza') - interval '3 months')::date,
+        (date_trunc('month', now() at time zone 'America/Fortaleza') - interval '3 months')::date);
+insert into public.company_expense_recurrences (id, company_id, category, description, amount, day, starts_on, last_generated_month)
+values ('ce000000-0000-0000-0000-0000000000b1', 'bbbbbbbb-0000-0000-0000-00000000000b', 'aluguel', 'Aluguel B', 500, 5,
+        (date_trunc('month', now() at time zone 'America/Fortaleza') - interval '1 month')::date,
+        (date_trunc('month', now() at time zone 'America/Fortaleza') - interval '1 month')::date);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select company_expenses_generate() as criadas;
+select test.check('despesas: "Repetir todo mês" cria os meses que faltam até o atual, no último dia nos meses curtos, só da loja de quem abriu',
+  test.count($$select * from company_expenses where recurrence_id = 'ce000000-0000-0000-0000-0000000000a1'$$) = 3
+  and not exists (select 1 from company_expenses
+                  where recurrence_id = 'ce000000-0000-0000-0000-0000000000a1'
+                    and due_on <> (date_trunc('month', due_on) + interval '1 month - 1 day')::date)
+  and test.count($$select * from company_expenses where description = 'Aluguel do galpão'$$) >= 1);
+select test.check('despesas: rodar de novo não duplica',
+  company_expenses_generate() = 0
+  and test.count($$select * from company_expenses where recurrence_id = 'ce000000-0000-0000-0000-0000000000a1'$$) = 3);
+select test.check('despesas: excluir a despesa de um mês não faz ela voltar',
+  test.allowed($$delete from company_expenses where recurrence_id = 'ce000000-0000-0000-0000-0000000000a1' and due_on = (select min(due_on) from company_expenses where recurrence_id = 'ce000000-0000-0000-0000-0000000000a1')$$)
+  and company_expenses_generate() = 0
+  and test.count($$select * from company_expenses where recurrence_id = 'ce000000-0000-0000-0000-0000000000a1'$$) = 2);
+select test.check('despesas: marcar como paga, parar de repetir e não ver o modelo da loja B',
+  test.allowed($$update company_expenses set paid_on = current_date where description = 'Conta de água'$$)
+  and test.allowed($$update company_expense_recurrences set active = false where id = 'ce000000-0000-0000-0000-0000000000a1'$$)
+  and test.count($$select * from company_expense_recurrences where id = 'ce000000-0000-0000-0000-0000000000b1'$$) = 0);
+reset role;
+select test.login(null);
+select public.company_expenses_generate() as criadas_pelo_cron;
+select test.check('despesas: o cron (sem login) cria as das outras lojas; criadas pelo sistema não vão para Atividades',
+  exists (select 1 from public.company_expenses where recurrence_id = 'ce000000-0000-0000-0000-0000000000b1')
+  and not exists (select 1 from public.activity_log where entity = 'company_expenses' and action = 'insert' and label like '%Internet%'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente: não vê nem lança despesas da empresa',
+  test.count('select * from company_expenses') <= 0
+  and test.count('select * from company_expense_recurrences') <= 0
+  and test.denied($$insert into company_expenses (category, amount, due_on) values ('agua', 1, current_date)$$)
+  and test.denied($$select company_expenses_generate()$$)
+  and test.denied($$select create_company_expense('{"category": "agua", "amount": 1, "due_on": "2026-10-01"}', false)$$));
+reset role;
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: não vê nem lança despesas da empresa',
+  test.count('select * from company_expenses') <= 0
+  and test.denied($$insert into company_expenses (category, amount, due_on) values ('agua', 1, current_date)$$));
+reset role;
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: vê só as despesas da loja B',
+  test.count($$select * from company_expenses where company_id = test.company_a()$$) = 0
+  and test.count('select * from company_expenses') >= 1
+  and test.denied($$update company_expenses set amount = 1 where company_id = test.company_a()$$));
+reset role;
+select test.login(null);
+set role anon;
+select test.check('anon: nada das despesas da empresa',
+  test.count('select * from company_expenses') <= 0
+  and test.count('select * from company_expense_recurrences') <= 0
+  and test.denied($$select company_expenses_generate()$$));
+reset role;
+
+-- ============================ mensalidade, PIX, contrato e suporte (65)
+select test.check('mensalidade: dia de vencimento de 1 a 31 (29 a 31 viram o último dia nos meses curtos)',
+  test.allowed($$update public.client_accounts set due_day = 31 where company_id = 'eeeeeeee-0000-0000-0000-00000000000e'$$)
+  and test.denied($$update public.client_accounts set due_day = 32 where company_id = 'eeeeeeee-0000-0000-0000-00000000000e'$$)
+  and test.denied($$update public.client_accounts set due_day = 0 where company_id = 'eeeeeeee-0000-0000-0000-00000000000e'$$));
+update public.client_accounts set due_day = 10 where company_id = 'eeeeeeee-0000-0000-0000-00000000000e';
+select test.check('plataforma: a aba Portais saiu dos planos (fica só na WB.AUTO até a Webmotors ficar pronta)',
+  not exists (select 1 from public.plans where 'portais' = any(features)));
+
+-- Loja A ativa com mensalidade (para a página Mensalidade e o "Já paguei")
+update public.client_accounts set status = 'ativo', monthly_price = 100, due_day = 10, billing_start = '2026-01-01' where company_id = test.company_a();
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: preenche os dados do PIX e do suporte',
+  test.allowed($$update platform_settings set pix_key = 'chave@pix.teste', pix_name = 'WB DEV TESTE', pix_city = 'SAO LUIS',
+                 bank_name = 'Banco Teste', support_email = 'suporte@teste', support_hours = 'Seg a sex, 8h às 18h' where id = 1$$)
+  and test.denied($$update platform_settings set pix_name = repeat('x', 26) where id = 1$$)
+  and test.denied($$insert into platform_settings (id) values (2)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não lê nem muda os dados da plataforma direto; vê o PIX e o suporte pelo my_account',
+  test.count('select * from platform_settings') <= 0
+  and test.denied($$update platform_settings set pix_key = 'x'$$)
+  and my_account() -> 'payment' ->> 'pix_key' = 'chave@pix.teste'
+  and my_account() -> 'payment' ->> 'pix_name' = 'WB DEV TESTE'
+  and my_account() -> 'support' ->> 'email' = 'suporte@teste'
+  and my_account() -> 'support' ->> 'phone' = '5598981295577');
+select test.check('admin A: informa o pagamento ("Já paguei"); mês já pago, sem mês ou comprovante de outra loja é recusado',
+  (inform_payment(array['2027-03-15'::date, '2027-04-01'::date], 200, current_date, jsonb_build_object('path', current_company_id()::text || '/r.pdf', 'name', 'r.pdf'), 'pago pelo PIX')).status = 'pendente'
+  and test.denied($$select inform_payment(array['2026-01-01'::date], 100, current_date)$$)
+  and test.denied($$select inform_payment(array[]::date[], 100, current_date)$$)
+  and test.denied($$select inform_payment(array['2027-06-01'::date], 100, current_date, '{"path": "bbbbbbbb-0000-0000-0000-00000000000b/r.pdf"}')$$)
+  and test.denied($$insert into client_payment_claims (company_id, months, amount, paid_on) values (current_company_id(), array['2027-06-01'::date], 1, current_date)$$));
+select test.check('admin A: vê o pagamento informado (meses no dia 1) e o histórico de pagamentos da loja',
+  test.count($$select * from client_payment_claims where months = array['2027-03-01'::date, '2027-04-01'::date]$$) = 1
+  and jsonb_array_length(my_account() -> 'payment' -> 'claims') = 1
+  and jsonb_array_length(my_payments()) >= 3
+  and test.denied($$update client_payment_claims set status = 'confirmado'$$)
+  and test.denied($$select platform_review_payment_claim((select id from client_payment_claims limit 1), true)$$));
+select test.check('admin A: envia comprovante na pasta da loja A e não na da loja B',
+  test.allowed($$insert into storage.objects (bucket_id, name) select 'payment-receipts', current_company_id() || '/comprovante.pdf'$$)
+  and test.denied($$insert into storage.objects (bucket_id, name) values ('payment-receipts', 'bbbbbbbb-0000-0000-0000-00000000000b/x.pdf')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: não informa pagamento nem vê a mensalidade, o PIX ou os comprovantes',
+  test.denied($$select inform_payment(array['2027-06-01'::date], 100, current_date)$$)
+  and test.count('select * from client_payment_claims') <= 0
+  and my_account() -> 'payment' = 'null'::jsonb
+  and my_account() -> 'billing' = 'null'::jsonb
+  and test.denied($$select my_payments()$$)
+  and test.count($$select * from storage.objects where bucket_id = 'payment-receipts'$$) = 0);
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê o pagamento informado nem o comprovante da loja A',
+  test.count('select * from client_payment_claims') = 0
+  and test.count($$select * from storage.objects where bucket_id = 'payment-receipts'$$) = 0);
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select platform_review_payment_claim((select id from client_payment_claims where company_id = test.company_a()), true) ->> 'status' as conferido;
+select test.check('dono da plataforma: confirma o pagamento informado (vira o pagamento de cada mês) e não confere duas vezes',
+  (select status from client_payment_claims where company_id = test.company_a()) = 'confirmado'
+  and test.count($$select * from client_payments where company_id = test.company_a() and reference_month in ('2027-03-01', '2027-04-01') and method = 'PIX'$$) = 2
+  and (select sum(amount) from client_payments where company_id = test.company_a() and reference_month in ('2027-03-01', '2027-04-01')) = 200
+  and test.denied($$select platform_review_payment_claim((select id from client_payment_claims where company_id = test.company_a()), false, 'x')$$)
+  and test.count($$select * from storage.objects where bucket_id = 'payment-receipts'$$) = 1);
+reset role;
+
+-- Contrato de adesão: a minuta entra como rascunho e não bloqueia ninguém
+select test.check('contrato: a minuta entra como rascunho; sem versão publicada não há aceite pendente',
+  exists (select 1 from public.platform_terms where status = 'rascunho' and body like '%CONTRATO DE ADESÃO%')
+  and not exists (select 1 from public.platform_terms where status = 'publicada'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: sem versão publicada, o painel não pede aceite; não lê nem publica o rascunho',
+  my_account() -> 'terms' = 'null'::jsonb
+  and test.count('select * from platform_terms') <= 0
+  and test.denied('select publish_platform_terms()')
+  and test.denied($$update platform_terms set body = 'x'$$));
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: edita o rascunho e publica (versão 1); a versão publicada não muda',
+  test.allowed($$update platform_terms set title = 'Contrato de Adesão e Termos de Uso do WB.AUTO' where status = 'rascunho'$$)
+  and (publish_platform_terms() ->> 'version')::int = 1
+  and test.denied($$update platform_terms set body = 'outro' where version = 1$$)
+  and test.denied($$delete from platform_terms where version = 1$$)
+  and test.denied('select publish_platform_terms()'));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: vê que há termos pendentes, sem o texto, e não aceita pela loja',
+  (my_account() -> 'terms' ->> 'accepted')::boolean = false
+  and my_account() -> 'terms' -> 'body' = 'null'::jsonb
+  and test.denied('select accept_platform_terms(1)'));
+reset role;
+
+-- Login da equipe WB.Dev como admin da loja A não aceita pelo cliente
+insert into auth.users (id, email) values ('cccccccc-0000-0000-0000-0000000000e2', 'suporte2@wbdev') on conflict (id) do nothing;
+insert into public.user_company (user_id, company_id, role) values ('cccccccc-0000-0000-0000-0000000000e2', test.company_a(), 'admin');
+insert into public.platform_team (user_id) values ('cccccccc-0000-0000-0000-0000000000e2') on conflict do nothing;
+select test.login('cccccccc-0000-0000-0000-0000000000e2');
+set role authenticated;
+select test.check('equipe WB.Dev (admin na loja A): vê que é da equipe e não aceita os termos pelo cliente',
+  (my_account() ->> 'platform_team')::boolean
+  and test.denied('select accept_platform_terms(1)'));
+reset role;
+delete from public.platform_team where user_id = 'cccccccc-0000-0000-0000-0000000000e2';
+delete from public.user_company where user_id = 'cccccccc-0000-0000-0000-0000000000e2';
+delete from auth.users where id = 'cccccccc-0000-0000-0000-0000000000e2';
+
+-- Dono da plataforma ligado como admin da loja A: também não aceita pelo cliente
+insert into public.user_company (user_id, company_id, role) values ('cccccccc-0000-0000-0000-000000000001', test.company_a(), 'admin');
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma (admin na loja A): conta como equipe WB.Dev, não vê o texto e não aceita pelo cliente',
+  (my_account() ->> 'platform_team')::boolean
+  and my_account() -> 'terms' -> 'body' = 'null'::jsonb
+  and test.denied('select accept_platform_terms(1)'));
+reset role;
+delete from public.user_company where user_id = 'cccccccc-0000-0000-0000-000000000001';
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: vê o texto pendente; aceitar outra versão é recusado',
+  (my_account() -> 'terms' ->> 'accepted')::boolean = false
+  and my_account() -> 'terms' ->> 'body' like '%CONTRATO DE ADESÃO%'
+  and test.denied('select accept_platform_terms(2)'));
+select accept_platform_terms(1) ->> 'user_email' as aceitou;
+select test.check('admin A: aceita a versão publicada (fica registrado quem aceitou) e baixa o comprovante',
+  (select user_email from client_terms_acceptances where version = 1) = 'admin@loja-a'
+  and (my_account() -> 'terms' ->> 'accepted')::boolean
+  and my_account() -> 'terms' -> 'body' = 'null'::jsonb
+  and terms_receipt() ->> 'version' = '1'
+  and length(terms_receipt() ->> 'body_sha256') = 64
+  and test.denied($$insert into client_terms_acceptances (company_id, terms_id, version, body_sha256) select current_company_id(), id, 1, 'x' from platform_terms$$)
+  and test.denied($$select terms_receipt('bbbbbbbb-0000-0000-0000-00000000000b')$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B (loja de demonstração): não pede aceite, não aceita e não vê o aceite da A',
+  my_account() -> 'terms' = 'null'::jsonb
+  and (my_account() ->> 'platform_team')::boolean = false
+  and test.denied('select accept_platform_terms(1)')
+  and test.count('select * from client_terms_acceptances') = 0);
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: vê quem aceitou e o comprovante de cada loja',
+  exists (select 1 from jsonb_array_elements(platform_terms_overview()) c
+          where (c ->> 'company_id')::uuid = test.company_a() and (c -> 'acceptance' ->> 'version')::int = 1)
+  and terms_receipt(test.company_a()) ->> 'user_email' = 'admin@loja-a');
+reset role;
+
+-- Suporte
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select (open_support_ticket('Não consigo enviar foto', 'problema', 'Dá erro ao enviar a foto do carro')).id as chamado;
+select test.check('vendedor A: abre chamado (com a primeira mensagem); não grava direto nas tabelas',
+  test.count('select * from support_tickets') = 1
+  and test.count('select * from support_messages') = 1
+  and test.denied($$insert into support_tickets (company_id, subject) values (current_company_id(), 'x')$$)
+  and test.denied($$update support_tickets set status = 'resolvido'$$)
+  and test.denied($$select open_support_ticket('', 'duvida', 'x')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000005');
+set role authenticated;
+select test.check('vendedor A2: não vê o chamado do outro vendedor',
+  test.count('select * from support_tickets') = 0
+  and test.count('select * from support_messages') = 0
+  and test.denied($$select post_support_message((select id from public.support_tickets limit 1), 'oi')$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê os chamados da loja A',
+  test.count('select * from support_tickets') = 0 and test.count('select * from support_messages') = 0);
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: vê o chamado não lido, responde (fica "respondido" e a loja vê a resposta)',
+  test.count('select * from support_tickets where wbdev_unread') = 1
+  and (post_support_message((select id from support_tickets limit 1), 'Pode me mandar um print?')).author_kind = 'wbdev'
+  and test.count($$select * from support_tickets where status = 'respondido' and store_unread and not wbdev_unread$$) = 1
+  and test.allowed($$insert into client_contact_notes (company_id, channel, note) values (test.company_a(), 'whatsapp', 'Liguei para combinar o treinamento')$$)
+  and test.count('select * from client_contact_notes') = 1);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: vê o chamado da equipe com a resposta; não lê as anotações de atendimento da WB.Dev',
+  test.count('select * from support_tickets') = 1
+  and test.count('select * from support_messages') = 2
+  and (my_account() -> 'support' ->> 'unread')::int = 1
+  and test.count('select * from client_contact_notes') <= 0);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: vê a resposta não lida', (my_account() -> 'support' ->> 'unread')::int = 1);
+select mark_support_ticket_read((select id from support_tickets limit 1));
+select test.check('vendedor A: lida a resposta, sai o "não lido"', (my_account() -> 'support' ->> 'unread')::int = 0);
+select (post_support_message((select id from support_tickets limit 1), 'Segue o print')).author_kind as autor;
+select test.check('vendedor A: responder reabre o chamado; marca resolvido; não muda para outra situação; anexa arquivo',
+  (select author_kind from support_messages order by created_at desc limit 1) = 'loja'
+  and test.count($$select * from support_tickets where status = 'aberto' and wbdev_unread$$) = 1
+  and test.denied($$select set_support_ticket_status((select id from support_tickets limit 1), 'respondido')$$)
+  and test.try($$select set_support_ticket_status((select id from support_tickets limit 1), 'resolvido')$$) like 'ok%'
+  and test.allowed($$insert into storage.objects (bucket_id, name) select 'support-files', current_company_id() || '/print.png'$$));
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: nada do contrato, dos pagamentos informados, do suporte e das anotações',
+  test.count('select * from platform_terms') <= 0
+  and test.count('select * from client_terms_acceptances') <= 0
+  and test.count('select * from client_payment_claims') <= 0
+  and test.count('select * from support_tickets') <= 0
+  and test.count('select * from client_contact_notes') <= 0
+  and test.count('select * from platform_settings') <= 0
+  and test.denied('select accept_platform_terms(1)')
+  and test.denied($$select inform_payment(array['2027-06-01'::date], 1, current_date)$$)
+  and test.denied($$select open_support_ticket('x', 'duvida', 'x')$$));
+reset role;
+
+-- ============================================ documentos pessoais e domínio (67)
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: anexa CNH, RG e comprovantes de residência e de renda; tipo fora da lista é recusado',
+  test.allowed($$insert into customer_documents (company_id, customer_id, doc_type, file_path)
+                select current_company_id(), 'c0000000-0000-0000-0000-0000000000a1', 'cnh', current_company_id() || '/c-a1/cnh.jpg'$$)
+  and test.allowed($$insert into customer_documents (company_id, customer_id, doc_type, file_path)
+                select current_company_id(), 'c0000000-0000-0000-0000-0000000000a1', 'rg', current_company_id() || '/c-a1/rg.jpg'$$)
+  and test.allowed($$insert into customer_documents (company_id, customer_id, doc_type, file_path)
+                select current_company_id(), 'c0000000-0000-0000-0000-0000000000a1', 'comprovante_residencia', current_company_id() || '/c-a1/luz.pdf'$$)
+  and test.allowed($$insert into customer_documents (company_id, customer_id, doc_type, file_path)
+                select current_company_id(), 'c0000000-0000-0000-0000-0000000000a1', 'comprovante_renda', current_company_id() || '/c-a1/renda.pdf'$$)
+  and test.denied($$insert into customer_documents (company_id, customer_id, doc_type, file_path)
+                select current_company_id(), 'c0000000-0000-0000-0000-0000000000a1', 'passaporte', current_company_id() || '/c-a1/x.jpg'$$));
+select test.check('admin A: não mexe nos dados do domínio da própria conta',
+  test.denied($$update client_accounts set domain_years = 1, domain_registrar = 'registro_br'$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: anexa a CNH do cliente e não vê a que o admin anexou',
+  test.allowed($$insert into customer_documents (company_id, customer_id, doc_type, file_path)
+                select current_company_id(), 'c0000000-0000-0000-0000-0000000000a2', 'cnh', current_company_id() || '/c-a2/cnh.jpg'$$)
+  and test.count($$select * from customer_documents where doc_type = 'cnh'$$) = 1);
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: grava a compra do domínio, os anos, onde está e quem paga; valores fora da lista são recusados',
+  test.allowed($$update client_accounts set domain_registered_on = '2026-10-07', domain_years = 2, domain_expires_on = '2028-10-07',
+                 domain_registrar = 'registro_br', domain_paid_by = 'cliente' where company_id = test.company_a()$$)
+  and test.denied($$update client_accounts set domain_years = 11 where company_id = test.company_a()$$)
+  and test.denied($$update client_accounts set domain_registrar = 'outro lugar' where company_id = test.company_a()$$)
+  and test.denied($$update client_accounts set domain_paid_by = 'loja' where company_id = test.company_a()$$));
+-- Em outra consulta: platform_clients() é stable e não enxerga o que mudou dentro da mesma consulta
+select test.check('dono da plataforma: a lista de clientes traz os dados do domínio',
+  (select x -> 'account' ->> 'domain_registrar' from jsonb_array_elements(platform_clients()) x where x ->> 'company_id' = test.company_a()::text) = 'registro_br'
+  and (select (x -> 'account' ->> 'domain_years')::int from jsonb_array_elements(platform_clients()) x where x ->> 'company_id' = test.company_a()::text) = 2
+  and (select x -> 'account' ->> 'domain_paid_by' from jsonb_array_elements(platform_clients()) x where x ->> 'company_id' = test.company_a()::text) = 'cliente');
 reset role;
 
 -- ================================================================ resultado

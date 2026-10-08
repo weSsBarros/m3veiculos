@@ -11,7 +11,6 @@ import { maskPhoneBR, maskKeepingCaret } from '../../utils/masks.js'
 import { MoneyInput } from '../../components/NumberInputs.jsx'
 import { HealthPill } from './PlatformParts.jsx'
 import { StatusPill, BillingPill } from './ClientParts.jsx'
-import PlatformTabs from './PlatformTabs.jsx'
 import '../admin.css'
 
 const FILTERS = [
@@ -24,7 +23,7 @@ const FILTERS = [
 ]
 
 const EMPTY_NEW = { name: '', slug: '', slugTouched: false, responsibleName: '', responsiblePhone: '', responsibleEmail: '', planId: '', monthlyPrice: '', dueDay: '' }
-const DAYS = Array.from({ length: 28 }, (_, i) => i + 1)
+const DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
 
 // Painel WB.Dev → Clientes: situação do serviço, mensalidade e saúde de cada loja
 export default function PlatformClients() {
@@ -94,7 +93,7 @@ export default function PlatformClients() {
         monthlyPrice: creating.monthlyPrice ? parseMoneyBR(creating.monthlyPrice) : null,
         dueDay: creating.dueDay ? Number(creating.dueDay) : null,
       })
-      navigate(`/admin/plataforma/clientes/${created.slug}`)
+      navigate(`/wbdev/clientes/${created.slug}`)
     } catch (err) {
       setCreateError(err.message || 'Não foi possível cadastrar o cliente.')
       setSaving(false)
@@ -105,7 +104,7 @@ export default function PlatformClients() {
     <div className="admin-page platform-page">
       <div className="admin-page-head">
         <div>
-          <h1>Plataforma</h1>
+          <h1>Clientes</h1>
           <p>Os clientes do sistema: serviço, mensalidade e como cada loja está usando.</p>
         </div>
         <div className="admin-row-actions">
@@ -117,14 +116,13 @@ export default function PlatformClients() {
           </button>
         </div>
       </div>
-      <PlatformTabs />
 
       {creating && (
         <form className="admin-form admin-form-section" onSubmit={submitNew}>
           <h2>Novo cliente</h2>
           <p className="admin-form-hint">
-            Entra "Em implantação", sem cobrança. Quando você ativar, o 1º vencimento é 30 dias depois (ou no dia que escolher
-            abaixo). O site e o painel da loja são montados depois e ligados a este cadastro.
+            Entra "Em implantação", sem cobrança. Quando você ativar, a 1ª mensalidade vence no dia da ativação e depois todo
+            mês nesse dia (ou no dia que escolher abaixo). O site e o painel da loja são montados depois e ligados a este cadastro.
           </p>
           <div className="admin-form-grid admin-form-grid-3">
             <label>
@@ -171,7 +169,7 @@ export default function PlatformClients() {
             <label>
               Dia do vencimento
               <select value={creating.dueDay} onChange={(e) => updateNew('dueDay', e.target.value)}>
-                <option value="">Automático (30 dias após ativar)</option>
+                <option value="">Automático (dia da ativação)</option>
                 {DAYS.map((d) => (
                   <option key={d} value={d}>
                     Dia {d}
@@ -221,7 +219,7 @@ export default function PlatformClients() {
             const domain = domainAlert(c.account)
             const implanting = c.account.status === 'implantacao' ? implantationDays(c.account) : null
             return (
-              <Link key={c.companyId} to={`/admin/plataforma/clientes/${c.slug}`} className="client-card">
+              <Link key={c.companyId} to={`/wbdev/clientes/${c.slug}`} className="client-card">
                 <div className="client-card-head">
                   <strong>{c.name}</strong>
                   <StatusPill status={c.account.status} />

@@ -14,3 +14,8 @@ export function supportLink(storeName) {
 export function creditLink(storeName) {
   return link(`Olá! Vi o site da ${storeName} e quero saber mais sobre o sistema WB.AUTO.`)
 }
+
+// Mensagem pronta para a WB.Dev (ex.: "Já paguei" com o comprovante)
+export function supportMessageLink(text) {
+  return link(text)
+}

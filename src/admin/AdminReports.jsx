@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { FileText, FileSpreadsheet } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
-import { fetchSales } from '../lib/salesApi.js'
+import { fetchSales, soldEntriesFrom } from '../lib/salesApi.js'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
 import { fetchAllCustomers } from '../lib/customersApi.js'
@@ -11,6 +11,8 @@ import { fetchFinancings } from '../lib/financingApi.js'
 import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
 import { fetchCompanySettings } from '../lib/companyApi.js'
 import { fetchLeads, fetchTeamDirectory, fetchRotation } from '../lib/storeSettingsApi.js'
+import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExpensesApi.js'
+import { companyExpenseCategoryLabel } from '../utils/companyExpenses.js'
 import { expenseCategoryLabel } from '../utils/carFormat.js'
 import { periodRange } from '../utils/period.js'
 import {
@@ -21,6 +23,7 @@ import {
   buildCustomersReport,
   buildLeadsReport,
   buildEntryTypeReport,
+  buildResultReport,
 } from '../utils/reports/build.js'
 import { exportReportPdf, exportReportExcel } from '../utils/reports/export.js'
 import PeriodFilter from './PeriodFilter.jsx'
@@ -95,6 +98,30 @@ export default function AdminReports() {
       build: async () => {
         const [sales, cars, expenses] = await Promise.all([fetchSales(), fetchAllCarsAdmin(), fetchAllExpensesAdmin()])
         return buildEntryTypeReport({ sales, cars, expenses, range })
+      },
+    },
+    {
+      id: 'resultado',
+      title: 'Resultado (lucro líquido)',
+      description: 'Vendas do período menos o custo dos carros vendidos, as comissões pagas no período e as despesas da empresa (aluguel, contas, salários).',
+      usesPeriod: true,
+      show: isAdmin,
+      build: async () => {
+        const [sales, cars, carExpenses, companyExpenses, sellers] = await Promise.all([
+          fetchSales(),
+          fetchAllCarsAdmin(),
+          fetchAllExpensesAdmin(),
+          generateCompanyExpenses().catch(() => {}).then(fetchCompanyExpenses),
+          fetchSellers().catch(() => []),
+        ])
+        return buildResultReport({
+          soldEntries: soldEntriesFrom(cars, sales),
+          carExpenses,
+          companyExpenses,
+          sellers,
+          range,
+          categoryLabel: companyExpenseCategoryLabel,
+        })
       },
     },
     {

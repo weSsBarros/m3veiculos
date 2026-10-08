@@ -8,6 +8,7 @@ $host = preg_replace('/[^a-z0-9.\-]/i', '', $_SERVER['HTTP_HOST'] ?? '');
 
 echo "User-agent: *\n";
 echo "Disallow: /admin\n";
+echo "Disallow: /wbdev\n";
 echo "Disallow: /api/\n";
 echo "\n";
 echo "Sitemap: https://{$host}/sitemap.xml\n";

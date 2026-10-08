@@ -7,6 +7,7 @@
 export const PANEL_TABS = [
   { key: 'estoque', label: 'Estoque', path: '/admin/estoque', roles: ['admin', 'manager', 'seller'] },
   { key: 'novo-carro', label: 'Novo carro', path: '/admin/carros/novo', roles: ['admin', 'manager', 'seller'] },
+  { key: 'portais', label: 'Portais (OLX e Webmotors)', path: '/admin/portais', roles: ['admin', 'manager'] },
   { key: 'vendas', label: 'Vendas', path: '/admin/vendas', roles: ['admin', 'manager', 'seller'] },
   { key: 'financeiro', label: 'Financeiro', path: '/admin/financeiro', roles: ['admin', 'manager'] },
   { key: 'financiamentos-externos', label: 'Financ. externos', path: '/admin/financiamentos-externos', roles: ['admin', 'manager', 'seller'] },
@@ -38,6 +39,7 @@ export const PENDENCY_TABS = {
   'res-exp': 'vendas',
   'res-soon': 'vendas',
   'inst-soon': 'financeiro',
+  'company-bills': 'financeiro',
   'ext-stale': 'financiamentos-externos',
   'ext-approved': 'financiamentos-externos',
   commissions: 'equipe',
@@ -49,6 +51,8 @@ export const PENDENCY_TABS = {
   'car-docs': 'estoque',
   'renave-entry': 'estoque',
   'renave-exit': 'estoque',
+  'olx-problems': 'portais',
+  'wm-problems': 'portais',
   'interest-match': 'clientes',
   'follow-up': 'clientes',
   'liked-car-gone': 'clientes',
@@ -104,6 +108,13 @@ export function menuTabHidden(settings, key, person = {}) {
   return hiddenTabs[role].includes(key)
 }
 
+// Aba escondida para a loja inteira (fora do plano ou "Esconder de todos"),
+// sem olhar o menu de cada pessoa. Para as partes de outras telas que dependem
+// da aba, como as seções OLX e Webmotors do cadastro do carro (aba Portais)
+export function storeTabHidden(settings, key, planTabs = null) {
+  return menuTabHidden(settings, key, { role: 'admin', planTabs })
+}
+
 export function isBlockHidden(settings, key) {
   return normalizePanelSettings(settings).hiddenBlocks.includes(key)
 }
@@ -147,4 +158,8 @@ export const PENDENCY_LABELS = {
   'interest-match': 'Clientes com carro novo que combina',
   'follow-up': 'Retornos de atendimento',
   'liked-car-gone': 'Carro de que o cliente gostou foi vendido ou reservado',
+  'renave-entry': 'Carros sem a entrada no RENAVE',
+  'renave-exit': 'Vendidos sem a saída no RENAVE',
+  'olx-problems': 'Carros com problema na OLX',
+  'wm-problems': 'Carros com problema na Webmotors',
 }

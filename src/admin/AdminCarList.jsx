@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Pencil, Trash2, RefreshCcw, Receipt, Star, Eye, EyeOff, Search, Handshake, LayoutGrid, List, ExternalLink, BellRing, Bookmark, ListChecks } from 'lucide-react'
 import { fetchAllCarsAdmin, updateCarStatus, updateCarFeatured, updateCarHidden, deleteCar } from '../lib/carsApi.js'
 import { registerSaleFromDialog } from '../lib/saleFlow.js'
@@ -13,6 +13,11 @@ import { fetchSellers } from '../lib/sellersApi.js'
 import { formatCurrency, VEHICLE_CATEGORIES, ENTRY_TYPES, entryTypeLabel, vehicleCategoryLabel, daysInStock, isStockStale, stockAlertThreshold, matchesCarSearch, formatDateBR } from '../utils/carFormat.js'
 import { DEFAULT_BANKS } from '../utils/payment.js'
 import { renavePending, renavePendingLabel } from '../utils/renave.js'
+import { fetchOlxAccount, fetchOlxAds } from '../lib/olxApi.js'
+import { olxCarState, olxSellerPhones } from '../utils/olxStatus.js'
+import { fetchWebmotorsAccount, fetchWebmotorsAds } from '../lib/webmotorsApi.js'
+import { webmotorsCarState } from '../utils/webmotorsStatus.js'
+import { portalBadge } from '../utils/portalStatus.js'
 import { applyStockAlertToAll, fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import { DEFAULT_SALE_CHECKLIST } from '../utils/saleChecklist.js'
 import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
@@ -24,6 +29,14 @@ import ChecklistSettingsDialog from './ChecklistSettingsDialog.jsx'
 import StatusMenu from './StatusMenu.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
+
+// Etiqueta de cada portal (OLX, seção 59; Webmotors, seção 61): só com a conta
+// conectada e quando diz algo útil
+function PortalBadge({ state, name, card = false }) {
+  const badge = portalBadge(state, name)
+  if (!badge) return null
+  return <span className={`${card ? 'stock-card-badge' : 'admin-hidden-badge'} is-portal ${badge.tone}`} title={state.detail || undefined}>{badge.label}</span>
+}
 
 // Botões de ação com ícone + nome, iguais na tabela (desktop) e nos cards (celular)
 function RowActions({ car, busy, canDelete, canSeeCosts, canEditSales, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
@@ -76,6 +89,21 @@ function RowActions({ car, busy, canDelete, canSeeCosts, canEditSales, onToggleF
   )
 }
 
+// Clicar no card (ou na linha da tabela) abre a edição do carro, como o botão
+// "Editar". Botões, links, o menu de status (que abre fora do card) e o texto
+// selecionado (ex.: copiar a placa) ficam de fora; Ctrl+clique abre noutra aba.
+function useOpenCarOnClick() {
+  const navigate = useNavigate()
+  return (e, carId) => {
+    if (!e.currentTarget.contains(e.target)) return
+    if (e.target.closest('a, button, input, select, textarea, label, [role="menu"], [role="listbox"]')) return
+    if (window.getSelection?.()?.toString()) return
+    const url = `/admin/carros/${carId}`
+    if (e.ctrlKey || e.metaKey) window.open(url, '_blank', 'noopener')
+    else navigate(url)
+  }
+}
+
 const VIEW_KEY = 'admin_stock_view'
 
 const SELLER_LOCK = 'Só o administrador ou o gerente mudam o status de um carro vendido ou reservado'
@@ -109,7 +137,7 @@ function readView() {
   }
 }
 
-function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSaleValues, canEditSales, onChangeStatus, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
+function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSaleValues, canEditSales, onOpen, onChangeStatus, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
   const { car, totalCost, margin, sale, sellerName, views, reservation } = row
   const days = daysInStock(car)
   const stale = isStockStale(car, alertDefault)
@@ -118,7 +146,10 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
   const showSale = Boolean(sale) && canSeeSaleValues
 
   return (
-    <article className={`stock-card ${car.hidden ? 'is-hidden-row' : ''} ${busy ? 'is-busy' : ''}`}>
+    <article
+      className={`stock-card is-clickable ${car.hidden ? 'is-hidden-row' : ''} ${busy ? 'is-busy' : ''}`}
+      onClick={(e) => onOpen(e, car.id)}
+    >
       <div className="stock-card-photo">
         {car.images[0] ? <img src={thumbUrl(car.images[0])} alt="" loading="lazy" /> : <span>Sem foto</span>}
         <div className="stock-card-badges">
@@ -126,6 +157,8 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
           {car.hidden && <span className="stock-card-badge is-hidden"><EyeOff size={12} /> Oculto no site</span>}
           {car.entryType && car.entryType !== 'showroom' && <span className="stock-card-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
           {renavePendingLabel(car) && <span className="stock-card-badge is-renave">{renavePendingLabel(car)}</span>}
+          <PortalBadge state={row.olx} name="OLX" card />
+          <PortalBadge state={row.wm} name="Webmotors" card />
         </div>
         <span
           className={`stock-card-days ${stale ? 'is-stale' : ''}`}
@@ -193,6 +226,7 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
 }
 
 function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCosts, canSeeSaleValues, canEditSales, onChangeStatus, onToggleFeatured, onToggleHidden, onDelete, onEditSale, emptyLabel }) {
+  const openCar = useOpenCarOnClick()
   if (rows.length === 0) {
     return (
       <section className="admin-car-group">
@@ -217,6 +251,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
               canSeeCosts={canSeeCosts}
               canSeeSaleValues={canSeeSaleValues}
               canEditSales={canEditSales}
+              onOpen={openCar}
               onChangeStatus={onChangeStatus}
               onToggleFeatured={onToggleFeatured}
               onToggleHidden={onToggleHidden}
@@ -250,8 +285,12 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ car, totalCost, margin, sale, sellerName, views, reservation }) => (
-              <tr key={car.id} className={`${busyId === car.id ? 'is-busy' : ''} ${car.hidden ? 'is-hidden-row' : ''}`}>
+            {rows.map(({ car, totalCost, margin, sale, sellerName, views, reservation, olx, wm }) => (
+              <tr
+                key={car.id}
+                className={`is-clickable ${busyId === car.id ? 'is-busy' : ''} ${car.hidden ? 'is-hidden-row' : ''}`}
+                onClick={(e) => openCar(e, car.id)}
+              >
                 <td>
                   <div className="admin-thumb">
                     {car.images[0] ? <img src={thumbUrl(car.images[0])} alt="" loading="lazy" /> : <span>Sem foto</span>}
@@ -266,6 +305,8 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   {car.hidden && <span className="admin-hidden-badge">Oculto</span>}
                   {car.entryType && car.entryType !== 'showroom' && <span className="admin-hidden-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
                   {renavePendingLabel(car) && <span className="admin-hidden-badge is-renave">{renavePendingLabel(car)}</span>}
+                  <PortalBadge state={olx} name="OLX" />
+                  <PortalBadge state={wm} name="Webmotors" />
                   {car.status === 'vendido' && soldLabel(sale, sellerName, canEditSales) && (
                     <span className="admin-table-sub">{soldLabel(sale, sellerName, canEditSales)}</span>
                   )}
@@ -314,8 +355,8 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
       </div>
 
       <div className="admin-card-list">
-        {rows.map(({ car, totalCost, margin, sale, sellerName, views, reservation }) => (
-          <div className={`admin-card ${car.hidden ? 'is-hidden-row' : ''}`} key={car.id}>
+        {rows.map(({ car, totalCost, margin, sale, sellerName, views, reservation, olx, wm }) => (
+          <div className={`admin-card is-clickable ${car.hidden ? 'is-hidden-row' : ''}`} key={car.id} onClick={(e) => openCar(e, car.id)}>
             <div className="admin-card-top">
               <div className="admin-thumb admin-card-thumb">
                 {car.images[0] ? <img src={thumbUrl(car.images[0])} alt="" loading="lazy" /> : <span>Sem foto</span>}
@@ -336,6 +377,8 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                 {car.hidden && <span className="admin-hidden-badge">Oculto</span>}
                 {car.entryType && car.entryType !== 'showroom' && <span className="admin-hidden-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
                 {renavePendingLabel(car) && <span className="admin-hidden-badge is-renave">{renavePendingLabel(car)}</span>}
+                <PortalBadge state={olx} name="OLX" />
+                <PortalBadge state={wm} name="Webmotors" />
                 {car.status === 'vendido' && soldLabel(sale, sellerName, canEditSales) && (
                   <span className="admin-card-meta">{soldLabel(sale, sellerName, canEditSales)}</span>
                 )}
@@ -397,6 +440,14 @@ export default function AdminCarList() {
   // RENAVE pendente (seção 55): vem marcado pelo aviso do início (?renave=pendente)
   const [searchParams] = useSearchParams()
   const [onlyRenave, setOnlyRenave] = useState(() => searchParams.get('renave') === 'pendente')
+  // OLX (seção 59): situação de cada carro, com a conta conectada
+  const [onlyOlx, setOnlyOlx] = useState(false)
+  const [olxAccount, setOlxAccount] = useState(null)
+  const [olxAds, setOlxAds] = useState([])
+  // Webmotors (seção 61): idem, com a Webmotors conectada
+  const [onlyWm, setOnlyWm] = useState(false)
+  const [wmAccount, setWmAccount] = useState(null)
+  const [wmAds, setWmAds] = useState([])
   const [alertDialogOpen, setAlertDialogOpen] = useState(false)
   const [alertDays, setAlertDays] = useState('')
   const [alertSaving, setAlertSaving] = useState(false)
@@ -465,6 +516,19 @@ export default function AdminCarList() {
       setCustomers(customersData)
       // Visualizações: se falhar, o estoque aparece normalmente (com 0)
       fetchCarViewTotals().then(setCarViews).catch(() => setCarViews({}))
+      // OLX: se falhar (ou a loja não conectou), o estoque aparece sem a etiqueta
+      fetchOlxAccount({ fresh: true })
+        .then(async (account) => {
+          setOlxAccount(account)
+          setOlxAds(account?.connected ? await fetchOlxAds() : [])
+        })
+        .catch(() => setOlxAccount(null))
+      fetchWebmotorsAccount({ fresh: true })
+        .then(async (account) => {
+          setWmAccount(account)
+          setWmAds(account?.connected ? await fetchWebmotorsAds() : [])
+        })
+        .catch(() => setWmAccount(null))
     } catch (err) {
       setError(err.message || 'Erro ao carregar os carros.')
     } finally {
@@ -496,6 +560,11 @@ export default function AdminCarList() {
     return map
   }, [reservations])
 
+  const olxAdsByCar = useMemo(() => new Map(olxAds.filter((a) => a.carId).map((a) => [a.carId, a])), [olxAds])
+  const olxCtx = useMemo(() => ({ account: olxAccount, sellerPhones: olxSellerPhones(sellers), siteUrl: window.location.origin }), [olxAccount, sellers])
+  const wmAdsByCar = useMemo(() => new Map(wmAds.filter((a) => a.carId).map((a) => [a.carId, a])), [wmAds])
+  const wmCtx = useMemo(() => ({ account: wmAccount, siteUrl: window.location.origin }), [wmAccount])
+
   const rows = useMemo(
     () =>
       cars.map((car) => {
@@ -507,16 +576,18 @@ export default function AdminCarList() {
         const sellerName = sale?.sellerId ? sellersById[sale.sellerId]?.name || '' : ''
         const views = carViews[car.id]?.views || 0
         const reservation = car.status === 'reservado' ? reservationsByCar[car.id] || null : null
-        return { car, totalCost, margin, sale, sellerName, views, reservation }
+        const olx = olxCarState(car, olxAdsByCar.get(car.id) || null, olxCtx)
+        const wm = webmotorsCarState(car, wmAdsByCar.get(car.id) || null, wmCtx)
+        return { car, totalCost, margin, sale, sellerName, views, reservation, olx, wm }
       }),
-    [cars, expensesByCar, salesByCar, sellersById, carViews, reservationsByCar]
+    [cars, expensesByCar, salesByCar, sellersById, carViews, reservationsByCar, olxAdsByCar, olxCtx, wmAdsByCar, wmCtx]
   )
 
   const minDaysValue = Number.parseInt(minDays, 10)
   const hasMinDays = Number.isFinite(minDaysValue) && minDaysValue > 0
 
   const filteredRows = useMemo(() => {
-    return rows.filter(({ car }) => {
+    return rows.filter(({ car, olx, wm }) => {
       const matchesQuery = matchesCarSearch(car, search)
       const matchesCategory = categoryFilter === 'todas' || car.category === categoryFilter
       const matchesEntry = entryFilter === 'todas' || (car.entryType || 'showroom') === entryFilter
@@ -524,18 +595,22 @@ export default function AdminCarList() {
       const matchesDays = !hasMinDays || (car.status !== 'vendido' && daysInStock(car) > minDaysValue)
       const matchesAlert = !onlyAlert || isStockStale(car, alertDefault)
       const matchesRenave = !onlyRenave || renavePending(car)
-      return matchesQuery && matchesCategory && matchesEntry && matchesDays && matchesAlert && matchesRenave
+      const matchesOlx = !onlyOlx || Boolean(olx?.problem)
+      const matchesWm = !onlyWm || Boolean(wm?.problem)
+      return matchesQuery && matchesCategory && matchesEntry && matchesDays && matchesAlert && matchesRenave && matchesOlx && matchesWm
     })
-  }, [rows, search, categoryFilter, entryFilter, hasMinDays, minDaysValue, onlyAlert, onlyRenave, alertDefault])
+  }, [rows, search, categoryFilter, entryFilter, hasMinDays, minDaysValue, onlyAlert, onlyRenave, onlyOlx, onlyWm, alertDefault])
 
   const staleCount = rows.filter(({ car }) => isStockStale(car, alertDefault)).length
   const renaveCount = rows.filter(({ car }) => renavePending(car)).length
+  const olxProblemCount = rows.filter(({ olx }) => olx?.problem).length
+  const wmProblemCount = rows.filter(({ wm }) => wm?.problem).length
 
   const availableRows = filteredRows.filter((r) => r.car.status === 'disponivel')
   const maintenanceRows = filteredRows.filter((r) => r.car.status === 'manutencao')
   const reservedRows = filteredRows.filter((r) => r.car.status === 'reservado')
   const soldRows = filteredRows.filter((r) => r.car.status === 'vendido')
-  const isFiltering = search.trim() !== '' || categoryFilter !== 'todas' || entryFilter !== 'todas' || hasMinDays || onlyAlert || onlyRenave
+  const isFiltering = search.trim() !== '' || categoryFilter !== 'todas' || entryFilter !== 'todas' || hasMinDays || onlyAlert || onlyRenave || onlyOlx || onlyWm
 
   useEffect(() => {
     load()
@@ -846,6 +921,28 @@ export default function AdminCarList() {
           >
             RENAVE pendente ({renaveCount})
           </button>
+          {olxAccount?.connected && (
+            <button
+              type="button"
+              className={`admin-alert-chip ${onlyOlx ? 'is-active' : ''}`}
+              onClick={() => setOnlyOlx((v) => !v)}
+              aria-pressed={onlyOlx}
+              title="Carros que faltam dados para a OLX, foram recusados ou deram erro (detalhes em Portais)"
+            >
+              OLX com problema ({olxProblemCount})
+            </button>
+          )}
+          {wmAccount?.connected && (
+            <button
+              type="button"
+              className={`admin-alert-chip ${onlyWm ? 'is-active' : ''}`}
+              onClick={() => setOnlyWm((v) => !v)}
+              aria-pressed={onlyWm}
+              title="Carros que faltam dados para a Webmotors, foram recusados ou deram erro (detalhes em Portais)"
+            >
+              Webmotors com problema ({wmProblemCount})
+            </button>
+          )}
           {(hasMinDays || onlyAlert) && (
             <button type="button" className="admin-clear-filter" onClick={() => { setMinDays(''); setOnlyAlert(false) }}>
               Limpar filtro de dias

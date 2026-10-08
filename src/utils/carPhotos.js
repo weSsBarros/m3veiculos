@@ -92,3 +92,37 @@ export async function compressCarPhoto(file) {
     source.close?.()
   }
 }
+
+// Foto de documento do cliente (CNH, RG, comprovantes): JPEG de até 2000 px, que
+// continua legível e abre em qualquer aparelho. PDF, arquivo pequeno ou foto que
+// o navegador não consegue abrir (ex.: HEIC no computador) vão como estão.
+const DOC_MAX_SIDE = 2000
+const DOC_QUALITY = 0.85
+const DOC_KEEP_BELOW = 1.5 * 1024 * 1024
+
+export async function compressDocumentPhoto(file) {
+  if (!file.type.startsWith('image/') || file.size <= DOC_KEEP_BELOW) return file
+  let source
+  try {
+    source = await loadImage(file)
+  } catch {
+    return file
+  }
+  try {
+    const width = source.width
+    const height = source.height
+    const scale = Math.min(1, DOC_MAX_SIDE / Math.max(width, height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(width * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    const ctx = canvas.getContext('2d')
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height)
+    const blob = await canvasToBlob(canvas, 'image/jpeg', DOC_QUALITY)
+    if (!blob || blob.size >= file.size) return file
+    const base = file.name.replace(/\.[^.]+$/, '') || 'documento'
+    return new File([blob], `${base}.jpg`, { type: 'image/jpeg' })
+  } finally {
+    source.close?.()
+  }
+}

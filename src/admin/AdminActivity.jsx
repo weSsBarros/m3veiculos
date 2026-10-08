@@ -23,6 +23,8 @@ const ENTITY_FILTERS = [
   { value: 'external_financings', label: 'Financiamentos externos' },
   { value: 'car_reservations', label: 'Reservas' },
   { value: 'financing_installments', label: 'Parcelas dos clientes', finance: true },
+  { value: 'olx', label: 'OLX' },
+  { value: 'webmotors', label: 'Webmotors' },
 ]
 
 function formatDateTime(iso) {
@@ -75,6 +77,10 @@ const FIELD_LABELS = {
   renave_exit_status: 'saída no RENAVE',
   renave_exit_on: 'data da saída no RENAVE',
   renave_exit_protocol: 'protocolo da saída no RENAVE',
+  olx_publish: 'publicar na OLX',
+  olx_catalog: 'versão da OLX',
+  webmotors_publish: 'publicar na Webmotors',
+  webmotors_catalog: 'versão da Webmotors',
   signed_on: 'data da assinatura',
   title: 'descrição',
   car_id: 'carro',

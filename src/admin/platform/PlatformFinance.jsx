@@ -26,7 +26,6 @@ import DateInputBR from '../../components/DateInputBR.jsx'
 import { MoneyInput } from '../../components/NumberInputs.jsx'
 import useConfirm from '../../components/useConfirm.jsx'
 import { BillingPill } from './ClientParts.jsx'
-import PlatformTabs from './PlatformTabs.jsx'
 import '../admin.css'
 
 const SECTIONS = [
@@ -191,7 +190,7 @@ export default function PlatformFinance() {
     <div className="admin-page platform-page">
       <div className="admin-page-head">
         <div>
-          <h1>Plataforma</h1>
+          <h1>Financeiro</h1>
           <p>Financeiro da WB.Dev: o que entrou, o que falta receber, despesas e lucro.</p>
         </div>
         <div className="admin-row-actions">
@@ -213,7 +212,6 @@ export default function PlatformFinance() {
           </button>
         </div>
       </div>
-      <PlatformTabs />
 
       <nav className="client-sections" aria-label="Seções do financeiro">
         {SECTIONS.map((s) => (
@@ -407,7 +405,7 @@ export default function PlatformFinance() {
                       {ranking.map((r) => (
                         <tr key={r.companyId}>
                           <td>
-                            <Link to={`/admin/plataforma/clientes/${r.slug}`}>{r.name}</Link>
+                            <Link to={`/wbdev/clientes/${r.slug}`}>{r.name}</Link>
                           </td>
                           <td>{r.billing ? <BillingPill billing={r.billing} /> : '—'}</td>
                           <td>{r.price ? money(r.price) : '—'}</td>

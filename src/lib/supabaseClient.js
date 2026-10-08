@@ -17,6 +17,7 @@ const READ_ONLY_RPCS = new Set([
   'current_company_id', 'site_visit_totals', 'car_view_totals', 'team_directory', 'store_contact',
   'is_platform_admin', 'platform_overview', 'platform_store_detail', 'store_performance',
   'platform_clients', 'my_account', 'company_status',
+  'my_payments', 'terms_receipt', 'platform_terms_overview', 'suspended_account',
 ])
 
 // "Ver como" (lib/viewScope.js): enquanto o admin simula outra pessoa, toda

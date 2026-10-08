@@ -132,6 +132,8 @@ export const FEATURES = [
   { key: 'expenses', label: 'Gastos' },
   { key: 'customer_documents', label: 'Documentos' },
   { key: 'signatures', label: 'Assinaturas digitais' },
+  { key: 'olx', label: 'Anúncios na OLX' },
+  { key: 'webmotors', label: 'Anúncios na Webmotors' },
   { key: 'rotation', label: 'Rodízio do WhatsApp' },
 ]
 

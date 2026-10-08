@@ -4,7 +4,6 @@ import { fetchPlans, savePlan, deletePlan, fetchClients } from '../../lib/client
 import { money } from '../../utils/billing.js'
 import { PANEL_TABS } from '../../utils/panelSettings.js'
 import useConfirm from '../../components/useConfirm.jsx'
-import PlatformTabs from './PlatformTabs.jsx'
 import { MoneyInput } from '../../components/NumberInputs.jsx'
 import '../admin.css'
 
@@ -83,7 +82,7 @@ export default function PlatformPlans() {
     <div className="admin-page platform-page">
       <div className="admin-page-head">
         <div>
-          <h1>Plataforma</h1>
+          <h1>Planos</h1>
           <p>Planos do sistema: valor e as abas que cada plano libera no painel da loja.</p>
         </div>
         {!form && (
@@ -92,7 +91,6 @@ export default function PlatformPlans() {
           </button>
         )}
       </div>
-      <PlatformTabs />
       {error && <p className="admin-error">{error}</p>}
 
       {form && (

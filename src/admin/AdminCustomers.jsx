@@ -13,6 +13,7 @@ import { fetchTeamDirectory } from '../lib/storeSettingsApi.js'
 import { fetchMatches, fetchContacts, fetchInterests } from '../lib/customerCrmApi.js'
 import { likedCarGone, PAYMENT_INTENTS } from '../utils/customerInterests.js'
 import CustomerFileDialog from './CustomerFileDialog.jsx'
+import PersonalDocuments, { uploadPendingPersonalDocs } from './PersonalDocuments.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
@@ -70,6 +71,8 @@ export default function AdminCustomers() {
   const [team, setTeam] = useState([])
   const [crm, setCrm] = useState({ matches: [], followUps: [], interests: [] })
   const [editingId, setEditingId] = useState(null)
+  // CNH, RG e comprovantes escolhidos no cadastro novo: vão depois de cadastrar
+  const [pendingDocs, setPendingDocs] = useState([])
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
 
@@ -254,6 +257,7 @@ export default function AdminCustomers() {
 
   function cancelEdit() {
     setEditingId(null)
+    setPendingDocs([])
     setForm(emptyCustomer(isSeller ? mySellerId : ''))
   }
 
@@ -286,6 +290,17 @@ export default function AdminCustomers() {
       } else {
         const created = await createCustomer(formToCustomer())
         setCustomers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
+        if (pendingDocs.length > 0) {
+          try {
+            await uploadPendingPersonalDocs(created.id, pendingDocs)
+          } catch (err) {
+            // O cliente já foi cadastrado: abre a edição dele para anexar de novo
+            startEdit(created)
+            setPendingDocs([])
+            setError('Cliente cadastrado, mas os documentos não foram enviados (' + err.message + '). Anexe de novo abaixo.')
+            return
+          }
+        }
       }
       cancelEdit()
     } catch (err) {
@@ -358,6 +373,22 @@ export default function AdminCustomers() {
           {form.address && !hasAddress(form.addressParts) && (
             <p className="admin-form-note">Endereço anotado antes: {form.address}. Preencha as partes acima (a nota fiscal exige).</p>
           )}
+        </fieldset>
+        <fieldset className="customer-address personal-docs-box">
+          <legend>Documentos pessoais</legend>
+          <PersonalDocuments
+            key={editingId || 'novo'}
+            customerId={editingId}
+            canDelete={isAdmin}
+            pending={pendingDocs}
+            onPendingChange={setPendingDocs}
+            disabled={saving}
+          />
+          <p className="admin-form-note">
+            {editingId
+              ? 'Foto pela câmera do celular ou PDF. Cada arquivo é enviado na hora.'
+              : 'Foto pela câmera do celular ou PDF. Os arquivos vão junto quando você cadastrar o cliente.'}
+          </p>
         </fieldset>
         <label>
           Observações

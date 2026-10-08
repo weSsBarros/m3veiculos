@@ -40,6 +40,7 @@ export async function logLogin() {
 const ENTITY_LABELS = {
   cars: 'Carro',
   car_expenses: 'Gasto',
+  company_expenses: 'Despesa da empresa',
   suppliers: 'Fornecedor',
   customers: 'Cliente',
   contracts: 'Contrato/recibo',
@@ -57,6 +58,8 @@ const ENTITY_LABELS = {
   customer_interest_matches: 'Aviso de carro que combina',
   whatsapp_rotation: 'Rodízio do WhatsApp',
   companies: 'Configurações',
+  olx: 'OLX',
+  webmotors: 'Webmotors',
 }
 
 const ACTION_LABELS = {

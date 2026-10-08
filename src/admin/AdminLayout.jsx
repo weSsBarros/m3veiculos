@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -22,20 +22,27 @@ import {
   FileChartColumn,
   Settings,
   EyeOff,
-  Radar,
   Gauge,
+  Megaphone,
+  Moon,
+  Sun,
+  Receipt,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import ViewAsBar from './ViewAsBar.jsx'
 import AccountNotices from './AccountNotices.jsx'
+import PanelSwitch, { useRememberPanel } from './PanelSwitch.jsx'
+import { usePlatformBadges } from './platform/platformBadges.js'
 import { fetchOpenTransfers } from '../lib/salesApi.js'
 import { fetchOverdueInstallments } from '../lib/financingApi.js'
 import { transferAlert } from '../utils/transfer.js'
 import { tabForPath } from '../utils/panelSettings.js'
+import { storeBillingNotice } from '../utils/billing.js'
 import './admin.css'
-import { supportLink } from '../utils/support.js'
+import './admin-dark.css'
+import { useAdminTheme } from '../utils/adminTheme.js'
 
-// Nome da loja na mensagem do item "Ajuda" (WhatsApp do suporte)
+// Nome da loja nas mensagens para a WB.Dev (avisos e WhatsApp do suporte)
 const STORE_NAME = 'M&3 Veículos'
 
 const SIDEBAR_KEY = 'admin_sidebar_expanded'
@@ -44,6 +51,7 @@ const ADMIN_NAV = [
   { to: '/admin', end: true, icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/admin/estoque', icon: Car, label: 'Estoque' },
   { to: '/admin/carros/novo', icon: PlusCircle, label: 'Novo carro' },
+  { to: '/admin/portais', icon: Megaphone, label: 'Portais' },
   { to: '/admin/vendas', icon: Handshake, label: 'Vendas', alert: 'transfers' },
   { to: '/admin/financeiro', icon: Wallet, label: 'Financeiro', alert: 'installments' },
   { to: '/admin/financiamentos-externos', icon: Landmark, label: 'Financ. externos' },
@@ -95,9 +103,6 @@ function usePostSaleAlerts(isStaff, canManageCustomerFinance, pathname) {
   return alerts
 }
 
-// Só para o dono do sistema (platform_admins), fora das abas de Configurações
-const PLATFORM_ITEM = { to: '/admin/plataforma', icon: Radar, label: 'Plataforma' }
-
 const SELLER_NAV = [
   { to: '/admin', end: true, icon: TrendingUp, label: 'Minhas vendas' },
   { to: '/admin/estoque', icon: Car, label: 'Estoque' },
@@ -118,15 +123,40 @@ function readExpanded() {
 }
 
 export default function AdminLayout() {
-  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden, isPlatformAdmin, planTabs } = useAuth()
+  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden, isPlatformAdmin, planTabs, account } = useAuth()
   const [expanded, setExpanded] = useState(readExpanded)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [tip, setTip] = useState(null)
+  const [theme, toggleTheme] = useAdminTheme()
+  const navRef = useRef(null)
   const { pathname } = useLocation()
   const alerts = usePostSaleAlerts(isStaff, canManageCustomerFinance, pathname)
+  // Dono do sistema: troca para o painel WB.Dev (/wbdev), com as pendências de lá
+  const platformBadges = usePlatformBadges(isPlatformAdmin, pathname)
+  const platformPending = platformBadges.claims + platformBadges.unread
+  useRememberPanel('loja')
 
   useEffect(() => {
     setMobileOpen(false)
+    setTip(null)
+    // A aba aberta fica visível mesmo quando a lista do menu rola
+    navRef.current?.querySelector('a.is-active')?.scrollIntoView({ block: 'nearest' })
   }, [pathname])
+
+  // Nome da aba ao lado do item, com o menu recolhido
+  function showTip(event) {
+    const item = event.target.closest?.('[data-tooltip]')
+    if (!item) return
+    const rect = item.getBoundingClientRect()
+    setTip({ text: item.dataset.tooltip, top: rect.top + rect.height / 2, left: rect.right + 10 })
+  }
+
+  function hideTip(event) {
+    // Passar do ícone para o texto do mesmo item não esconde
+    const from = event?.target?.closest?.('[data-tooltip]')
+    if (from && event.relatedTarget?.closest?.('[data-tooltip]') === from) return
+    setTip(null)
+  }
 
   function toggleExpanded() {
     setExpanded((prev) => {
@@ -143,11 +173,15 @@ export default function AdminLayout() {
   // Abas escondidas em Configurações somem do menu (o início nunca some)
   const nav = (isAdmin ? ADMIN_NAV : isManager ? managerNav(canManageCustomerFinance) : SELLER_NAV)
     .filter((item) => item.end || !isTabHidden(tabForPath(item.to)))
-    .concat(isPlatformAdmin ? [PLATFORM_ITEM] : [])
   const hiddenHere = isTabHidden(tabForPath(pathname))
   // Aba fora do plano da loja (painel WB.Dev → Planos)
   const outOfPlan = Array.isArray(planTabs) && Boolean(tabForPath(pathname)) && !planTabs.includes(tabForPath(pathname))
   const showLabels = expanded || mobileOpen
+  // Suporte: respostas novas da WB.Dev; Mensalidade: vence logo ou em atraso
+  const supportUnread = account?.support?.unread || 0
+  // Mensalidade que vence logo ou atrasou, e que a loja ainda não informou como paga
+  const billingNotice = storeBillingNotice(account?.billing, new Date(), account?.payment?.claims || [])
+  const billingAlert = Boolean(billingNotice && !billingNotice.informed)
 
   return (
     <div className={`admin-shell ${expanded ? 'is-expanded' : 'is-collapsed'} ${mobileOpen ? 'is-mobile-open' : ''}`}>
@@ -161,11 +195,18 @@ export default function AdminLayout() {
           </span>
           <span>Painel M&3 Veículos</span>
         </Link>
+        {isPlatformAdmin && <PanelSwitch current="loja" compact showTooltip={false} badge={platformPending} />}
       </header>
 
       {mobileOpen && <div className="admin-sidebar-backdrop" onClick={() => setMobileOpen(false)} />}
 
-      <aside className="admin-sidebar">
+      <aside
+        className="admin-sidebar"
+        onMouseOver={showTip}
+        onMouseOut={hideTip}
+        onFocus={showTip}
+        onBlur={hideTip}
+      >
         <div className="admin-sidebar-top">
           <button
             type="button"
@@ -194,7 +235,13 @@ export default function AdminLayout() {
           )}
         </div>
 
-        <nav className="admin-sidenav">
+        {isPlatformAdmin && (
+          <div className="panel-switch-slot">
+            {showLabels ? <PanelSwitch current="loja" badge={platformPending} /> : <PanelSwitch current="loja" compact badge={platformPending} />}
+          </div>
+        )}
+
+        <nav className="admin-sidenav" ref={navRef} onScroll={hideTip}>
           {nav.map(({ to, end, icon: Icon, label, alert }) => {
             const count = alert ? alerts[alert] : 0
             const fullLabel = count ? `${label} (${ALERT_TOOLTIPS[alert](count)})` : label
@@ -220,16 +267,38 @@ export default function AdminLayout() {
         </nav>
 
         <div className="admin-sidebar-bottom">
-          <a
-            href={supportLink(STORE_NAME)}
-            target="_blank"
-            rel="noreferrer"
-            data-tooltip={showLabels ? undefined : 'Ajuda'}
-            aria-label="Ajuda: falar com o suporte no WhatsApp"
+          <NavLink
+            to="/admin/suporte"
+            className={({ isActive }) => (isActive ? 'is-active' : '')}
+            data-tooltip={showLabels ? undefined : supportUnread ? `Suporte (${supportUnread} ${supportUnread === 1 ? 'resposta nova' : 'respostas novas'})` : 'Suporte'}
+            aria-label="Suporte: falar com a WB.Dev e acompanhar os chamados"
           >
             <LifeBuoy size={18} />
-            <span className="admin-sidenav-label">Ajuda</span>
-          </a>
+            <span className="admin-sidenav-label">Suporte</span>
+            {supportUnread > 0 && <span className="admin-nav-badge">{supportUnread > 99 ? '99+' : supportUnread}</span>}
+          </NavLink>
+          {isAdmin && !viewAs && (
+            <NavLink
+              to="/admin/mensalidade"
+              className={({ isActive }) => (isActive ? 'is-active' : '')}
+              data-tooltip={showLabels ? undefined : billingAlert ? 'Mensalidade (vence logo ou em atraso)' : 'Mensalidade'}
+              aria-label="Mensalidade do sistema: PIX e pagamentos"
+            >
+              <Receipt size={18} />
+              <span className="admin-sidenav-label">Mensalidade</span>
+              {billingAlert && <span className="admin-nav-badge" title="Mensalidade vence logo ou está em atraso">!</span>}
+            </NavLink>
+          )}
+          <button
+            type="button"
+            className="admin-sidebar-action"
+            onClick={toggleTheme}
+            data-tooltip={showLabels ? undefined : theme === 'escuro' ? 'Tema claro' : 'Tema escuro'}
+            aria-label={theme === 'escuro' ? 'Usar o tema claro' : 'Usar o tema escuro'}
+          >
+            {theme === 'escuro' ? <Sun size={18} /> : <Moon size={18} />}
+            <span className="admin-sidenav-label">{theme === 'escuro' ? 'Tema claro' : 'Tema escuro'}</span>
+          </button>
           <a href="/" target="_blank" rel="noreferrer" data-tooltip={showLabels ? undefined : 'Ver site'} aria-label="Ver site">
             <ExternalLink size={18} />
             <span className="admin-sidenav-label">Ver site</span>
@@ -253,6 +322,12 @@ export default function AdminLayout() {
           </button>
         </div>
       </aside>
+
+      {tip && !showLabels && (
+        <div className="admin-sidebar-tip" role="tooltip" style={{ top: tip.top, left: tip.left }}>
+          {tip.text}
+        </div>
+      )}
 
       <main className="admin-main">
         <ViewAsBar />

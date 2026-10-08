@@ -6,7 +6,8 @@ import { billingTotals, receivedByMonth, money, monthName, dateBR, isCharged, re
 import { recentMonths, monthLabel } from '../../utils/platform.js'
 import BarChart from '../../components/charts/BarChart.jsx'
 import { BillingPill } from './ClientParts.jsx'
-import PlatformTabs from './PlatformTabs.jsx'
+import PaymentClaimsPanel from './PaymentClaimsPanel.jsx'
+import PlatformPaymentSettings from './PlatformPaymentSettings.jsx'
 import '../admin.css'
 
 // Painel WB.Dev → Cobrança: receita mensal, recebido, atrasos e o mês atual
@@ -79,14 +80,13 @@ export default function PlatformBilling() {
     <div className="admin-page platform-page">
       <div className="admin-page-head">
         <div>
-          <h1>Plataforma</h1>
+          <h1>Cobrança</h1>
           <p>Mensalidades dos clientes: o que entra, o que falta e quem atrasou.</p>
         </div>
         <button type="button" className="btn btn-outline" onClick={load}>
           <RefreshCcw size={15} /> Atualizar
         </button>
       </div>
-      <PlatformTabs />
       {error && <p className="admin-error">{error}</p>}
 
       {loading && clients.length === 0 ? (
@@ -122,6 +122,8 @@ export default function PlatformBilling() {
             </div>
           </div>
 
+          <PaymentClaimsPanel clients={clients} onConfirmed={load} />
+
           <div className="chart-card platform-billing-chart">
             <h3>Recebido por mês</h3>
             <BarChart data={chart} color="#2446c8" formatValue={(v) => (v > 0 ? `R$ ${Math.round(v).toLocaleString('pt-BR')}` : '—')} />
@@ -133,7 +135,7 @@ export default function PlatformBilling() {
               <ul className="client-list">
                 {late.map((c) => (
                   <li key={c.companyId}>
-                    <Link to={`/admin/plataforma/clientes/${c.slug}`}>
+                    <Link to={`/wbdev/clientes/${c.slug}`}>
                       <strong>{c.name}</strong>
                       <span>
                         {c.billing.open.map((o) => monthName(o.month)).join(', ')} · {money(c.billing.open_total)}
@@ -167,7 +169,7 @@ export default function PlatformBilling() {
                     return (
                       <tr key={c.companyId}>
                         <td>
-                          <Link to={`/admin/plataforma/clientes/${c.slug}`}>{c.name}</Link>
+                          <Link to={`/wbdev/clientes/${c.slug}`}>{c.name}</Link>
                         </td>
                         <td>{dateBR(due)}</td>
                         <td>{money(c.billing.price)}</td>
@@ -187,7 +189,7 @@ export default function PlatformBilling() {
             <div className="client-billing-head">
               <div>
                 <h2>Lembretes por e-mail</h2>
-                <p className="admin-form-hint">Saem sozinhos todo dia às 8h: 5 dias antes, no dia e com 1, 3 e 7 dias de atraso.</p>
+                <p className="admin-form-hint">Saem sozinhos todo dia às 8h: 3 dias antes, no dia e com 1, 3 e 7 dias de atraso, com o PIX e o link da página Mensalidade da loja.</p>
               </div>
               <div className="admin-row-actions">
                 <button type="button" className="btn btn-outline" onClick={() => runMail('teste')} disabled={mailBusy}>
@@ -205,7 +207,7 @@ export default function PlatformBilling() {
               <ul className="client-list">
                 {due.map((d) => (
                   <li key={`${d.company_id}-${d.kind}-${d.month}`}>
-                    <Link to={`/admin/plataforma/clientes/${clients.find((c) => c.companyId === d.company_id)?.slug || ''}`}>
+                    <Link to={`/wbdev/clientes/${clients.find((c) => c.companyId === d.company_id)?.slug || ''}`}>
                       <strong>{d.name}</strong>
                       <span>
                         {reminderLabel(d.kind)} · {monthName(d.month)} · vence {dateBR(d.due)} · {(d.to || []).join(', ') || 'sem e-mail'}
@@ -253,6 +255,8 @@ export default function PlatformBilling() {
               </>
             )}
           </div>
+
+          <PlatformPaymentSettings />
 
           {implanting.length > 0 && (
             <p className="admin-form-note">

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isTabHidden, isBlockHidden, normalizePanelSettings, tabForPath, toggleHiddenTab, menuTabHidden, tabsForRole } from '../src/utils/panelSettings.js'
+import { isTabHidden, isBlockHidden, normalizePanelSettings, tabForPath, toggleHiddenTab, menuTabHidden, tabsForRole, storeTabHidden } from '../src/utils/panelSettings.js'
 import { fillTemplate, normalizeTemplates, DEFAULT_TEMPLATES, firstName } from '../src/utils/messageTemplates.js'
 import { interestMatchesCar, matchingStockCars, likedCarGone, describeInterest } from '../src/utils/customerInterests.js'
 import { nextRotationEntry, waDigits, formatWaPhone, entryProblem } from '../src/utils/whatsappRotation.js'
@@ -51,6 +51,11 @@ test('menu: cargo personalizado e menu próprio mostram só as abas da lista', (
   assert.equal(menuTabHidden(settings, 'vendas', { role: 'manager', customRole: despachante, planTabs: plan }), false)
   assert.equal(menuTabHidden(settings, 'estoque', { role: 'seller', panelTabs: ['estoque'], planTabs: ['vendas'] }), true)
   assert.equal(menuTabHidden(settings, 'clientes', { role: 'seller', planTabs: null }), false)
+  // Aba da loja inteira (seções OLX/Webmotors do carro): só o plano e "Esconder de todos"
+  assert.equal(storeTabHidden(settings, 'portais', ['estoque']), true)
+  assert.equal(storeTabHidden(settings, 'portais', null), false)
+  assert.equal(storeTabHidden(settings, 'relatorios', null), false)
+  assert.equal(storeTabHidden({ hiddenTabs: { all: ['portais'] } }, 'portais', null), true)
   // Abas que cada nível pode ter
   assert.equal(tabsForRole('seller').some((t) => t.key === 'financeiro'), false)
   assert.equal(tabsForRole('manager').some((t) => t.key === 'financeiro'), true)

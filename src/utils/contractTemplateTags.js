@@ -124,7 +124,8 @@ export function buildContractTemplateData({ company, buyer, vehicle, sale }) {
     carro_placa: vehicle.plate || '',
     carro_chassi: vehicle.chassis || '',
     carro_renavam: vehicle.renavam || '',
-    preco: formatCurrency(sale.price),
+    // Carro sem preço (comum na entrada) fica com a linha em branco
+    preco: sale.price != null && sale.price !== '' ? formatCurrency(Number(sale.price)) : '',
     forma_pagamento: sale.paymentMethod || '',
     detalhes_pagamento: sale.paymentDetails || '',
     data_venda: formatDateExtended(sale.date),

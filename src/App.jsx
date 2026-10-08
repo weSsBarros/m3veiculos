@@ -20,6 +20,9 @@ import AdminCarExpenses from './admin/AdminCarExpenses.jsx'
 import AdminDashboard from './admin/AdminDashboard.jsx'
 import AdminFinance from './admin/AdminFinance.jsx'
 import AdminCustomerFinance from './admin/AdminCustomerFinance.jsx'
+import AdminCompanyExpenses from './admin/AdminCompanyExpenses.jsx'
+import AdminBilling from './admin/AdminBilling.jsx'
+import AdminSupport from './admin/AdminSupport.jsx'
 import AdminSales from './admin/AdminSales.jsx'
 import AdminExternalFinance from './admin/AdminExternalFinance.jsx'
 import AdminReports from './admin/AdminReports.jsx'
@@ -37,8 +40,9 @@ import { trackSiteVisit } from './lib/statsApi.js'
 import { fetchCompanyStatus } from './lib/clientsApi.js'
 import MaintenancePage from './components/MaintenancePage.jsx'
 
-// Abas "Plataforma" (só o dono do sistema) e "Desempenho" (admin da loja):
-// carregam à parte, quando abrem
+// Painel WB.Dev (/wbdev, só o dono do sistema) e aba "Desempenho" (admin da
+// loja): carregam à parte, quando abrem
+const WbdevLayout = lazy(() => import('./admin/platform/WbdevLayout.jsx'))
 const PlatformOverview = lazy(() => import('./admin/platform/PlatformOverview.jsx'))
 const PlatformStore = lazy(() => import('./admin/platform/PlatformStore.jsx'))
 const AdminPerformance = lazy(() => import('./admin/platform/AdminPerformance.jsx'))
@@ -48,7 +52,11 @@ const PlatformBilling = lazy(() => import('./admin/platform/PlatformBilling.jsx'
 const PlatformFinance = lazy(() => import('./admin/platform/PlatformFinance.jsx'))
 const PlatformNotices = lazy(() => import('./admin/platform/PlatformNotices.jsx'))
 const PlatformPlans = lazy(() => import('./admin/platform/PlatformPlans.jsx'))
+const PlatformSupport = lazy(() => import('./admin/platform/PlatformSupport.jsx'))
+const PlatformContacts = lazy(() => import('./admin/platform/PlatformContacts.jsx'))
+const PlatformTerms = lazy(() => import('./admin/platform/PlatformTerms.jsx'))
 const ContractTemplateEditor = lazy(() => import('./admin/ContractTemplateEditor.jsx'))
+const AdminPortals = lazy(() => import('./admin/AdminPortals.jsx'))
 
 function ScrollToTop() {
   const { pathname } = useLocation()
@@ -58,14 +66,17 @@ function ScrollToTop() {
   return null
 }
 
-function PlatformOnly() {
+// Painel WB.Dev: só o dono da plataforma (platform_admins)
+function PlatformOnly({ children }) {
   const { isPlatformAdmin } = useAuth()
   if (!isPlatformAdmin) return <Navigate to="/admin" replace />
-  return (
-    <Suspense fallback={<p className="admin-muted">Carregando…</p>}>
-      <Outlet />
-    </Suspense>
-  )
+  return children
+}
+
+// Endereços antigos da aba Plataforma (/admin/plataforma/...) vão para o painel WB.Dev
+function PlatformRedirect() {
+  const { pathname, search } = useLocation()
+  return <Navigate to={pathname.replace(/^\/admin\/plataforma/, '/wbdev') + search} replace />
 }
 
 function AdminHome() {
@@ -158,14 +169,25 @@ export default function App() {
           <Route path="carros/novo" element={<AdminCarForm />} />
           <Route path="carros/:id" element={<AdminCarForm />} />
           <Route path="carros/:id/gastos" element={<AdminCarExpenses />} />
+          <Route path="suporte" element={<AdminSupport />} />
           <Route element={<StaffOnly><Outlet /></StaffOnly>}>
             <Route path="historico" element={<AdminHistory />} />
             <Route path="fornecedores" element={<AdminSuppliers />} />
             <Route path="equipe" element={<AdminSellers />} />
             <Route path="atividades" element={<AdminActivity />} />
+            <Route
+              path="portais"
+              element={
+                <Suspense fallback={<p className="admin-muted">Carregando…</p>}>
+                  <AdminPortals />
+                </Suspense>
+              }
+            />
           </Route>
           <Route element={<AdminOnly><Outlet /></AdminOnly>}>
             <Route path="financeiro" element={<AdminFinance />} />
+            <Route path="financeiro/despesas" element={<AdminCompanyExpenses />} />
+            <Route path="mensalidade" element={<AdminBilling />} />
             <Route path="contratos/modelos" element={<AdminContractTemplates />} />
             <Route
               path="contratos/modelos/:id"
@@ -188,16 +210,34 @@ export default function App() {
           <Route element={<CustomerFinanceOnly><Outlet /></CustomerFinanceOnly>}>
             <Route path="financeiro/clientes" element={<AdminCustomerFinance />} />
           </Route>
-          <Route element={<PlatformOnly />}>
-            <Route path="plataforma" element={<PlatformOverview />} />
-            <Route path="plataforma/clientes" element={<PlatformClients />} />
-            <Route path="plataforma/clientes/:slug" element={<ClientFile />} />
-            <Route path="plataforma/cobranca" element={<PlatformBilling />} />
-            <Route path="plataforma/financeiro" element={<PlatformFinance />} />
-            <Route path="plataforma/avisos" element={<PlatformNotices />} />
-            <Route path="plataforma/planos" element={<PlatformPlans />} />
-            <Route path="plataforma/:slug" element={<PlatformStore />} />
-          </Route>
+        </Route>
+
+        {/* Endereços antigos da aba Plataforma: fora do painel da loja, direto para o /wbdev */}
+        <Route path="/admin/plataforma/*" element={<PlatformRedirect />} />
+
+        <Route
+          path="/wbdev"
+          element={
+            <AdminGuard>
+              <PlatformOnly>
+                <Suspense fallback={<div className="admin-boot">Carregando…</div>}>
+                  <WbdevLayout />
+                </Suspense>
+              </PlatformOnly>
+            </AdminGuard>
+          }
+        >
+          <Route index element={<PlatformOverview />} />
+          <Route path="clientes" element={<PlatformClients />} />
+          <Route path="clientes/:slug" element={<ClientFile />} />
+          <Route path="cobranca" element={<PlatformBilling />} />
+          <Route path="financeiro" element={<PlatformFinance />} />
+          <Route path="avisos" element={<PlatformNotices />} />
+          <Route path="suporte" element={<PlatformSupport />} />
+          <Route path="contatos" element={<PlatformContacts />} />
+          <Route path="contrato" element={<PlatformTerms />} />
+          <Route path="planos" element={<PlatformPlans />} />
+          <Route path=":slug" element={<PlatformStore />} />
         </Route>
       </Routes>
     </AuthProvider>

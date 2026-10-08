@@ -6,6 +6,7 @@ import { fetchFinancings } from '../lib/financingApi.js'
 import { formatCurrencyCents, formatDateBR } from '../utils/carFormat.js'
 import { summarizeFinancing, FINANCING_STATUS_LABELS } from '../utils/financing.js'
 import CustomerDocuments from './CustomerDocuments.jsx'
+import PersonalDocuments from './PersonalDocuments.jsx'
 import GeneratedContractsList from './GeneratedContractsList.jsx'
 import CustomerInterests from './CustomerInterests.jsx'
 import CustomerContacts from './CustomerContacts.jsx'
@@ -184,6 +185,12 @@ export default function CustomerFileDialog({
               })}
             </ul>
           )}
+        </section>
+
+        <section className="admin-dialog-section">
+          <h3>Documentos pessoais</h3>
+          <p className="admin-form-hint">CNH, RG e comprovantes de residência e de renda (foto pela câmera do celular ou PDF).</p>
+          <PersonalDocuments customerId={customer.id} canDelete={isAdmin} />
         </section>
 
         <section className="admin-dialog-section">

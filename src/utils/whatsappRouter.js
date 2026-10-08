@@ -84,7 +84,7 @@ export function installWhatsAppRouter() {
     (event) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
       const link = event.target.closest?.('a[href]')
-      if (!link || window.location.pathname.startsWith('/admin')) return
+      if (!link || /^\/(admin|wbdev)(\/|$)/.test(window.location.pathname)) return
       const parsed = parseWhatsappUrl(link.href)
       if (!parsed || parsed.number !== WHATSAPP_NUMBER) return
       event.preventDefault()

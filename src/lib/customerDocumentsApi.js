@@ -16,8 +16,20 @@ export const CUSTOMER_DOC_TYPES = [
   { value: 'outro', label: 'Outro' },
 ]
 
+// Documentos pessoais do cliente (seção 67): área própria no cadastro e na ficha
+export const PERSONAL_DOC_TYPES = [
+  { value: 'cnh', label: 'CNH', hint: 'Frente e verso, ou a CNH digital em PDF' },
+  { value: 'rg', label: 'RG / identidade', hint: 'RG ou outro documento com foto' },
+  { value: 'comprovante_residencia', label: 'Comprovante de residência', hint: 'Conta de luz, água, telefone…' },
+  { value: 'comprovante_renda', label: 'Comprovante de renda', hint: 'Contracheque, extrato ou declaração' },
+]
+
+export function isPersonalDocType(value) {
+  return PERSONAL_DOC_TYPES.some((t) => t.value === value)
+}
+
 export function customerDocTypeLabel(value) {
-  return CUSTOMER_DOC_TYPES.find((t) => t.value === value)?.label || 'Documento'
+  return [...CUSTOMER_DOC_TYPES, ...PERSONAL_DOC_TYPES].find((t) => t.value === value)?.label || 'Documento'
 }
 
 function fromRow(row) {

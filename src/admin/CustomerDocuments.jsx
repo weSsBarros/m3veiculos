@@ -4,6 +4,7 @@ import { Paperclip, Upload, Pencil, Trash2, ExternalLink, Download } from 'lucid
 import {
   CUSTOMER_DOC_TYPES,
   customerDocTypeLabel,
+  isPersonalDocType,
   fetchCustomerDocuments,
   uploadCustomerDocument,
   updateCustomerDocument,
@@ -20,6 +21,7 @@ const EMPTY_META = { docType: 'compra', title: '', signedOn: '', carId: '', note
 // entrega, pós-venda, garantia...). Com carId, mostra e anexa só os daquele
 // carro. Não usa <form> para poder ficar dentro de outros formulários.
 // cars: carros do cliente [{ id, label }], para escolher a qual se refere.
+// CNH, RG e comprovantes ficam em "Documentos pessoais" (PersonalDocuments.jsx).
 export default function CustomerDocuments({ customerId, carId, cars = [], canDelete, onCountChange }) {
   const { confirm, confirmDialog } = useConfirm()
   const [docs, setDocs] = useState([])
@@ -36,7 +38,7 @@ export default function CustomerDocuments({ customerId, carId, cars = [], canDel
     let cancelled = false
     fetchCustomerDocuments({ customerId, carId })
       .then((data) => {
-        if (!cancelled) setDocs(data)
+        if (!cancelled) setDocs(data.filter((d) => !isPersonalDocType(d.docType)))
       })
       .catch((err) => {
         if (!cancelled) setError('Não foi possível carregar os documentos: ' + err.message)

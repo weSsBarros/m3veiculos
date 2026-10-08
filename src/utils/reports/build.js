@@ -7,8 +7,9 @@
 import { daysInStock, carStatusLabel, ENTRY_TYPES } from '../carFormat.js'
 import { inRange } from '../period.js'
 import { describePayment } from '../payment.js'
-import { summarizeFinancing } from '../financing.js'
+import { summarizeFinancing, lateCharges, isInstallmentPaid } from '../financing.js'
 import { externalStatusLabel } from '../externalFinancing.js'
+import { storeResult } from '../storeResult.js'
 
 const carName = (car) => (car ? `${car.brand} ${car.model} ${car.version || ''}`.trim() : 'Carro removido')
 
@@ -497,6 +498,222 @@ export function buildEntryTypeReport({ sales, cars, expenses = [], range }) {
         ],
         rows: stockRows,
         totals: { type: 'Total', count: sum(stockRows, 'count'), price: sum(stockRows, 'price'), invested: sum(stockRows, 'invested') },
+      },
+    ],
+  }
+}
+
+// Resultado (lucro líquido): vendas do período menos o custo dos carros vendidos
+// (compra + gastos), as comissões pagas no período (pela data do pagamento) e as
+// despesas da empresa com vencimento no período. sellers: para o nome de quem
+// recebeu a comissão.
+export function buildResultReport({ soldEntries = [], carExpenses = [], companyExpenses = [], sellers = [], range, categoryLabel = (c) => c }) {
+  const r = storeResult({ soldEntries, carExpenses, companyExpenses, range })
+  const sellersById = byId(sellers)
+  const summary = [
+    { item: `Vendas (${count(r.soldCount, 'carro', 'carros')})`, value: r.revenue },
+    { item: 'Custo dos carros vendidos (compra + gastos)', value: -r.carsCost },
+    { item: 'Margem bruta', value: r.grossMargin },
+    { item: `Comissões pagas no período (${count(r.paidCommissions.length, 'comissão', 'comissões')})`, value: -r.commissions },
+    { item: 'Despesas da empresa', value: -r.companyExpenses },
+    { item: 'Lucro líquido', value: r.net },
+  ]
+  const soldRows = r.sold.map((e) => ({
+    date: e.date,
+    car: carName(e.car),
+    plate: e.car?.plate ? e.car.plate.toUpperCase() : '',
+    price: e.price,
+    cost: e.cost,
+    margin: e.margin,
+  }))
+  const commissionRows = r.paidCommissions.map((e) => ({
+    paidOn: e.paidOn,
+    seller: sellersById[e.sale?.sellerId]?.name || '',
+    car: carName(e.car),
+    soldOn: e.date || '',
+    amount: e.commission,
+  }))
+  const billRows = r.bills.map((e) => ({
+    due: e.dueOn,
+    category: categoryLabel(e.category),
+    description: e.description || '',
+    amount: e.amount,
+    paid: e.paidOn ? e.paidOn.split('-').reverse().join('/') : 'A pagar',
+  }))
+  return {
+    title: 'Resultado (lucro líquido)',
+    subtitle: periodSubtitle(range),
+    sections: [
+      {
+        title: 'Resultado',
+        columns: [
+          { key: 'item', label: 'Item', type: 'text' },
+          { key: 'value', label: 'Valor', type: 'money' },
+        ],
+        rows: summary,
+      },
+      {
+        title: 'Carros vendidos',
+        columns: [
+          { key: 'date', label: 'Data', type: 'date' },
+          { key: 'car', label: 'Carro', type: 'text' },
+          { key: 'plate', label: 'Placa', type: 'text' },
+          { key: 'price', label: 'Venda', type: 'money' },
+          { key: 'cost', label: 'Custo', type: 'money' },
+          { key: 'margin', label: 'Margem', type: 'money' },
+        ],
+        rows: soldRows,
+        totals: { date: count(soldRows.length, 'venda', 'vendas'), price: sum(soldRows, 'price'), cost: sum(soldRows, 'cost'), margin: sum(soldRows, 'margin') },
+      },
+      {
+        title: 'Comissões pagas no período',
+        columns: [
+          { key: 'paidOn', label: 'Paga em', type: 'date' },
+          { key: 'seller', label: 'Vendedor', type: 'text' },
+          { key: 'car', label: 'Carro', type: 'text' },
+          { key: 'soldOn', label: 'Vendido em', type: 'date' },
+          { key: 'amount', label: 'Comissão', type: 'money' },
+        ],
+        rows: commissionRows,
+        totals: { paidOn: count(commissionRows.length, 'comissão', 'comissões'), amount: sum(commissionRows, 'amount') },
+      },
+      {
+        title: 'Despesas da empresa',
+        columns: [
+          { key: 'due', label: 'Vencimento', type: 'date' },
+          { key: 'category', label: 'Categoria', type: 'text' },
+          { key: 'description', label: 'Descrição', type: 'text' },
+          { key: 'amount', label: 'Valor', type: 'money' },
+          { key: 'paid', label: 'Pago em', type: 'text' },
+        ],
+        rows: billRows,
+        totals: { due: count(billRows.length, 'despesa', 'despesas'), amount: sum(billRows, 'amount') },
+      },
+    ],
+  }
+}
+
+// Financeiro dos clientes (carnês da loja) num período: o que vence (a receber),
+// o que atrasou, o que foi recebido e o saldo de cada cliente. financings já vem
+// com a busca e o filtro da tela; customersById para o telefone.
+export function buildInstallmentsReport({ financings = [], customersById = new Map(), range, today }) {
+  const active = financings.filter((f) => f.status !== 'cancelado')
+  const phone = (f) => (f.customerId ? customersById.get(f.customerId)?.phone || '' : '')
+  const vehicle = (f) => [f.vehicleLabel, f.vehiclePlate ? f.vehiclePlate.toUpperCase() : ''].filter(Boolean).join(' · ')
+  const parcel = (f, i) => `${i.number}/${f.installmentsCount || (f.installments || []).length}`
+  const fmt = (iso) => iso.split('-').reverse().join('/')
+
+  const openRows = []
+  const paidRows = []
+  for (const f of active) {
+    for (const i of f.installments || []) {
+      if (!isInstallmentPaid(i) && inRange(i.dueDate, range)) {
+        const charges = i.dueDate < today ? lateCharges(i, f, today) : { days: 0, total: 0 }
+        openRows.push({
+          due: i.dueDate,
+          customer: f.customerName,
+          phone: phone(f),
+          car: vehicle(f),
+          parcel: parcel(f, i),
+          amount: i.amount,
+          updated: Math.round((i.amount + charges.total) * 100) / 100,
+          situation: i.dueDate < today ? `Atrasada há ${charges.days} ${charges.days === 1 ? 'dia' : 'dias'}` : i.dueDate === today ? 'Vence hoje' : 'A vencer',
+        })
+      }
+      if (isInstallmentPaid(i) && inRange(i.paidOn, range)) {
+        paidRows.push({
+          paidOn: i.paidOn,
+          customer: f.customerName,
+          car: vehicle(f),
+          parcel: parcel(f, i),
+          due: i.dueDate,
+          amount: i.amount,
+          received: i.paidAmount ?? i.amount,
+          method: i.paymentMethod || '',
+        })
+      }
+    }
+  }
+  openRows.sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : a.customer.localeCompare(b.customer)))
+  paidRows.sort((a, b) => (a.paidOn < b.paidOn ? -1 : 1))
+
+  const balanceRows = active
+    .map((f) => ({ f, s: summarizeFinancing(f, today) }))
+    .filter(({ s }) => s.open > 0)
+    .map(({ f, s }) => ({
+      customer: f.customerName,
+      phone: phone(f),
+      car: vehicle(f),
+      openCount: s.count - s.paidCount,
+      open: s.open,
+      overdue: s.overdueAmount,
+      next: s.nextDue ? fmt(s.nextDue.dueDate) : '',
+    }))
+    .sort((a, b) => a.customer.localeCompare(b.customer))
+
+  const overdueRows = openRows.filter((r) => r.due < today)
+  const summary = [
+    { item: `A receber (${count(openRows.length, 'parcela', 'parcelas')})`, value: sum(openRows, 'amount') },
+    { item: `Em atraso, com multa e juros (${count(overdueRows.length, 'parcela', 'parcelas')})`, value: sum(overdueRows, 'updated') },
+    { item: `Recebido (${count(paidRows.length, 'parcela', 'parcelas')})`, value: sum(paidRows, 'received') },
+    { item: `Saldo em aberto dos clientes (${count(balanceRows.length, 'financiamento', 'financiamentos')})`, value: sum(balanceRows, 'open') },
+  ]
+
+  return {
+    title: 'Financeiro dos clientes',
+    subtitle: periodSubtitle(range),
+    sections: [
+      {
+        title: 'Resumo',
+        columns: [
+          { key: 'item', label: 'Item', type: 'text' },
+          { key: 'value', label: 'Valor', type: 'money' },
+        ],
+        rows: summary,
+      },
+      {
+        title: 'Parcelas a receber',
+        columns: [
+          { key: 'due', label: 'Vencimento', type: 'date' },
+          { key: 'customer', label: 'Cliente', type: 'text' },
+          { key: 'phone', label: 'Telefone', type: 'text' },
+          { key: 'car', label: 'Veículo', type: 'text' },
+          { key: 'parcel', label: 'Parcela', type: 'text' },
+          { key: 'amount', label: 'Valor', type: 'money' },
+          { key: 'updated', label: 'Com multa e juros', type: 'money' },
+          { key: 'situation', label: 'Situação', type: 'text' },
+        ],
+        rows: openRows,
+        totals: { due: count(openRows.length, 'parcela', 'parcelas'), amount: sum(openRows, 'amount'), updated: sum(openRows, 'updated') },
+      },
+      {
+        title: 'Parcelas recebidas',
+        columns: [
+          { key: 'paidOn', label: 'Pago em', type: 'date' },
+          { key: 'customer', label: 'Cliente', type: 'text' },
+          { key: 'car', label: 'Veículo', type: 'text' },
+          { key: 'parcel', label: 'Parcela', type: 'text' },
+          { key: 'due', label: 'Vencimento', type: 'date' },
+          { key: 'amount', label: 'Parcela', type: 'money' },
+          { key: 'received', label: 'Recebido', type: 'money' },
+          { key: 'method', label: 'Forma', type: 'text' },
+        ],
+        rows: paidRows,
+        totals: { paidOn: count(paidRows.length, 'parcela', 'parcelas'), amount: sum(paidRows, 'amount'), received: sum(paidRows, 'received') },
+      },
+      {
+        title: 'Saldo por cliente',
+        columns: [
+          { key: 'customer', label: 'Cliente', type: 'text' },
+          { key: 'phone', label: 'Telefone', type: 'text' },
+          { key: 'car', label: 'Veículo', type: 'text' },
+          { key: 'openCount', label: 'Parcelas em aberto', type: 'int' },
+          { key: 'open', label: 'Saldo', type: 'money' },
+          { key: 'overdue', label: 'Em atraso', type: 'money' },
+          { key: 'next', label: 'Próximo vencimento', type: 'text' },
+        ],
+        rows: balanceRows,
+        totals: { customer: count(balanceRows.length, 'cliente', 'clientes'), openCount: sum(balanceRows, 'openCount'), open: sum(balanceRows, 'open'), overdue: sum(balanceRows, 'overdue') },
       },
     ],
   }

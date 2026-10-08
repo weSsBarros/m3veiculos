@@ -165,3 +165,14 @@ export function effectiveSaleDate(car, sale) {
   if (sale) return sale.saleDate
   return car?.soldAt ? car.soldAt.slice(0, 10) : null
 }
+
+// Carros vendidos com o valor e a data efetivos da venda (lucro do mês)
+export function soldEntriesFrom(cars, sales) {
+  const salesByCar = Object.fromEntries(sales.map((s) => [s.carId, s]))
+  return cars
+    .filter((c) => c.status === 'vendido')
+    .map((car) => {
+      const sale = salesByCar[car.id] || null
+      return { car, sale, price: effectiveSalePrice(car, sale), date: effectiveSaleDate(car, sale) }
+    })
+}

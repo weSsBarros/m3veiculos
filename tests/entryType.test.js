@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildEntryTypeReport } from '../src/utils/reports/build.js'
 import { siteCategories, vehicleCategoryLabel, entryTypeLabel } from '../src/utils/carFormat.js'
+import { buildEntryTemplateData, buildContractTemplateData } from '../src/utils/contractTemplateTags.js'
 
 const car = (id, entryType, purchasePrice, extra = {}) => ({
   id,
@@ -53,4 +54,22 @@ test('moto: categoria do painel e só aparece no site quando a loja tem moto', (
   assert.equal(siteCategories([{ category: 'moto' }]).some((c) => c.slug === 'moto'), true)
   assert.equal(entryTypeLabel(undefined), 'Showroom')
   assert.equal(entryTypeLabel('repasse'), 'Repasse')
+})
+
+test('contrato da entrada: carro sem preço, sem km e sem valor monta a prévia com linhas em branco', () => {
+  const data = buildEntryTemplateData({
+    company: { name: 'Loja' },
+    owner: null,
+    vehicle: { brand: 'Fiat', model: 'Argo', km: null, price: null },
+    entry: { type: 'consignado', value: null, date: '' },
+  })
+  assert.equal(data.preco, '')
+  assert.equal(data.carro_km, '')
+  assert.equal(data.valor_entrada, '')
+  assert.equal(data.data_entrada, '')
+  assert.equal(data.tipo_entrada, 'consignação')
+  assert.equal(data.proprietario_nome, '')
+  // Com preço, o preço sai formatado (o da venda também)
+  assert.match(buildEntryTemplateData({ company: {}, owner: null, vehicle: { price: 85000 }, entry: {} }).preco, /^R\$\s85\.000$/)
+  assert.match(buildContractTemplateData({ company: {}, buyer: {}, vehicle: {}, sale: { price: 0 } }).preco, /^R\$\s0$/)
 })

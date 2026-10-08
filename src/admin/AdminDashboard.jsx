@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw, AlertTriangle, Clock, Wallet, ImageOff, FileWarning, ClipboardList, Landmark, HandCoins, Bookmark, BellRing, CircleDollarSign } from 'lucide-react'
+import { RefreshCcw, AlertTriangle, Clock, Wallet, ImageOff, FileWarning, ClipboardList, Landmark, HandCoins, Bookmark, BellRing, CircleDollarSign, Megaphone, Receipt } from 'lucide-react'
 import { fetchOverdueInstallments, fetchUpcomingInstallments } from '../lib/financingApi.js'
 import { fetchContractsAdmin } from '../lib/contractsApi.js'
 import { fetchCustomerDocuments } from '../lib/customerDocumentsApi.js'
@@ -8,13 +8,19 @@ import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
 import { fetchReservations } from '../lib/reservationsApi.js'
 import { stockGaps, saleGaps, externalGaps, unpaidCommissions, reservationGaps, RECENT_SALES_DAYS } from '../utils/dashboardAlerts.js'
 import { renaveGaps } from '../utils/renave.js'
+import { fetchOlxAccount, fetchOlxAds } from '../lib/olxApi.js'
+import { olxCarState, olxSellerPhones } from '../utils/olxStatus.js'
+import { fetchWebmotorsAccount, fetchWebmotorsAds } from '../lib/webmotorsApi.js'
+import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExpensesApi.js'
+import { companyExpensePendency, COMPANY_EXPENSE_ALERT_DAYS } from '../utils/companyExpenses.js'
+import { webmotorsCarState } from '../utils/webmotorsStatus.js'
 import { transferAlert } from '../utils/transfer.js'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchAllSuppliers } from '../lib/suppliersApi.js'
 import { fetchSales, effectiveSalePrice, effectiveSaleDate } from '../lib/salesApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
-import { expenseCategoryLabel, formatCurrency, formatCurrencyCents, daysInStock } from '../utils/carFormat.js'
+import { expenseCategoryLabel, formatCurrency, formatCurrencyCents, daysInStock, todayISO } from '../utils/carFormat.js'
 import { periodRange, inRange } from '../utils/period.js'
 import BarChart from '../components/charts/BarChart.jsx'
 import DonutChart from '../components/charts/DonutChart.jsx'
@@ -55,7 +61,10 @@ export default function AdminDashboard() {
   const [customerDocs, setCustomerDocs] = useState([])
   const [externals, setExternals] = useState([])
   const [reservations, setReservations] = useState([])
+  const [olx, setOlx] = useState({ account: null, ads: [] })
+  const [wm, setWm] = useState({ account: null, ads: [] })
   const [upcomingInstallments, setUpcomingInstallments] = useState([])
+  const [companyExpenses, setCompanyExpenses] = useState([])
 
   async function load() {
     setLoading(true)
@@ -83,6 +92,22 @@ export default function AdminDashboard() {
       fetchCustomerDocuments().then(setCustomerDocs).catch(() => setCustomerDocs([]))
       fetchExternalFinancings().then(setExternals).catch(() => setExternals([]))
       fetchReservations().then(setReservations).catch(() => setReservations([]))
+      // OLX (seção 59): só com a conta conectada
+      fetchOlxAccount({ fresh: true })
+        .then(async (account) => setOlx({ account, ads: account?.connected ? await fetchOlxAds() : [] }))
+        .catch(() => setOlx({ account: null, ads: [] }))
+      // Despesas da empresa (seção 63, só o admin): cria as do mês e confere o que vence
+      if (isAdmin) {
+        generateCompanyExpenses()
+          .catch(() => {})
+          .then(fetchCompanyExpenses)
+          .then(setCompanyExpenses)
+          .catch(() => setCompanyExpenses([]))
+      }
+      // Webmotors (seção 61): só com a Webmotors conectada
+      fetchWebmotorsAccount({ fresh: true })
+        .then(async (account) => setWm({ account, ads: account?.connected ? await fetchWebmotorsAds() : [] }))
+        .catch(() => setWm({ account: null, ads: [] }))
     } catch (err) {
       setError(err.message || 'Erro ao carregar o dashboard.')
     } finally {
@@ -254,6 +279,22 @@ export default function AdminDashboard() {
 
   const customerPendencies = useCustomerPendencies(cars)
 
+  // Carros com problema na OLX: faltam dados, recusado, erro, sem vaga, removido ou expirado
+  const olxProblems = useMemo(() => {
+    if (!olx.account?.connected) return 0
+    const adsByCar = new Map(olx.ads.filter((a) => a.carId).map((a) => [a.carId, a]))
+    const ctx = { account: olx.account, sellerPhones: olxSellerPhones(sellers), siteUrl: window.location.origin }
+    return cars.filter((car) => olxCarState(car, adsByCar.get(car.id) || null, ctx)?.problem).length
+  }, [olx, cars, sellers])
+
+  // Carros com problema na Webmotors: faltam dados, recusado, erro, sem vaga ou tirado na Webmotors
+  const wmProblems = useMemo(() => {
+    if (!wm.account?.connected) return 0
+    const adsByCar = new Map(wm.ads.filter((a) => a.carId).map((a) => [a.carId, a]))
+    const ctx = { account: wm.account, siteUrl: window.location.origin }
+    return cars.filter((car) => webmotorsCarState(car, adsByCar.get(car.id) || null, ctx)?.problem).length
+  }, [wm, cars])
+
   // Pendências com a contagem de cada uma (0 = nada pendente). Avisos de abas
   // escondidas em Configurações não aparecem.
   const pendencies = (() => {
@@ -263,10 +304,14 @@ export default function AdminDashboard() {
     const unpaid = unpaidCommissions(sales, externals)
     const res = reservationGaps(reservations)
     const renave = renaveGaps(cars)
+    const bills = companyExpensePendency(companyExpenses, todayISO())
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
     const items = [
       { key: 'res-exp', count: res.expired, danger: true, icon: Bookmark, to: '/admin/vendas', cta: 'Resolver', text: `${plural(res.expired, 'reserva passou', 'reservas passaram')} do prazo — converta em venda ou cancele.` },
       { key: 'renave-exit', count: renave.exit, danger: true, icon: FileWarning, to: '/admin/estoque?renave=pendente', cta: 'Registrar', text: `${plural(renave.exit, 'carro vendido está', 'carros vendidos estão')} sem a saída registrada no RENAVE.` },
+      { key: 'olx-problems', count: olxProblems, icon: Megaphone, to: '/admin/portais?filtro=problemas', cta: 'Resolver', text: `${plural(olxProblems, 'carro está', 'carros estão')} com problema na OLX (faltam dados, recusado ou erro).` },
+      { key: 'wm-problems', count: wmProblems, icon: Megaphone, to: '/admin/portais?portal=webmotors&filtro=problemas', cta: 'Resolver', text: `${plural(wmProblems, 'carro está', 'carros estão')} com problema na Webmotors (faltam dados, recusado ou erro).` },
+      { key: 'company-bills', count: bills.count, danger: bills.overdue > 0, icon: Receipt, to: bills.overdue ? '/admin/financeiro/despesas?filtro=atrasadas' : '/admin/financeiro/despesas?filtro=a_pagar', cta: 'Ver', text: bills.overdue ? `${plural(bills.count, 'conta da empresa', 'contas da empresa')} para pagar (${formatCurrencyCents(bills.total)}): ${plural(bills.overdue, 'atrasada', 'atrasadas')}.` : `${plural(bills.count, 'conta da empresa vence', 'contas da empresa vencem')} em até ${COMPANY_EXPENSE_ALERT_DAYS} dias (${formatCurrencyCents(bills.total)}).` },
       { key: 'renave-entry', count: renave.entry, icon: FileWarning, to: '/admin/estoque?renave=pendente', cta: 'Registrar', text: `${plural(renave.entry, 'carro está', 'carros estão')} sem a entrada registrada no RENAVE.` },
       { key: 'res-soon', count: res.dueSoon, icon: Bookmark, to: '/admin/vendas', cta: 'Ver', text: `${plural(res.dueSoon, 'reserva vence', 'reservas vencem')} em até 2 dias.` },
       { key: 'inst-soon', count: upcomingInstallments.length, icon: BellRing, to: '/admin/financeiro/clientes', cta: 'Lembrar', text: `${plural(upcomingInstallments.length, 'parcela de cliente vence', 'parcelas de clientes vencem')} nos próximos 7 dias.` },

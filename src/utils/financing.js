@@ -1,4 +1,5 @@
 import { daysBetweenISO, todayISO } from './carFormat.js'
+import { inRange } from './period.js'
 
 // Financiamento próprio da loja (carnê): cálculo de parcela, multa e juros por
 // atraso e o resumo de cada financiamento. Diferente do resto do sistema, aqui
@@ -123,4 +124,22 @@ export const FINANCING_STATUS_LABELS = {
 export function isDueSoon(installment, today = todayISO(), days = 7) {
   if (isInstallmentPaid(installment) || installment.dueDate < today) return false
   return daysBetweenISO(today, installment.dueDate) <= days
+}
+
+// Parcelas de um financiamento num período (Financeiro dos clientes): as que
+// vencem nele (em aberto = a receber) e as pagas nele (recebido)
+export function financingInPeriod(financing, range) {
+  const installments = financing.installments || []
+  const due = installments.filter((i) => inRange(i.dueDate, range))
+  const dueOpen = due.filter((i) => !isInstallmentPaid(i))
+  const paid = installments.filter((i) => isInstallmentPaid(i) && inRange(i.paidOn, range))
+  return {
+    dueCount: due.length,
+    dueAmount: round2(due.reduce((s, i) => s + i.amount, 0)),
+    dueOpenCount: dueOpen.length,
+    dueOpenAmount: round2(dueOpen.reduce((s, i) => s + i.amount, 0)),
+    paidCount: paid.length,
+    paidAmount: round2(paid.reduce((s, i) => s + (i.paidAmount ?? i.amount), 0)),
+    active: due.length > 0 || paid.length > 0,
+  }
 }

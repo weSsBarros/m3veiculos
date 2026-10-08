@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw, Presentation, FileDown, Sheet, X } from 'lucide-react'
+import { RefreshCcw, Presentation, FileDown, Sheet, Maximize2, ExternalLink, Globe } from 'lucide-react'
 import { fetchPlatformOverview } from '../../lib/platformApi.js'
-import PlatformTabs from './PlatformTabs.jsx'
+import { fetchClients } from '../../lib/clientsApi.js'
+import { domainAlert, domainRegistrarLabel, domainPayerLabel, dateBR } from '../../utils/billing.js'
+import { usePresentation, setPresentation, setPresentationNames } from './presentation.js'
 import {
   storeHealth,
   platformTotals,
@@ -36,43 +38,151 @@ function resultItems(totals) {
   ]
 }
 
-// Tela cheia para mostrar a quem ainda não é cliente (sem nome de loja)
-function PresentMode({ totals, periodLabel, onClose }) {
-  useEffect(() => {
-    const el = document.documentElement
-    el.requestFullscreen?.().catch(() => {})
-    function onKey(e) {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
-    }
-  }, [onClose])
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+const sinceText = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return `no sistema desde ${MONTHS[d.getMonth()]}/${d.getFullYear()}`
+}
+
+// Modo apresentação: os resultados para mostrar a quem ainda não é cliente. Os
+// totais e cada loja (com o nome, ou "Loja 1, 2..." se esconder os nomes), sem
+// saúde, cobrança nem nada interno. "Tela cheia" esconde o menu.
+function ShowcaseView({ stores, totals, period, setPeriod, periodLabel, loading, error }) {
+  const { showNames } = usePresentation()
+  const ref = useRef(null)
+  const real = useMemo(
+    () => [...stores].filter((s) => !s.isDemo).sort((a, b) => b.site.visits - a.site.visits || a.name.localeCompare(b.name)),
+    [stores]
+  )
+
+  function fullScreen() {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
+    else ref.current?.requestFullscreen?.().catch(() => {})
+  }
 
   return (
-    <div className="platform-present" role="dialog" aria-label="Resultados da plataforma">
-      <button type="button" className="platform-present-close" onClick={onClose} aria-label="Fechar">
-        <X size={22} />
-      </button>
-      <div className="platform-present-inner">
-        <span className="platform-present-brand">WB.Dev</span>
-        <h1>Resultados da plataforma</h1>
-        <p>
-          {periodLabel} · soma das {totals.stores} lojas que usam o sistema
-        </p>
-        <div className="platform-present-grid">
-          {resultItems(totals).map((item) => (
-            <div key={item.label} className="platform-present-kpi">
-              <strong>{fmt(item.value)}</strong>
-              <span>{item.label}</span>
-              {item.prev !== undefined ? <Trend prev={item.prev} value={item.value} /> : <small>{item.sub}</small>}
-            </div>
-          ))}
+    <div className="admin-page platform-page wbdev-showcase" ref={ref}>
+      <div className="admin-page-head">
+        <div>
+          <span className="wbdev-showcase-brand">WB.Dev · sistema WB.AUTO</span>
+          <h1>Resultados das lojas</h1>
+          <p>
+            {periodLabel} · {totals.stores} {totals.stores === 1 ? 'loja usa' : 'lojas usam'} o sistema. A setinha compara com o período anterior de
+            mesmo tamanho.
+          </p>
+        </div>
+        <div className="admin-row-actions wbdev-showcase-actions">
+          <select value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="Período">
+            {PLATFORM_PERIODS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <label className="admin-checkbox wbdev-showcase-names">
+            <input type="checkbox" checked={showNames} onChange={(e) => setPresentationNames(e.target.checked)} />
+            Nomes das lojas
+          </label>
+          <button type="button" className="btn btn-outline" onClick={fullScreen}>
+            <Maximize2 size={15} /> Tela cheia
+          </button>
         </div>
       </div>
+
+      {error && <p className="admin-error">{error}</p>}
+      {loading && stores.length === 0 ? (
+        <p className="admin-muted">Carregando…</p>
+      ) : (
+        <>
+          <div className="platform-kpis wbdev-showcase-kpis">
+            {resultItems(totals).map((item) => (
+              <div key={item.label} className="platform-kpi">
+                <span>{item.label}</span>
+                <strong>{fmt(item.value)}</strong>
+                {item.prev !== undefined ? <Trend prev={item.prev} value={item.value} /> : <small>{item.sub}</small>}
+              </div>
+            ))}
+          </div>
+
+          <h2 className="admin-section-title">Loja por loja</h2>
+          <div className="wbdev-showcase-stores">
+            {real.map((s, i) => (
+              <div key={s.id} className="wbdev-showcase-store">
+                <div className="wbdev-showcase-store-head">
+                  <strong>{showNames ? s.name : `Loja ${i + 1}`}</strong>
+                  <small>{sinceText(s.createdAt)}</small>
+                  {showNames && s.siteUrl && (
+                    <a href={s.siteUrl} target="_blank" rel="noreferrer" className="platform-site-link">
+                      <Globe size={13} /> {s.siteUrl.replace(/^https?:\/\//, '')} <ExternalLink size={12} />
+                    </a>
+                  )}
+                </div>
+                <div className="platform-store-numbers">
+                  <span>
+                    <b>{fmt(s.site.visits)}</b> visitas no site
+                  </span>
+                  <span>
+                    <b>{fmt(s.site.visitors)}</b> pessoas
+                  </span>
+                  <span>
+                    <b>{fmt(s.leads.total)}</b> contatos no WhatsApp
+                  </span>
+                  <span>
+                    <b>{fmt(s.stock.available)}</b> carros à venda
+                  </span>
+                  <span>
+                    <b>{fmt(s.sales.sold)}</b> carros vendidos
+                  </span>
+                  <span>
+                    <b>{fmt(s.sales.soldSite)}</b> vendas com contato pelo site
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="admin-form-hint">
+            Números do período escolhido, contados pelo próprio sistema. Contatos pelo WhatsApp e vendas com contato pelo site contam a partir de
+            01/10/2026.
+          </p>
+        </>
+      )}
     </div>
+  )
+}
+
+// Domínios dos clientes que vencem em até 60 dias (ou já venceram)
+function DomainAlerts({ clients }) {
+  const due = clients
+    .map((c) => ({ client: c, alert: domainAlert(c.account) }))
+    .filter((x) => x.alert)
+    .sort((a, b) => String(a.client.account.domainExpiresOn).localeCompare(String(b.client.account.domainExpiresOn)))
+  if (due.length === 0) return null
+  return (
+    <section className="admin-form-section wbdev-domains">
+      <h2>Domínios para renovar</h2>
+      <ul className="doc-list">
+        {due.map(({ client: c, alert }) => (
+          <li key={c.companyId}>
+            <div className="doc-list-main">
+              <strong>
+                <Link to={`/wbdev/clientes/${c.slug}`}>{c.name}</Link>
+                {c.account.domain ? ` · ${c.account.domain}` : ''}
+              </strong>
+              <span className="admin-table-sub">
+                {[
+                  `${alert} (${dateBR(c.account.domainExpiresOn)})`,
+                  domainRegistrarLabel(c.account.domainRegistrar),
+                  c.account.domainPaidBy ? `renovação: ${domainPayerLabel(c.account.domainPaidBy)}` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
@@ -82,8 +192,9 @@ export default function PlatformOverview() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [sort, setSort] = useState({ key: 'visits', dir: 'desc' })
-  const [presenting, setPresenting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [clients, setClients] = useState([])
+  const { presenting } = usePresentation()
 
   const range = useMemo(() => platformRange(period), [period])
   const periodLabel = PLATFORM_PERIODS.find((p) => p.value === period)?.label || ''
@@ -104,6 +215,18 @@ export default function PlatformOverview() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end])
+
+  // Domínios para renovar (fichas dos clientes); fora da apresentação
+  useEffect(() => {
+    if (presenting) return undefined
+    let active = true
+    fetchClients()
+      .then((list) => active && setClients(list))
+      .catch(() => active && setClients([]))
+    return () => {
+      active = false
+    }
+  }, [presenting])
 
   const totals = useMemo(() => platformTotals(stores), [stores])
   const withHealth = useMemo(
@@ -158,12 +281,26 @@ export default function PlatformOverview() {
     exportReportExcel(report, { companyName: 'Plataforma' })
   }
 
+  if (presenting) {
+    return (
+      <ShowcaseView
+        stores={stores}
+        totals={totals}
+        period={period}
+        setPeriod={setPeriod}
+        periodLabel={periodLabel}
+        loading={loading}
+        error={error}
+      />
+    )
+  }
+
   return (
     <div className="admin-page platform-page">
       <div className="admin-page-head">
         <div>
-          <h1>Plataforma</h1>
-          <p>Painel WB.Dev: todas as lojas que usam o sistema. Só você vê esta aba.</p>
+          <h1>Visão geral</h1>
+          <p>Todas as lojas que usam o sistema.</p>
         </div>
         <div className="admin-row-actions">
           <select value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="Período">
@@ -179,7 +316,6 @@ export default function PlatformOverview() {
         </div>
       </div>
 
-      <PlatformTabs />
 
       {error && <p className="admin-error">{error}</p>}
       {loading && stores.length === 0 ? (
@@ -196,7 +332,7 @@ export default function PlatformOverview() {
                 </p>
               </div>
               <div className="platform-results-actions">
-                <button type="button" className="btn btn-primary" onClick={() => setPresenting(true)}>
+                <button type="button" className="btn btn-primary" onClick={() => setPresentation(true)}>
                   <Presentation size={16} /> Apresentar
                 </button>
                 <button type="button" className="btn btn-outline" onClick={downloadResults} disabled={exporting}>
@@ -215,10 +351,12 @@ export default function PlatformOverview() {
             </div>
           </section>
 
+          <DomainAlerts clients={clients} />
+
           <h2 className="admin-section-title">Saúde das lojas</h2>
           <div className="platform-store-grid">
             {withHealth.map(({ store: s, health }) => (
-              <Link key={s.id} to={`/admin/plataforma/${s.slug}`} className={`platform-store-card is-${health.level}`}>
+              <Link key={s.id} to={`/wbdev/${s.slug}`} className={`platform-store-card is-${health.level}`}>
                 <div className="platform-store-top">
                   <strong>{s.name}</strong>
                   {s.isDemo ? <span className="platform-demo">demonstração</span> : <HealthPill level={health.level} />}
@@ -277,7 +415,7 @@ export default function PlatformOverview() {
                 {compared.map((s) => (
                   <tr key={s.id}>
                     <td>
-                      <Link to={`/admin/plataforma/${s.slug}`}>{s.name}</Link>
+                      <Link to={`/wbdev/${s.slug}`}>{s.name}</Link>
                       {s.isDemo && <span className="admin-table-sub">demonstração</span>}
                     </td>
                     {COMPARE_COLUMNS.map((c) => (
@@ -336,7 +474,6 @@ export default function PlatformOverview() {
         </>
       )}
 
-      {presenting && <PresentMode totals={totals} periodLabel={periodLabel} onClose={() => setPresenting(false)} />}
     </div>
   )
 }

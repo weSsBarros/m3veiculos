@@ -11,6 +11,10 @@ import {
   fetchReminderLog,
   fetchReminderRecipients,
   sendReceiptEmail,
+  fetchContactNotes,
+  fetchPlatformSettings,
+  fetchPlatformTerms,
+  fetchTermsReceipt,
 } from '../../lib/clientsApi.js'
 import {
   money,
@@ -20,6 +24,12 @@ import {
   chargeMessage,
   whatsappLink,
   domainAlert,
+  domainExpiryFrom,
+  domainRegistrarLabel,
+  domainPayerLabel,
+  DOMAIN_REGISTRARS,
+  DOMAIN_PAYERS,
+  DOMAIN_ALERT_DAYS,
   onboardingStatus,
   implantationDays,
   firstDueDate,
@@ -29,7 +39,8 @@ import { exportPaymentReceipt, paymentReceiptBase64 } from '../../utils/clientPd
 import { todayISO } from '../../utils/carFormat.js'
 import useConfirm from '../../components/useConfirm.jsx'
 import { StatusPill, BillingPill } from './ClientParts.jsx'
-import PlatformTabs from './PlatformTabs.jsx'
+import { ContactNotes } from './PlatformContacts.jsx'
+import { exportTermsReceiptPdf } from '../../utils/termsPdf.js'
 import DateInputBR from '../../components/DateInputBR.jsx'
 import MonthInputBR from '../../components/MonthInputBR.jsx'
 import MonthSelectBR from '../../components/MonthSelectBR.jsx'
@@ -40,12 +51,14 @@ const SECTIONS = [
   { key: 'resumo', label: 'Resumo' },
   { key: 'cobranca', label: 'Cobrança' },
   { key: 'dados', label: 'Dados e implantação' },
+  { key: 'atendimento', label: 'Atendimento e contrato' },
   { key: 'acesso', label: 'Acesso' },
 ]
 
 const METHODS = ['Pix', 'Transferência', 'Dinheiro', 'Cartão', 'Boleto', 'Outro']
 const STATUS_LABEL = { implantacao: 'Em implantação', ativo: 'Ativo', bloqueado: 'Bloqueado', cancelado: 'Cancelado' }
-const DAYS = Array.from({ length: 28 }, (_, i) => i + 1)
+const DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
+const DOMAIN_YEARS = Array.from({ length: 10 }, (_, i) => i + 1)
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
 
 const toMonthInput = (iso) => (iso ? iso.slice(0, 7) : '')
@@ -78,6 +91,10 @@ export default function ClientFile() {
   const [reminderLog, setReminderLog] = useState([])
   const [sendReceipt, setSendReceipt] = useState(true)
   const [mailing, setMailing] = useState('')
+  // Atendimento e contrato: anotações, aceite do contrato de adesão e a chave PIX
+  const [notes, setNotes] = useState([])
+  const [termsInfo, setTermsInfo] = useState(null)
+  const [pixKey, setPixKey] = useState('')
 
   async function load() {
     setError('')
@@ -90,6 +107,11 @@ export default function ClientFile() {
       setPayments(await fetchPayments(found.companyId))
       fetchReminderRecipients(found.companyId).then(setRecipients).catch(() => setRecipients([]))
       fetchReminderLog(found.companyId, 20).then(setReminderLog).catch(() => setReminderLog([]))
+      fetchContactNotes(found.companyId).then(setNotes).catch(() => setNotes([]))
+      fetchPlatformSettings().then((s) => setPixKey(s.pixKey)).catch(() => setPixKey(''))
+      Promise.all([fetchPlatformTerms(), fetchTermsReceipt(found.companyId)])
+        .then(([list, receipt]) => setTermsInfo({ current: list.find((t) => t.status === 'publicada') || null, receipt }))
+        .catch(() => setTermsInfo({ current: null, receipt: null }))
       const a = found.account
       setBillingForm({
         planId: a.planId || '',
@@ -106,6 +128,10 @@ export default function ClientFile() {
         responsibleEmail: a.responsibleEmail,
         domain: a.domain,
         domainExpiresOn: a.domainExpiresOn || '',
+        domainRegisteredOn: a.domainRegisteredOn || '',
+        domainYears: a.domainYears ? String(a.domainYears) : '',
+        domainRegistrar: a.domainRegistrar,
+        domainPaidBy: a.domainPaidBy,
         notes: a.notes,
       })
       const firstOpen = found.billing.open?.[0] || found.billing.next
@@ -233,7 +259,24 @@ export default function ClientFile() {
 
   function saveData(e) {
     e.preventDefault()
-    save({ ...dataForm, domainExpiresOn: dataForm.domainExpiresOn || '' }, 'Dados salvos.')
+    save(
+      {
+        ...dataForm,
+        domainExpiresOn: dataForm.domainExpiresOn || '',
+        domainRegisteredOn: dataForm.domainRegisteredOn || '',
+        domainYears: dataForm.domainYears ? Number(dataForm.domainYears) : '',
+      },
+      'Dados salvos.'
+    )
+  }
+
+  // Compra + anos: o vencimento é calculado (e dá para corrigir à mão depois)
+  function updateDomainPurchase(field, value) {
+    setDataForm((f) => {
+      const next = { ...f, [field]: value }
+      const expires = domainExpiryFrom(next.domainRegisteredOn, next.domainYears)
+      return expires ? { ...next, domainExpiresOn: expires } : next
+    })
   }
 
   function toggleOnboarding(key) {
@@ -279,7 +322,7 @@ export default function ClientFile() {
 
   async function backToImplantation() {
     const ok = await confirm(
-      `Voltar ${client.name} para "Em implantação"? A cobrança para e, ao ativar de novo, os 30 dias recomeçam.`,
+      `Voltar ${client.name} para "Em implantação"? A cobrança para e, ao ativar de novo, o vencimento passa a ser o dia da nova ativação.`,
       { title: 'Voltar para implantação', confirmLabel: 'Voltar para implantação', cancelLabel: 'Cancelar' }
     )
     if (ok) save({ status: 'implantacao' }, `${client.name} voltou para implantação.`)
@@ -296,7 +339,7 @@ export default function ClientFile() {
   if (!client) {
     return (
       <div className="admin-page platform-page">
-        <Link to="/admin/plataforma/clientes" className="platform-back">
+        <Link to="/wbdev/clientes" className="platform-back">
           <ArrowLeft size={16} /> Clientes
         </Link>
         {error ? <p className="admin-error">{error}</p> : <p className="admin-muted">Carregando…</p>}
@@ -309,7 +352,7 @@ export default function ClientFile() {
   const onboarding = onboardingStatus(client)
   const done = onboarding.filter((i) => i.done).length
   const domain = domainAlert(a)
-  const chargeLink = whatsappLink(a.responsiblePhone, chargeMessage({ storeName: client.name, responsibleName: a.responsibleName, billing }))
+  const chargeLink = whatsappLink(a.responsiblePhone, chargeMessage({ storeName: client.name, responsibleName: a.responsibleName, billing, pixKey, siteUrl: client.siteUrl }))
   const planPrice = plans.find((p) => p.id === billingForm?.planId)?.monthlyPrice
   const implantation = implantationDays(a)
   const autoMonth = a.status === 'implantacao' || Boolean(a.activatedOn)
@@ -319,7 +362,7 @@ export default function ClientFile() {
     <div className="admin-page platform-page">
       <div className="admin-page-head">
         <div>
-          <Link to="/admin/plataforma/clientes" className="platform-back">
+          <Link to="/wbdev/clientes" className="platform-back">
             <ArrowLeft size={16} /> Clientes
           </Link>
           <h1>
@@ -333,11 +376,10 @@ export default function ClientFile() {
             </p>
           )}
         </div>
-        <Link to={`/admin/plataforma/${client.slug}`} className="btn btn-outline">
+        <Link to={`/wbdev/${client.slug}`} className="btn btn-outline">
           <BarChart3 size={15} /> Números da loja
         </Link>
       </div>
-      <PlatformTabs />
 
       <nav className="client-sections" aria-label="Seções da ficha">
         {SECTIONS.map((s) => (
@@ -373,7 +415,7 @@ export default function ClientFile() {
             <strong>{billing.price ? money(billing.price) : '—'}</strong>
             <small>
               {client.plan?.name ? `Plano ${client.plan.name}` : 'Sem plano'}
-              {billing.due_day ? ` · vence dia ${billing.due_day}${billing.due_day_auto ? ' (automático)' : ''}` : a.status === 'implantacao' ? ' · vence 30 dias após ativar' : ''}
+              {billing.due_day ? ` · vence dia ${billing.due_day}${billing.due_day_auto ? ' (automático)' : ''}` : a.status === 'implantacao' ? ' · vence no dia da ativação' : ''}
             </small>
           </div>
           <div className="platform-kpi">
@@ -397,7 +439,15 @@ export default function ClientFile() {
               <b>{client.checks.logins}</b> {client.checks.logins === 1 ? 'login' : 'logins'}
             </span>
             <span className={client.checks.ownDomain ? 'is-used' : 'is-warn'}>Domínio: <b>{client.checks.ownDomain ? 'próprio' : 'temporário'}</b></span>
-            {domain && <span className="is-warn">{domain}</span>}
+            {a.domainExpiresOn && (
+              <span className={domain ? 'is-warn' : ''}>
+                {domain || `Domínio vence em ${dateBR(a.domainExpiresOn)}`}
+                {[domainRegistrarLabel(a.domainRegistrar), a.domainPaidBy ? `renovação: ${domainPayerLabel(a.domainPaidBy)}` : '']
+                  .filter(Boolean)
+                  .map((t) => ` · ${t}`)
+                  .join('')}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -431,7 +481,7 @@ export default function ClientFile() {
               <label>
                 Dia do vencimento
                 <select value={billingForm.dueDay} onChange={(e) => setBillingForm((f) => ({ ...f, dueDay: e.target.value }))}>
-                  <option value="">{autoMonth ? 'Automático (30 dias após ativar)' : 'Escolha o dia'}</option>
+                  <option value="">{autoMonth ? 'Automático (dia da ativação)' : 'Escolha o dia'}</option>
                   {DAYS.map((d) => (
                     <option key={d} value={d}>
                       Dia {d}
@@ -450,14 +500,14 @@ export default function ClientFile() {
             </div>
             {a.status === 'implantacao' ? (
               <p className="admin-form-note">
-                Em implantação não há cobrança. Ao ativar, o 1º vencimento é 30 dias depois (se cair no dia 29, 30 ou 31, vence no
-                dia 1 do mês seguinte), a não ser que você escolha o dia ou o mês acima.
+                Em implantação não há cobrança. Ao ativar, a 1ª mensalidade vence no próprio dia da ativação e depois todo mês
+                nesse dia (29 a 31: no último dia dos meses mais curtos), a não ser que você escolha o dia ou o mês acima.
               </p>
             ) : a.activatedOn ? (
               <p className="admin-form-note">
                 Ativado em {dateBR(a.activatedOn)}: 1º vencimento em{' '}
                 {dateBR(firstDueDate({ activatedOn: a.activatedOn, dueDay: a.dueDay, billingStart: a.billingStart }))}
-                {a.dueDay ? ' (dia escolhido à mão)' : ' (automático, 30 dias depois)'}. Dia e mês em branco seguem a ativação.
+                {a.dueDay ? ' (dia escolhido à mão)' : ' (automático, no dia da ativação)'}. Dia e mês em branco seguem a ativação.
               </p>
             ) : (
               <p className="admin-form-note">
@@ -661,18 +711,65 @@ export default function ClientFile() {
                 ['responsibleName', 'Responsável'],
                 ['responsiblePhone', 'Telefone / WhatsApp do responsável'],
                 ['responsibleEmail', 'E-mail do responsável'],
-                ['domain', 'Domínio'],
               ].map(([key, label]) => (
                 <label key={key}>
                   {label}
                   <input value={dataForm[key]} onChange={(e) => setDataForm((f) => ({ ...f, [key]: e.target.value }))} />
                 </label>
               ))}
-              <label>
-                Vencimento do domínio
-                <DateInputBR value={dataForm.domainExpiresOn} onChange={(v) => setDataForm((f) => ({ ...f, domainExpiresOn: v }))} />
-              </label>
             </div>
+            <fieldset className="customer-address client-domain">
+              <legend>Domínio</legend>
+              <div className="admin-form-grid admin-form-grid-3">
+                <label>
+                  Domínio
+                  <input
+                    value={dataForm.domain}
+                    onChange={(e) => setDataForm((f) => ({ ...f, domain: e.target.value }))}
+                    placeholder="Ex.: minhaloja.com.br"
+                  />
+                </label>
+                <label>
+                  Comprado em
+                  <DateInputBR value={dataForm.domainRegisteredOn} onChange={(v) => updateDomainPurchase('domainRegisteredOn', v)} />
+                </label>
+                <label>
+                  Por quanto tempo
+                  <select value={dataForm.domainYears} onChange={(e) => updateDomainPurchase('domainYears', e.target.value)}>
+                    <option value="">—</option>
+                    {DOMAIN_YEARS.map((n) => (
+                      <option key={n} value={n}>{plural(n, 'ano', 'anos')}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Vence em
+                  <DateInputBR value={dataForm.domainExpiresOn} onChange={(v) => setDataForm((f) => ({ ...f, domainExpiresOn: v }))} />
+                </label>
+                <label>
+                  Onde está registrado
+                  <select value={dataForm.domainRegistrar} onChange={(e) => setDataForm((f) => ({ ...f, domainRegistrar: e.target.value }))}>
+                    <option value="">—</option>
+                    {DOMAIN_REGISTRARS.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Quem paga a renovação
+                  <select value={dataForm.domainPaidBy} onChange={(e) => setDataForm((f) => ({ ...f, domainPaidBy: e.target.value }))}>
+                    <option value="">—</option>
+                    {DOMAIN_PAYERS.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <p className="admin-form-note">
+                O vencimento é calculado pela data da compra e o período (dá para corrigir à mão). O aviso aparece {DOMAIN_ALERT_DAYS} dias antes,
+                na lista de clientes, na ficha e na Visão geral.
+              </p>
+            </fieldset>
             <label>
               Observações
               <textarea rows={3} value={dataForm.notes} onChange={(e) => setDataForm((f) => ({ ...f, notes: e.target.value }))} />
@@ -704,6 +801,47 @@ export default function ClientFile() {
         </>
       )}
 
+      {section === 'atendimento' && (
+        <>
+          <div className="admin-form-section">
+            <h2>Contrato de adesão</h2>
+            {!termsInfo ? (
+              <p className="admin-muted">Carregando…</p>
+            ) : !termsInfo.current ? (
+              <p className="admin-muted">
+                Nenhuma versão publicada ainda. <Link to="/wbdev/contrato">Revisar e publicar o contrato</Link>
+              </p>
+            ) : termsInfo.receipt ? (
+              <div className="billing-list-row">
+                <div>
+                  <strong>
+                    {Number(termsInfo.receipt.version) === termsInfo.current.version ? 'Aceitou a versão atual' : `Aceitou a versão ${termsInfo.receipt.version} (falta a ${termsInfo.current.version})`}
+                  </strong>
+                  <span className="admin-table-sub">
+                    {new Date(termsInfo.receipt.accepted_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} ·{' '}
+                    {termsInfo.receipt.user_name || termsInfo.receipt.user_email} · IP {termsInfo.receipt.ip || '—'}
+                  </span>
+                </div>
+                <button type="button" className="btn btn-outline" onClick={() => exportTermsReceiptPdf(termsInfo.receipt)}>
+                  <FileDown size={15} /> Comprovante (PDF)
+                </button>
+              </div>
+            ) : (
+              <p>Ainda não aceitou a versão {termsInfo.current.version}. O admin da loja aceita no próximo acesso ao painel.</p>
+            )}
+          </div>
+          <div className="admin-form-section">
+            <h2>Anotações de atendimento</h2>
+            <ContactNotes
+              companyId={client.companyId}
+              notes={notes}
+              onAdded={(n) => setNotes((prev) => [n, ...prev])}
+              onDeleted={(id) => setNotes((prev) => prev.filter((x) => x.id !== id))}
+            />
+          </div>
+        </>
+      )}
+
       {section === 'acesso' && (
         <div className="admin-form-section client-access">
           <h2>Acesso ao sistema</h2>
@@ -714,7 +852,7 @@ export default function ClientFile() {
                 equipe usa o painel e o site normalmente, sem cobrança.
               </p>
               <label className="client-access-reason">
-                Data de ativação (dela contam os 30 dias)
+                Data de ativação (a mensalidade vence nesse dia, todo mês)
                 <DateInputBR value={activationDate} onChange={setActivationDate} />
               </label>
               {previewFirst && (

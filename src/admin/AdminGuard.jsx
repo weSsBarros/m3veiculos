@@ -1,14 +1,19 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
 import SetupNotice from '../components/SetupNotice.jsx'
+import TermsGate from './TermsGate.jsx'
 
 export default function AdminGuard({ children }) {
-  const { user, loading } = useAuth()
+  const { user, loading, account } = useAuth()
+  const location = useLocation()
 
   if (!isSupabaseConfigured) return <SetupNotice />
   if (loading) return <div className="admin-boot">Carregando…</div>
-  if (!user) return <Navigate to="/admin/login" replace />
+  // Depois de entrar, volta para a tela que a pessoa abriu (painel da loja ou WB.Dev)
+  if (!user) return <Navigate to="/admin/login" replace state={{ from: location.pathname + location.search }} />
+  // Contrato de adesão publicado e ainda não aceito pela loja (a equipe WB.Dev passa)
+  if (account?.terms && !account.terms.accepted && !account.platformTeam) return <TermsGate />
 
   return children
 }

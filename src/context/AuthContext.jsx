@@ -6,9 +6,9 @@ import { logLogin } from '../lib/activityApi.js'
 import { setViewScope } from '../lib/viewScope.js'
 import { fetchStoreSettings } from '../lib/storeSettingsApi.js'
 import { fetchIsPlatformAdmin } from '../lib/platformApi.js'
-import { fetchMyAccount, fetchCompanyStatus } from '../lib/clientsApi.js'
+import { fetchMyAccount, fetchCompanyStatus, fetchSuspendedAccount } from '../lib/clientsApi.js'
 import { SUPPORT_DISPLAY } from '../utils/support.js'
-import { normalizePanelSettings, menuTabHidden, isBlockHidden as blockHiddenIn } from '../utils/panelSettings.js'
+import { normalizePanelSettings, menuTabHidden, storeTabHidden, isBlockHidden as blockHiddenIn } from '../utils/panelSettings.js'
 
 const AuthContext = createContext(null)
 
@@ -16,10 +16,14 @@ export const WRONG_COMPANY_MESSAGE = 'Essa conta não tem acesso a este painel.'
 // Loja bloqueada pela WB.Dev (painel WB.Dev → Clientes → Acesso)
 export const SUSPENDED_MESSAGE = `O acesso a este painel está suspenso. Fale com a WB.Dev: ${SUPPORT_DISPLAY}.`
 
-// Conta sem acesso: é porque a loja está bloqueada?
-async function suspendedOrWrong() {
+// Conta sem acesso: é porque a loja está bloqueada? Se for, antes de sair o login
+// pega o que pode mostrar para regularizar (o admin vê a cobrança e o PIX).
+// null = a conta só não é desta loja.
+async function blockedInfo() {
   const status = await fetchCompanyStatus().catch(() => ({ blocked: false }))
-  return status.blocked ? SUSPENDED_MESSAGE : WRONG_COMPANY_MESSAGE
+  if (!status.blocked) return null
+  const info = await fetchSuspendedAccount().catch(() => null)
+  return { admin: false, billing: null, payment: null, ...info, name: info?.name || status.name || '' }
 }
 
 // A autenticação (auth.users) é compartilhada entre todas as empresas do
@@ -60,8 +64,10 @@ export function AuthProvider({ children }) {
   // Conta da loja no painel WB.Dev: situação, abas do plano, avisos e (admin)
   // a mensalidade. null = ainda não carregou ou indisponível (painel normal).
   const [account, setAccount] = useState(null)
-  // Login recusado porque a loja está bloqueada (a tela de login avisa)
+  // Login recusado porque a loja está bloqueada (a tela de login avisa e, para o
+  // admin, mostra o que está em aberto e o PIX)
   const [suspended, setSuspended] = useState(false)
+  const [suspendedInfo, setSuspendedInfo] = useState(null)
 
   useEffect(() => {
     if (!isSupabaseConfigured) return
@@ -84,13 +90,14 @@ export function AuthProvider({ children }) {
       const ok = await belongsToThisCompany()
       if (cancelled) return
       if (!ok) {
-        const reason = await suspendedOrWrong()
+        const blocked = await blockedInfo()
         await supabase.auth.signOut()
         if (!cancelled) {
           setUser(null)
           setRole(null)
           setSeller(null)
-          setSuspended(reason === SUSPENDED_MESSAGE)
+          setSuspended(Boolean(blocked))
+          setSuspendedInfo(blocked)
           setLoading(false)
         }
         return
@@ -105,6 +112,7 @@ export function AuthProvider({ children }) {
       setPlatformAdmin(owner)
       setAccount(acc)
       setSuspended(false)
+      setSuspendedInfo(null)
       setPanelSettings(store ? store.panel : normalizePanelSettings(null))
       setCarsAccess(userRole)
       setUser(session.user)
@@ -132,9 +140,11 @@ export function AuthProvider({ children }) {
     if (error) throw error
     const ok = await belongsToThisCompany()
     if (!ok) {
-      const reason = await suspendedOrWrong()
+      const blocked = await blockedInfo()
       await supabase.auth.signOut()
-      throw new Error(reason)
+      setSuspended(Boolean(blocked))
+      setSuspendedInfo(blocked)
+      throw new Error(blocked ? SUSPENDED_MESSAGE : WRONG_COMPANY_MESSAGE)
     }
     logLogin().catch(() => {})
     return data.user
@@ -169,6 +179,14 @@ export function AuthProvider({ children }) {
     setViewAs(null)
   }
 
+  // Recarrega a conta (depois de aceitar os termos, informar um pagamento ou ler
+  // a resposta de um chamado)
+  async function refreshAccount() {
+    const acc = await fetchMyAccount().catch(() => null)
+    if (acc) setAccount(acc)
+    return acc
+  }
+
   // Papel efetivo nas telas: o simulado, se o admin estiver "vendo como"
   const simulating = role === 'admin' && viewAs !== null
   const effectiveRole = simulating ? viewAs.role : role
@@ -199,6 +217,7 @@ export function AuthProvider({ children }) {
     planTabs: account?.features ?? null,
   }
   const isTabHidden = (key) => menuTabHidden(panelSettings, key, menuPerson)
+  const isStoreTabHidden = (key) => storeTabHidden(panelSettings, key, menuPerson.planTabs)
   const isBlockHidden = (key) => blockHiddenIn(panelSettings, key)
 
   return (
@@ -219,10 +238,13 @@ export function AuthProvider({ children }) {
         panelSettings,
         setPanelSettings,
         isTabHidden,
+        isStoreTabHidden,
         isBlockHidden,
         account,
+        refreshAccount,
         planTabs: account?.features ?? null,
         suspended,
+        suspendedInfo,
         // Some no "ver como": a aba é do dono do sistema, não da equipe da loja
         isPlatformAdmin: platformAdmin && !simulating,
         viewAs: simulating ? viewAs : null,

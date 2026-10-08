@@ -36,6 +36,9 @@ import { RENAVE_STATUSES } from '../utils/renave.js'
 import { DEFAULT_INTAKE_CHECKLIST, DEFAULT_INSPECTION_CHECKLIST } from '../utils/carChecklists.js'
 import { DEFAULT_BANKS } from '../utils/payment.js'
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
+import OlxCarSection from './OlxCarSection.jsx'
+import WebmotorsCarSection from './WebmotorsCarSection.jsx'
+import { olxSellerPhones } from '../utils/olxStatus.js'
 
 const EMPTY_CAR = {
   brand: '',
@@ -728,6 +731,9 @@ export default function AdminCarForm() {
             Ocultar do site (some das listagens e da página do carro, sem marcar como vendido)
           </label>
         </section>
+
+        <OlxCarSection car={car} carId={id} sellerPhones={olxSellerPhones(sellers)} noPrice={noPrice} onChange={update} />
+        <WebmotorsCarSection car={car} carId={id} noPrice={noPrice} onChange={update} />
 
         <section className="admin-form-section">
           <h2>Entrada na loja</h2>
