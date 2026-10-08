@@ -108,18 +108,32 @@ export default function WebmotorsPortalPanel({ cars, setCars, reloadKey }) {
     setAds(await fetchWebmotorsAds())
   }
 
-  function syncMessage(result) {
-    if (result?.busy) return 'A Webmotors já está sendo atualizada agora. Confira de novo em instantes.'
-    if (result?.modality === false) return 'Escolha a modalidade do plano da Webmotors: sem ela nenhum carro vai.'
-    if (result?.lists === false) return 'A Webmotors não mandou as listas de cor, câmbio e combustível agora. Tente de novo em instantes.'
-    if (result?.sent && simulates) {
-      return `Pronto: ${result.sent} ${result.sent === 1 ? 'anúncio simulado' : 'anúncios simulados'}. Na loja de demonstração nada vai para a Webmotors.`
+  // Aviso depois de mandar: o que a Webmotors aceitou e, à parte, o que ela recusou
+  // ou não respondeu (esses ficam em "Com problema", com o motivo no carro)
+  function syncNotice(result) {
+    if (result?.busy) return { tone: 'success', text: 'A Webmotors já está sendo atualizada agora. Confira de novo em instantes.' }
+    if (result?.modality === false) return { tone: 'error', text: 'Escolha a modalidade do plano da Webmotors: sem ela nenhum carro vai.' }
+    if (result?.lists === false) {
+      return { tone: 'error', text: 'A Webmotors não mandou as listas de cor, câmbio e combustível agora. Tente de novo em instantes.' }
     }
-    const parts = []
-    if (result?.sent) parts.push(`${result.sent} ${result.sent === 1 ? 'anúncio enviado' : 'anúncios enviados'}`)
-    if (result?.updated) parts.push(`${result.updated} ${result.updated === 1 ? 'atualizado' : 'atualizados'}`)
-    if (result?.removed) parts.push(`${result.removed} ${result.removed === 1 ? 'tirado' : 'tirados'} da Webmotors`)
-    return parts.length ? `Pronto: ${parts.join(', ')}.` : 'Tudo em dia com a Webmotors.'
+    const done = []
+    if (result?.sent) {
+      done.push(simulates
+        ? `${result.sent} ${result.sent === 1 ? 'anúncio simulado' : 'anúncios simulados'} (na loja de demonstração nada vai para a Webmotors)`
+        : `${result.sent} ${result.sent === 1 ? 'anúncio enviado' : 'anúncios enviados'}`)
+    }
+    if (result?.updated) done.push(`${result.updated} ${result.updated === 1 ? 'atualizado' : 'atualizados'}`)
+    if (result?.removed) done.push(`${result.removed} ${result.removed === 1 ? 'tirado' : 'tirados'} da Webmotors`)
+    const problems = []
+    if (result?.refused) {
+      problems.push(`${result.refused} ${result.refused === 1 ? 'recusado' : 'recusados'} pela Webmotors (o motivo aparece no carro, em "Com problema")`)
+    }
+    if (result?.waiting) problems.push(`${result.waiting} sem resposta da Webmotors agora (o sistema tenta de novo em alguns minutos)`)
+    if (problems.length) {
+      const text = [...done, ...problems].join('; ')
+      return { tone: 'error', text: `${done.length ? 'Pronto: ' : 'Anúncios: '}${text}.` }
+    }
+    return { tone: 'success', text: done.length ? `Pronto: ${done.join(', ')}.` : 'Tudo em dia com a Webmotors.' }
   }
 
   const handleConnect = (e) => {
@@ -172,7 +186,7 @@ export default function WebmotorsPortalPanel({ cars, setCars, reloadKey }) {
       if (next) {
         const result = await syncWebmotors({ manual: true })
         await refreshAds()
-        setNotice({ tone: 'success', text: syncMessage(result) })
+        setNotice(syncNotice(result))
       }
     })
 
@@ -190,7 +204,7 @@ export default function WebmotorsPortalPanel({ cars, setCars, reloadKey }) {
     run('sync', async () => {
       const result = await syncWebmotors({ manual: true })
       await load()
-      setNotice({ tone: 'success', text: syncMessage(result) })
+      setNotice(syncNotice(result))
     })
 
   const togglePublish = (car) =>
@@ -211,7 +225,7 @@ export default function WebmotorsPortalPanel({ cars, setCars, reloadKey }) {
       if (again && !(await confirm('Publicar de novo na Webmotors? Entra como um anúncio novo no plano da loja.', { title: 'Publicar de novo', confirmLabel: 'Publicar' }))) return
       const result = await syncWebmotors({ carIds: [car.id], force })
       await refreshAds()
-      setNotice({ tone: 'success', text: syncMessage(result) })
+      setNotice(syncNotice(result))
     })
 
   async function openPreview(car) {

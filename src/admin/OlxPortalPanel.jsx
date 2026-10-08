@@ -117,15 +117,27 @@ export default function OlxPortalPanel({ cars, setCars, sellers, reloadKey }) {
     setAds(await fetchOlxAds())
   }
 
-  function syncMessage(result) {
-    if (result?.busy) return 'A OLX já está sendo atualizada agora. Confira de novo em instantes.'
-    const parts = []
-    if (result?.sent && account?.isDemo) {
-      return `Pronto: ${result.sent} ${result.sent === 1 ? 'anúncio simulado' : 'anúncios simulados'}. Na loja de demonstração nada vai para a OLX.`
+  // Aviso depois de mandar: o que a OLX recebeu e, à parte, o que ela recusou (na hora
+  // ou na análise) ou não respondeu (esses ficam em "Com problema", com o motivo no carro)
+  function syncNotice(result) {
+    if (result?.busy) return { tone: 'success', text: 'A OLX já está sendo atualizada agora. Confira de novo em instantes.' }
+    const done = []
+    if (result?.sent) {
+      done.push(account?.isDemo
+        ? `${result.sent} ${result.sent === 1 ? 'anúncio simulado' : 'anúncios simulados'} (na loja de demonstração nada vai para a OLX)`
+        : `${result.sent} ${result.sent === 1 ? 'anúncio enviado' : 'anúncios enviados'} (a OLX leva alguns minutos para processar)`)
     }
-    if (result?.sent) parts.push(`${result.sent} ${result.sent === 1 ? 'anúncio enviado' : 'anúncios enviados'}`)
-    if (result?.removed) parts.push(`${result.removed} saindo da OLX`)
-    return parts.length ? `Pronto: ${parts.join(', ')}. A OLX leva alguns minutos para processar.` : 'Tudo em dia com a OLX.'
+    if (result?.published) done.push(`${result.published} ${result.published === 1 ? 'publicado' : 'publicados'} na OLX`)
+    if (result?.removed) done.push(`${result.removed} saindo da OLX`)
+    const problems = []
+    if (result?.refused) {
+      problems.push(`${result.refused} ${result.refused === 1 ? 'recusado' : 'recusados'} pela OLX (o motivo aparece no carro, em "Com problema")`)
+    }
+    if (result?.waiting) problems.push(`${result.waiting} sem resposta da OLX agora (o sistema tenta de novo em alguns minutos)`)
+    if (problems.length) {
+      return { tone: 'error', text: `${done.length ? 'Pronto: ' : 'Anúncios: '}${[...done, ...problems].join('; ')}.` }
+    }
+    return { tone: 'success', text: done.length ? `Pronto: ${done.join(', ')}.` : 'Tudo em dia com a OLX.' }
   }
 
   const handleConnect = () => run('connect', connectOlx)
@@ -155,7 +167,7 @@ export default function OlxPortalPanel({ cars, setCars, sellers, reloadKey }) {
       if (next) {
         const result = await syncOlx({ manual: true })
         await refreshAds()
-        setNotice({ tone: 'success', text: syncMessage(result) })
+        setNotice(syncNotice(result))
       }
     })
 
@@ -173,7 +185,7 @@ export default function OlxPortalPanel({ cars, setCars, sellers, reloadKey }) {
     run('sync', async () => {
       const result = await syncOlx({ manual: true })
       await load()
-      setNotice({ tone: 'success', text: syncMessage(result) })
+      setNotice(syncNotice(result))
     })
 
   const togglePublish = (car) =>
@@ -194,7 +206,7 @@ export default function OlxPortalPanel({ cars, setCars, sellers, reloadKey }) {
       if (again && !(await confirm('Publicar de novo na OLX? A OLX conta como um anúncio novo no plano da loja.', { title: 'Publicar de novo', confirmLabel: 'Publicar' }))) return
       const result = await syncOlx({ carIds: [car.id], force })
       await refreshAds()
-      setNotice({ tone: 'success', text: syncMessage(result) })
+      setNotice(syncNotice(result))
     })
 
   const renew = (car) =>

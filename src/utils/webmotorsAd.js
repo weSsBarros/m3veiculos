@@ -635,11 +635,18 @@ export function wmModalityFull(modality) {
 // -- Códigos de retorno ---------------------------------------------------------------
 // "500" = deu certo (é o que a Webmotors devolve nos testes da coleção oficial do
 // Postman, no login, nos envios e em cada item das listas); outro código = recusa.
+// Um código é o número sozinho (500, 401) ou o par "grupo|item" das tabelas do manual
+// (43|22 = "Cor deve ser preenchida"); vários códigos vêm separados por ; , ou espaço.
 
 export const WM_SUCCESS = '500'
 
 function returnParts(code) {
-  return clean(code).split(/[^0-9A-Za-z_-]+/).filter(Boolean)
+  return clean(code)
+    .replace(/[()]/g, ' ')
+    .replace(/\s*\|\s*/g, '|')
+    .split(/[^0-9A-Za-z_|-]+/)
+    .map((c) => c.replace(/^\|+|\|+$/g, ''))
+    .filter(Boolean)
 }
 
 export function wmReturnOk(code) {
@@ -666,13 +673,103 @@ export function wmResultCode(result) {
   return ''
 }
 
-// Textos dos códigos que já conhecemos (a tabela vem com o ambiente de teste)
-const WM_RETURN_TEXTS = {}
+// Textos das tabelas de retorno do manual de integração (serviços de carros: login,
+// manutenção do anúncio, exclusão e fotos). Código fora da tabela aparece pelo número.
+const WM_RETURN_TEXTS = {
+  400: 'falha inesperada na Webmotors (fale com o suporte técnico de lá)',
+  401: 'o login da integração não vale mais (hash inválido)',
+  402: 'a sessão com a Webmotors expirou',
+  403: 'o usuário de integração não tem permissão para esta operação',
+  31: 'o login da integração não vale mais (hash inválido)',
+  32: 'falha inesperada na Webmotors (fale com o suporte técnico de lá)',
+  '28|2': 'preço de venda inválido',
+  '31|1': 'falta preencher um campo obrigatório',
+  '21|9': 'foto com mais de 500 KB',
+  '21|10': 'formato da foto inválido',
+  '42|1': 'falta preencher um campo da foto',
+  '42|2': 'fotos demais para o anúncio',
+  '42|3': 'a modalidade do plano não aceita fotos',
+  '42|4': 'a Webmotors não conseguiu gravar a foto',
+  '43|7': 'falta o preço do carro',
+  '43|8': 'falta o ano do modelo',
+  '43|9': 'falta o ano de fabricação',
+  '43|10': 'falta o câmbio',
+  '43|11': 'falta a cor',
+  '43|12': 'falta o número de portas',
+  '43|13': 'falta a placa',
+  '43|14': 'falta a quilometragem',
+  '43|15': 'falta a marca',
+  '43|16': 'falta o modelo',
+  '43|17': 'falta a versão',
+  '43|18': 'falta a quilometragem',
+  '43|19': 'falta a placa',
+  '43|20': 'falta o câmbio',
+  '43|21': 'falta o número de portas',
+  '43|22': 'falta a cor',
+  '43|25': 'a loja está bloqueada na Webmotors',
+  '43|30': 'falta o combustível',
+  '43|32': 'acabaram as vagas da modalidade do plano',
+  '43|33': 'acabaram as vagas do pacote de anúncios',
+  '43|36': 'o anúncio não pode ser alterado (ou não é desta loja)',
+  '43|37': 'ano do modelo inválido',
+  '43|39': 'o anúncio não é desta loja na Webmotors',
+  '43|40': 'anúncio inválido',
+  '43|41': 'marca, modelo, versão e ano do modelo não combinam',
+  '43|42': 'a cor não vale para esta versão',
+  '43|43': 'opcionais inválidos',
+  '43|44': 'combustível inválido',
+  '43|45': 'câmbio inválido',
+  '43|46': 'campo "adaptado para deficientes" inválido (S ou N)',
+  '43|47': 'campo "alienado" inválido (S ou N)',
+  '43|48': 'campo "blindado" inválido (S ou N)',
+  '43|49': 'campo "IPVA pago" inválido (S ou N)',
+  '43|50': 'campo "garantia de fábrica" inválido (S ou N)',
+  '43|51': 'campo "licenciado" inválido (S ou N)',
+  '43|52': 'campo "revisado" inválido (S ou N)',
+  '43|53': 'campo "revisões na concessionária" inválido (S ou N)',
+  '43|54': 'campo "único dono" inválido (S ou N)',
+  '43|55': 'tipo do anúncio inválido (U ou N)',
+  '43|56': 'a modalidade escolhida não vale para esta loja ou tipo de anúncio',
+  '43|57': 'o tipo do anúncio não pode ser alterado',
+  '43|58': 'falta o motivo da exclusão',
+  '43|62': 'número de portas inválido',
+  '43|63': 'combustível inválido',
+  '43|64': 'cor inválida',
+  '43|65': 'a descrição tem código HTML',
+  '43|66': 'o preço está fora do praticado pelo mercado (tabelas Webmotors e FIPE)',
+  '43|67': 'preço de revenda inválido',
+  '43|68': 'quilometragem não permitida',
+  '43|69': 'a foto não é deste anúncio',
+  '43|70': 'falta a marca',
+  '43|71': 'falta o modelo',
+  '43|72': 'falta a versão',
+  '43|73': 'falta a cor',
+  '43|74': 'falta a placa',
+  '43|75': 'falta o câmbio',
+  '43|76': 'falta o número de portas',
+  '43|77': 'falta o combustível',
+  '43|78': 'falta o preço de venda',
+  '43|79': 'um campo tem número inválido',
+  '43|80': 'a loja está bloqueada na Webmotors',
+  '43|82': 'neste anúncio só o preço pode ser alterado',
+  '43|84': 'placa inválida',
+  '43|85': 'ano de fabricação inválido',
+  '43|97': 'a descrição passou de 1.500 caracteres',
+  '43|102': 'preço de venda acima do permitido pela tabela FIPE',
+  '43|104': 'o preço de revenda está fora do praticado pelo mercado',
+  '43|105': 'preço de revenda acima do permitido pela tabela FIPE',
+  '43|106': 'falta o código do anúncio',
+  '43|107': 'a quilometragem só pode aumentar em relação à cadastrada',
+  '43|112': 'ano de fabricação inválido',
+}
 
 export function wmReturnText(codes) {
   const list = [].concat(codes || []).map(clean).filter(Boolean)
-  const parts = list.filter((c) => WM_RETURN_TEXTS[c]).map((c) => WM_RETURN_TEXTS[c])
+  const known = list.filter((c) => WM_RETURN_TEXTS[c])
+  const parts = [...new Set(known.map((c) => WM_RETURN_TEXTS[c]))]
+  if (parts.length) parts[0] = parts[0][0].toUpperCase() + parts[0].slice(1)
+  const text = parts.length ? `${parts.join('; ')} (código ${known.join(', ')})` : ''
   const unknown = list.filter((c) => !WM_RETURN_TEXTS[c])
-  if (unknown.length) parts.push(`a Webmotors recusou (código ${unknown.join(', ')})`)
-  return parts.join('; ') || 'a Webmotors recusou o pedido'
+  const rest = unknown.length ? `a Webmotors recusou (código ${unknown.join(', ')})` : ''
+  return [text, rest].filter(Boolean).join('; ') || 'a Webmotors recusou o pedido'
 }

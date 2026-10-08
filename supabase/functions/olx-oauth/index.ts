@@ -435,7 +435,10 @@ async function reconcile(service, company, acc, { manual = false, carIds = [], f
     .select('company_id')
   if (!locked?.length) return { busy: true }
 
-  const result = { sent: 0, removed: 0, checked: 0, status: acc.status }
+  // sent: a OLX recebeu (processa em minutos); published: saiu da análise publicado;
+  // refused: recusado (na hora ou na análise; fica em "Com problema");
+  // waiting: a OLX não respondeu agora (tenta de novo sozinho)
+  const result = { sent: 0, removed: 0, checked: 0, published: 0, refused: 0, waiting: 0, status: acc.status }
   try {
     const [carsRes, adsRes, teamRes] = await Promise.all([
       service.from('cars').select(CAR_COLUMNS).eq('company_id', company.id),
@@ -452,8 +455,13 @@ async function reconcile(service, company, acc, { manual = false, carIds = [], f
     if (!company.is_demo) {
       for (const ad of ads.filter((a) => a.import_token && ['aguardando', 'removendo'].includes(a.status))) {
         if (Date.now() > deadline) break
+        const before = ad.status
         await checkImport(service, acc, ad)
         result.checked++
+        if (ad.status !== before && ad.operation === 'insert') {
+          if (ad.status === 'publicado') result.published++
+          else if (['recusado', 'erro'].includes(ad.status)) result.refused++
+        }
       }
       // 2) Uma vez por hora (ou quando a pessoa pede), a lista geral da conta
       if (manual || !acc.last_list_at || Date.now() - new Date(acc.last_list_at).getTime() > LIST_EVERY_MS) {
@@ -481,14 +489,17 @@ async function reconcile(service, company, acc, { manual = false, carIds = [], f
         const changed = !ad || ad.payload_hash !== hash || ad.operation === 'delete' || ['removido', 'removido_olx', 'pendente'].includes(ad.status)
         const slotRetry = ad?.status === 'sem_vaga' && Date.now() - new Date(ad.sent_at || 0).getTime() > SLOT_RETRY_MS
         if (!changed && !slotRetry && !(requested && force)) continue
-        await sendInsert(service, company, acc, car, ad, payload, hash)
+        const saved = await sendInsert(service, company, acc, car, ad, payload, hash)
         sends++
-        result.sent++
+        if (['aguardando', 'simulado'].includes(saved?.status)) result.sent++
+        else if (['erro', 'sem_vaga', 'recusado'].includes(saved?.status) && saved?.payload_hash === hash) result.refused++
+        else result.waiting++
         if (acc.status !== 'conectada' && !requested) break
       } else if (ad && ad.operation === 'insert' && ad.status !== 'removido' && ad.status !== 'removido_olx') {
         if (liveOnOlx(ad)) sends++
         await sendDelete(service, company, acc, ad)
-        result.removed++
+        if (['removendo', 'removido'].includes(ad.status)) result.removed++
+        else result.waiting++
       }
     }
 
@@ -498,7 +509,8 @@ async function reconcile(service, company, acc, { manual = false, carIds = [], f
       if (liveOnOlx(ad)) {
         await sendDelete(service, company, acc, ad)
         sends++
-        result.removed++
+        if (['removendo', 'removido'].includes(ad.status)) result.removed++
+        else result.waiting++
       } else if (ad.status === 'removido' || ad.operation === 'insert') {
         await service.from('olx_ads').delete().eq('id', ad.id)
       }
