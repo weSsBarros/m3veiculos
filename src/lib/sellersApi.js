@@ -9,7 +9,7 @@ function fromRow(row) {
   return {
     id: row.id,
     userId: row.user_id,
-    // Nível de acesso (o que o banco libera): 'seller' ou 'manager'
+    // Nível de acesso (o que o banco libera): 'seller', 'manager' ou 'admin' (seção 69)
     role: row.role || 'seller',
     // Cargo personalizado (null = Vendedor/Gerente) e menu próprio (null = segue o cargo)
     customRoleId: row.custom_role_id || null,
@@ -76,9 +76,13 @@ export async function updateSeller(id, seller) {
       ...(seller.extCommissionType !== undefined
         ? { ext_commission_type: seller.extCommissionType || 'none', ext_commission_value: seller.extCommissionValue || 0 }
         : {}),
-      // Cargo: com cargo personalizado, o banco põe o nível do cargo
+      // Cargo: com cargo personalizado, o banco põe o nível do cargo. O
+      // administrador (seção 69) não tem cargo personalizado.
       ...(seller.role !== undefined
-        ? { role: seller.role === 'manager' ? 'manager' : 'seller', custom_role_id: seller.customRoleId || null }
+        ? {
+            role: ['manager', 'admin'].includes(seller.role) ? seller.role : 'seller',
+            custom_role_id: seller.role === 'admin' ? null : seller.customRoleId || null,
+          }
         : {}),
       ...(seller.panelTabs !== undefined ? { panel_tabs: Array.isArray(seller.panelTabs) ? seller.panelTabs : null } : {}),
     })
@@ -164,15 +168,35 @@ export function describeCommission(seller) {
   return `${seller.commissionValue.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}% da venda`
 }
 
-// Nome do cargo: o personalizado (ex.: "Despachante") ou Vendedor/Gerente
+// Nome do cargo: o personalizado (ex.: "Despachante") ou Vendedor/Gerente/Administrador
 export function roleLabel(role, customRole = null) {
+  if (role === 'admin') return 'Administrador'
   if (customRole?.name) return customRole.name
   return role === 'manager' ? 'Gerente' : 'Vendedor'
 }
 
 // Nível de acesso de um cargo personalizado (o que o banco libera)
 export function accessLabel(role) {
+  if (role === 'admin') return 'acesso de administrador'
   return role === 'manager' ? 'acesso de gerente' : 'acesso de vendedor'
+}
+
+// Administradores da loja que ainda não estão na Equipe (seção 69): sem o
+// cadastro na Equipe eles não aparecem no WhatsApp do carro nem nas vendas.
+// Devolve [{ userId, email, me }] (me = o próprio login). A equipe WB.Dev fica de fora.
+export async function fetchAdminsOutsideTeam() {
+  requireSupabase()
+  const { data, error } = await supabase.rpc('store_admins_outside_team')
+  if (error) throw error
+  return (Array.isArray(data) ? data : []).map((a) => ({ userId: a.user_id, email: a.email || '', me: Boolean(a.me) }))
+}
+
+// Põe um administrador na Equipe (nome e telefone; sem comissão)
+export async function addAdminToTeam(userId, name, phone) {
+  requireSupabase()
+  const { data, error } = await supabase.rpc('add_admin_to_team', { p_user_id: userId, p_name: name, p_phone: phone || '' })
+  if (error) throw error
+  return fromRow(data)
 }
 
 export function financeAccessLabel(access) {

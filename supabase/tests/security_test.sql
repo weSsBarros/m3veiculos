@@ -680,8 +680,11 @@ select test.login('aaaaaaaa-0000-0000-0000-000000000001');
 set role authenticated;
 select test.check('admin A: promove a gerente o vendedor que é admin em outra loja',
   test.allowed($$update sellers set role = 'manager' where id = '5e000000-0000-0000-0000-000000000007'$$));
-select test.check('admin A: não transforma ninguém em admin pela Equipe',
-  test.denied($$update sellers set role = 'admin' where id = '5e000000-0000-0000-0000-000000000004'$$));
+-- Desde a seção 69 o admin promove a administrador pela Equipe (e volta)
+select test.check('admin A: promove o vendedor a administrador e volta para vendedor',
+  test.allowed($$update sellers set role = 'admin' where id = '5e000000-0000-0000-0000-000000000004'$$)
+  and test.allowed($$update sellers set role = 'seller' where id = '5e000000-0000-0000-0000-000000000004'$$)
+  and (select role from sellers where id = '5e000000-0000-0000-0000-000000000004') = 'seller');
 select test.check('admin A: muda o nível do cargo',
   test.allowed($$update custom_roles set base_role = 'seller' where id = 'c4000000-0000-0000-0000-0000000000a1'$$));
 reset role;
@@ -1939,6 +1942,61 @@ select test.check('dono da plataforma: a lista de clientes traz os dados do dom�
   and (select (x -> 'account' ->> 'domain_years')::int from jsonb_array_elements(platform_clients()) x where x ->> 'company_id' = test.company_a()::text) = 2
   and (select x -> 'account' ->> 'domain_paid_by' from jsonb_array_elements(platform_clients()) x where x ->> 'company_id' = test.company_a()::text) = 'cliente');
 reset role;
+
+-- ============================ administradores na Equipe (69)
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: vê os administradores da loja fora da Equipe (ele mesmo)',
+  jsonb_array_length(store_admins_outside_team()) = 1
+  and store_admins_outside_team() -> 0 ->> 'user_id' = 'aaaaaaaa-0000-0000-0000-000000000001');
+select test.check('admin A: entra na Equipe como administrador, com telefone',
+  test.allowed($$select add_admin_to_team('aaaaaaaa-0000-0000-0000-000000000001', 'Admin A', '(98) 90000-0001')$$));
+select test.check('admin A: não entra duas vezes; vendedor não entra como admin; nome vazio é recusado',
+  test.denied($$select add_admin_to_team('aaaaaaaa-0000-0000-0000-000000000001', 'Admin A')$$)
+  and test.denied($$select add_admin_to_team('aaaaaaaa-0000-0000-0000-000000000004', 'Vendedor A')$$)
+  and test.denied($$select add_admin_to_team('aaaaaaaa-0000-0000-0000-000000000001', '  ')$$));
+select test.check('admin A: na Equipe com o nível de administrador (a lista de fora fica vazia)',
+  jsonb_array_length(store_admins_outside_team()) = 0
+  and (select role from sellers where user_id = 'aaaaaaaa-0000-0000-0000-000000000001') = 'admin');
+select test.check('admin A: promove o Vendedor A2 a administrador',
+  test.allowed($$update sellers set role = 'admin' where id = '5e000000-0000-0000-0000-000000000005'$$));
+reset role;
+select test.check('Vendedor A2 virou administrador no login também, com registro em Atividades',
+  (select role from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000005' and company_id = test.company_a()) = 'admin'
+  and exists (select 1 from public.activity_log where entity = 'sellers' and entity_id = '5e000000-0000-0000-0000-000000000005'
+              and details like '%Administrador%'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não muda o próprio nível',
+  test.denied($$update sellers set role = 'manager' where user_id = 'aaaaaaaa-0000-0000-0000-000000000001'$$));
+select test.check('admin A: rebaixa o A2 para vendedor (a loja continua com outro administrador)',
+  test.allowed($$update sellers set role = 'seller' where id = '5e000000-0000-0000-0000-000000000005'$$));
+reset role;
+select test.check('A2 voltou a vendedor no login',
+  (select role from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000005' and company_id = test.company_a()) = 'seller');
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: não vira administrador sozinho nem inclui ninguém na Equipe',
+  test.denied($$update sellers set role = 'admin' where id = '5e000000-0000-0000-0000-000000000004'$$)
+  and test.denied($$select add_admin_to_team('aaaaaaaa-0000-0000-0000-000000000004', 'Eu')$$)
+  and test.denied($$select store_admins_outside_team()$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente: não promove ninguém a administrador',
+  test.denied($$update sellers set role = 'admin' where id = '5e000000-0000-0000-0000-000000000004'$$)
+  and test.denied($$select add_admin_to_team('aaaaaaaa-0000-0000-0000-000000000001', 'Admin A')$$));
+reset role;
+
+-- A função manage-sellers (chave de serviço) também não deixa a loja sem administrador
+select set_config('request.jwt.claim.role', 'service_role', false);
+select test.check('chave de serviço: rebaixar o único administrador da loja é recusado',
+  test.denied($$update public.sellers set role = 'seller' where user_id = 'aaaaaaaa-0000-0000-0000-000000000001'$$)
+  and (select role from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000001' and company_id = test.company_a()) = 'admin');
+select set_config('request.jwt.claim.role', '', false);
 
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe

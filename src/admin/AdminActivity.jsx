@@ -162,7 +162,7 @@ export default function AdminActivity() {
   const people = useMemo(() => {
     const map = {}
     for (const [id, s] of Object.entries(sellersByUser)) {
-      map[id] = `${s.name} (${s.role === 'manager' ? 'gerente' : 'vendedor'}${s.deletedAt ? ', excluído' : ''})`
+      map[id] = `${s.name} (${s.role === 'admin' ? 'administrador' : s.role === 'manager' ? 'gerente' : 'vendedor'}${s.deletedAt ? ', excluído' : ''})`
     }
     for (const e of entries) if (e.userId && !map[e.userId]) map[e.userId] = e.userEmail || 'Usuário'
     return Object.entries(map).sort((a, b) => a[1].localeCompare(b[1]))
@@ -180,7 +180,7 @@ export default function AdminActivity() {
   function personName(entry) {
     const seller = sellersByUser[entry.userId]
     if (seller) {
-      const role = seller.role === 'manager' ? 'Gerente' : 'Vendedor'
+      const role = seller.role === 'admin' ? 'Administrador' : seller.role === 'manager' ? 'Gerente' : 'Vendedor'
       return { name: seller.name, role: seller.deletedAt ? `${role} (excluído)` : role }
     }
     return { name: entry.userEmail || '—', role: 'Admin' }

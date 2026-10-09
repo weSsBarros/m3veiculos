@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2, HandCoins } from 'lucide-react'
-import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, financeAccessLabel, accessLabel } from '../lib/sellersApi.js'
+import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2, HandCoins, ShieldCheck } from 'lucide-react'
+import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, financeAccessLabel, accessLabel, fetchAdminsOutsideTeam, addAdminToTeam } from '../lib/sellersApi.js'
 import { fetchCustomRoles } from '../lib/customRolesApi.js'
 import { tabsForRole } from '../utils/panelSettings.js'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -19,7 +19,7 @@ import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 
 const EMPTY_FORM = {
-  // Nível de acesso ('seller' ou 'manager') e cargo personalizado (null = Vendedor/Gerente)
+  // Nível de acesso ('seller', 'manager' ou 'admin') e cargo personalizado (null = Vendedor/Gerente)
   role: 'seller',
   customRoleId: null,
   // Menu próprio da pessoa: null = segue o cargo
@@ -43,9 +43,10 @@ const EMPTY_FORM = {
 const ACCESS_TEXT = {
   seller: 'vê só as próprias vendas, reservas e documentos de clientes',
   manager: 'vê todas as vendas e clientes da loja, menos custos',
+  admin: 'vê e gerencia tudo da loja, inclusive custos, Financeiro, Equipe e Configurações',
 }
 
-// Valor do seletor de cargo: 'seller', 'manager' ou 'custom:<id>'
+// Valor do seletor de cargo: 'seller', 'manager', 'admin' ou 'custom:<id>'
 const cargoValue = (role, customRoleId) => (customRoleId ? `custom:${customRoleId}` : role)
 
 // Aceita "1,5", "1.5", "500", "1.000" e "1.000,50"
@@ -59,7 +60,7 @@ function parseCommission(value) {
 
 export default function AdminSellers() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, canSeeSaleValues } = useAuth()
+  const { isAdmin, canSeeSaleValues, user } = useAuth()
   const [sellers, setSellers] = useState([])
   const [customRoles, setCustomRoles] = useState([])
   const [sales, setSales] = useState([])
@@ -82,20 +83,24 @@ export default function AdminSellers() {
   const [externals, setExternals] = useState([])
   const [commissionsFor, setCommissionsFor] = useState(null)
   const [savingCommissions, setSavingCommissions] = useState(false)
+  // Administradores da loja que não estão na Equipe (seção 69)
+  const [outsideAdmins, setOutsideAdmins] = useState([])
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const [sellersData, salesData, carsData, externalsData, rolesData] = await Promise.all([
+      const [sellersData, salesData, carsData, externalsData, rolesData, outsideData] = await Promise.all([
         fetchSellers(),
         fetchSales(),
         fetchAllCarsAdmin(),
         // Sem a tabela nova no banco, a Equipe abre normalmente
         fetchExternalFinancings().catch(() => []),
         fetchCustomRoles().catch(() => []),
+        isAdmin ? fetchAdminsOutsideTeam().catch(() => []) : [],
       ])
       setSellers(sellersData)
+      setOutsideAdmins(outsideData)
       setCustomRoles(rolesData)
       setExternals(externalsData)
       setSales(salesData)
@@ -188,13 +193,14 @@ export default function AdminSellers() {
   // cargo; o menu próprio perde as abas que o novo nível não tem
   function changeCargo(value) {
     const custom = value.startsWith('custom:') ? customRoles.find((r) => r.id === value.slice(7)) : null
-    const role = custom ? custom.baseRole : value === 'manager' ? 'manager' : 'seller'
+    const role = custom ? custom.baseRole : ['manager', 'admin'].includes(value) ? value : 'seller'
     const allowed = tabsForRole(role).map((t) => t.key)
     setForm((prev) => ({
       ...prev,
       role,
       customRoleId: custom ? custom.id : null,
-      panelTabs: Array.isArray(prev.panelTabs) ? prev.panelTabs.filter((k) => allowed.includes(k)) : null,
+      // O administrador vê o menu inteiro (sem menu próprio)
+      panelTabs: role !== 'admin' && Array.isArray(prev.panelTabs) ? prev.panelTabs.filter((k) => allowed.includes(k)) : null,
     }))
   }
 
@@ -317,9 +323,15 @@ export default function AdminSellers() {
 
   async function toggleActive(seller) {
     const next = !seller.active
-    const msg = next
-      ? `Reativar "${seller.name}"? Ele volta a conseguir entrar no painel.`
-      : `Desativar "${seller.name}"? Ele perde o acesso ao painel na hora. As vendas dele continuam registradas.`
+    // O administrador continua entrando no painel: desativar só tira da Equipe
+    // (WhatsApp dos carros, rodízio e listas de vendedores)
+    const msg = seller.role === 'admin'
+      ? next
+        ? `Reativar "${seller.name}" na Equipe? Ele volta a aparecer no WhatsApp dos carros, no rodízio e nas vendas.`
+        : `Desativar "${seller.name}" na Equipe? Ele sai do WhatsApp dos carros, do rodízio e das listas de vendedores, mas continua administrador e entrando no painel. Para tirar o acesso, mude o cargo ou use Excluir.`
+      : next
+        ? `Reativar "${seller.name}"? Ele volta a conseguir entrar no painel.`
+        : `Desativar "${seller.name}"? Ele perde o acesso ao painel na hora. As vendas dele continuam registradas.`
     const label = next ? 'Reativar' : 'Desativar'
     if (!(await confirm(msg, { title: `${label} ${roleLabel(seller.role, seller.customRole).toLowerCase()}`, confirmLabel: label }))) return
     try {
@@ -366,11 +378,24 @@ export default function AdminSellers() {
     }
   }
 
+  // Põe um administrador (vinculado pelo SQL) na Equipe, com nome e telefone
+  async function includeAdmin(userId, name, phone) {
+    const added = await addAdminToTeam(userId, name.trim(), phone)
+    setSellers((prev) => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))
+    setOutsideAdmins((prev) => prev.filter((a) => a.userId !== userId))
+    setFormSuccess(
+      `${added.name} entrou na Equipe como administrador. ${added.phone ? 'Já pode ser escolhido no WhatsApp do carro e no rodízio.' : 'Coloque o telefone dele (Editar) para aparecer no WhatsApp do carro.'}`
+    )
+  }
+
   function openReset(seller) {
     setResetFor(seller)
     setResetPassword('')
     setResetError('')
   }
+
+  // Ninguém muda o próprio nível (o banco também confere)
+  const editingSelf = Boolean(editingId) && sellers.find((s) => s.id === editingId)?.userId === user?.id
 
   const detailSeller = sellers.find((s) => s.id === detailId)
   const detailSales = periodSales.filter((s) => s.sellerId === detailId)
@@ -382,7 +407,7 @@ export default function AdminSellers() {
       <div className="admin-page-head">
         <div>
           <h1>Equipe</h1>
-          <p>Vendedores, gerentes e cargos da loja: acesso ao painel, vendas e comissões</p>
+          <p>Vendedores, gerentes, administradores e cargos da loja: acesso ao painel, vendas e comissões</p>
         </div>
         <div className="admin-row-actions">
           <PeriodFilter
@@ -424,15 +449,23 @@ export default function AdminSellers() {
         </div>
       </div>
 
+      {isAdmin && outsideAdmins.length > 0 && <OutsideAdmins admins={outsideAdmins} onInclude={includeAdmin} />}
+
       {isAdmin && (
       <form className="admin-form admin-form-section" onSubmit={handleSubmit}>
         <h2>{editingId ? `Editar ${roleLabel(form.role, formCustomRole).toLowerCase()}` : 'Nova pessoa na equipe'}</h2>
         <div className="admin-form-grid admin-form-grid-3">
           <label>
             Cargo
-            <select value={cargoValue(form.role, form.customRoleId)} onChange={(e) => changeCargo(e.target.value)}>
+            <select
+              value={cargoValue(form.role, form.customRoleId)}
+              onChange={(e) => changeCargo(e.target.value)}
+              disabled={editingSelf}
+              title={editingSelf ? 'Você não pode mudar o seu próprio nível' : undefined}
+            >
               <option value="seller">Vendedor</option>
               <option value="manager">Gerente</option>
+              <option value="admin">Administrador</option>
               {customRoles.length > 0 && (
                 <optgroup label="Cargos da loja">
                   {customRoles.map((r) => (
@@ -582,6 +615,17 @@ export default function AdminSellers() {
             </p>
           </div>
         )}
+        {form.role === 'admin' && (
+          <p className="admin-form-note member-admin-note">
+            <ShieldCheck size={15} aria-hidden="true" />
+            <span>
+              O administrador vê e gerencia tudo da loja: custos, Financeiro, Equipe e Configurações. Ele pode criar, mudar e
+              excluir outros administradores; a loja sempre fica com pelo menos um, e ninguém muda o próprio nível.
+              {editingSelf && ' Este é o seu acesso: o cargo só pode ser mudado por outro administrador.'}
+            </span>
+          </p>
+        )}
+        {form.role !== 'admin' && (
         <div className="member-menu">
           <span className="admin-field-label">Menu desta pessoa</span>
           <div className="admin-segmented" role="radiogroup" aria-label="Menu desta pessoa">
@@ -621,6 +665,7 @@ export default function AdminSellers() {
             </p>
           )}
         </div>
+        )}
         {editingId && (
           <p className="admin-form-note">
             O e-mail de login não muda por aqui. Mudar a comissão vale só para as próximas vendas — as já registradas mantêm a comissão da época.
@@ -716,6 +761,7 @@ export default function AdminSellers() {
                           onDelete={() => handleDelete(s)}
                           detailOpen={detailId === s.id}
                           canManage={isAdmin}
+                          isSelf={Boolean(s.userId) && s.userId === user?.id}
                         />
                       </td>
                     </tr>
@@ -782,6 +828,7 @@ export default function AdminSellers() {
                     onDelete={() => handleDelete(s)}
                     detailOpen={detailId === s.id}
                     canManage={isAdmin}
+                    isSelf={Boolean(s.userId) && s.userId === user?.id}
                   />
                 </div>
               )
@@ -899,7 +946,7 @@ function StatusPill({ seller }) {
   return <span className={`admin-status-pill ${seller.active ? 'is-on' : 'is-off'}`}>{seller.active ? 'Ativo' : 'Inativo'}</span>
 }
 
-function SellerActions({ seller, onDetail, onEdit, onReset, onToggle, onDelete, detailOpen, canManage }) {
+function SellerActions({ seller, onDetail, onEdit, onReset, onToggle, onDelete, detailOpen, canManage, isSelf }) {
   return (
     <div className="admin-action-group">
       <button type="button" className={`admin-action-btn ${detailOpen ? 'is-active' : ''}`} onClick={onDetail}>
@@ -916,11 +963,80 @@ function SellerActions({ seller, onDetail, onEdit, onReset, onToggle, onDelete, 
       <button type="button" className={`admin-action-btn ${seller.active ? 'admin-action-danger' : ''}`} onClick={onToggle}>
         {seller.active ? <UserX size={15} /> : <UserCheck size={15} />} {seller.active ? 'Desativar' : 'Reativar'}
       </button>
+      {!isSelf && (
       <button type="button" className="admin-action-btn admin-action-danger" onClick={onDelete}>
         <Trash2 size={15} /> Excluir
       </button>
+      )}
       </>
       )}
     </div>
+  )
+}
+
+// Administradores vinculados à loja (pelo SQL, por exemplo) que ainda não estão
+// na Equipe: sem o cadastro aqui eles não aparecem no WhatsApp do carro, no
+// rodízio nem nas vendas. Qualquer administrador inclui com nome e telefone.
+function OutsideAdmins({ admins, onInclude }) {
+  return (
+    <section className="admin-form-section admins-outside" aria-labelledby="admins-outside-title">
+      <h2 id="admins-outside-title">Administradores fora da Equipe</h2>
+      <p className="admin-form-note">
+        Estes logins são administradores da loja, mas ainda não estão na Equipe. Inclua com o nome e o telefone para que
+        apareçam no WhatsApp do carro, no rodízio e nas vendas.
+      </p>
+      <ul className="admins-outside-list">
+        {admins.map((a) => (
+          <OutsideAdminRow key={a.userId} admin={a} onInclude={onInclude} />
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function OutsideAdminRow({ admin, onInclude }) {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!name.trim()) {
+      setError('Informe o nome.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await onInclude(admin.userId, name, phone)
+    } catch (err) {
+      setError(err.message || 'Não foi possível incluir na Equipe.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <li>
+      <form className="admin-form admins-outside-row" onSubmit={submit}>
+        <span className="admins-outside-email">
+          <ShieldCheck size={15} aria-hidden="true" />
+          <strong>{admin.email || 'Login sem e-mail'}</strong>
+          {admin.me && <span className="admin-table-sub">(você)</span>}
+        </span>
+        <label>
+          Nome
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" required />
+        </label>
+        <label>
+          Telefone (WhatsApp)
+          <input value={phone} onChange={(e) => setPhone(maskKeepingCaret(e, maskPhoneBR))} placeholder="(00) 00000-0000" inputMode="tel" />
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={saving}>
+          <UserPlus size={15} /> {saving ? 'Incluindo…' : 'Incluir na equipe'}
+        </button>
+        {error && <p className="admin-error">{error}</p>}
+      </form>
+    </li>
   )
 }

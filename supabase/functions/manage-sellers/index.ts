@@ -1,5 +1,6 @@
-// Edge Function "manage-sellers" — cria login da equipe (vendedor ou gerente),
-// redefine senha e exclui da equipe.
+// Edge Function "manage-sellers" — cria login da equipe (vendedor, gerente ou,
+// desde a seção 69, administrador), redefine senha e exclui da equipe. A loja
+// nunca fica sem administrador e o acesso da WB.Dev não é mexido pela loja.
 // Só um usuário com papel 'admin' consegue chamar, e só age dentro da
 // própria empresa. A service role key existe apenas aqui no servidor.
 import { createClient } from 'jsr:@supabase/supabase-js@2'
@@ -44,12 +45,24 @@ Deno.serve(async (req) => {
     .maybeSingle()
   if (!link || link.role !== 'admin') return json({ error: 'Apenas administradores podem gerenciar vendedores' }, 403)
 
-  // O login só pertence a esta loja (sem acesso de admin aqui nem vínculo com
-  // outra loja)? Só então o admin daqui pode redefinir a senha ou apagá-lo.
+  // O login só pertence a esta loja (sem vínculo com outra loja)? Só então o
+  // admin daqui pode redefinir a senha ou apagá-lo. Desde a seção 69 vale também
+  // para outro administrador desta loja.
   async function loginOnlyHere(userId: string) {
     const { data: links } = await admin.from('user_company').select('company_id, role').eq('user_id', userId)
-    return (links ?? []).every((l) => l.company_id === companyId && l.role !== 'admin')
+    return (links ?? []).every((l) => l.company_id === companyId)
   }
+
+  // Acesso da equipe WB.Dev ou do dono da plataforma: a loja não mexe
+  async function isWbdevLogin(userId: string) {
+    const [{ data: team }, { data: owner }] = await Promise.all([
+      admin.from('platform_team').select('user_id').eq('user_id', userId).maybeSingle(),
+      admin.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle(),
+    ])
+    return Boolean(team || owner)
+  }
+
+  const ROLE_NAMES: Record<string, string> = { seller: 'vendedor', manager: 'gerente', admin: 'administrador' }
 
   let body: Record<string, unknown>
   try {
@@ -64,7 +77,7 @@ Deno.serve(async (req) => {
     const name = String(body.name ?? '').trim()
     const email = String(body.email ?? '').trim().toLowerCase()
     const phone = String(body.phone ?? '').trim()
-    const role = body.role === 'manager' ? 'manager' : 'seller'
+    const role = body.role === 'admin' ? 'admin' : body.role === 'manager' ? 'manager' : 'seller'
     const commissionType = ['percent', 'fixed', 'none'].includes(String(body.commissionType)) ? String(body.commissionType) : 'percent'
     const commissionValue = commissionType === 'none' ? 0 : Number(body.commissionValue ?? 0)
 
@@ -121,7 +134,7 @@ Deno.serve(async (req) => {
       entity: 'sellers',
       entity_id: seller.id,
       label: name,
-      details: role === 'manager' ? 'Criou login do gerente' : 'Criou login do vendedor',
+      details: `Criou login do ${ROLE_NAMES[role]}`,
     })
 
     return json({ seller })
@@ -138,6 +151,7 @@ Deno.serve(async (req) => {
       .eq('company_id', companyId)
       .maybeSingle()
     if (!seller?.user_id) return json({ error: 'Vendedor não encontrado' }, 404)
+    if (await isWbdevLogin(seller.user_id)) return json({ error: 'O acesso da WB.Dev não pode ser mudado pela loja.' }, 403)
     // Um login que também acessa outra loja não pode ter a senha trocada por
     // aqui (senão o admin desta loja entraria com esse login na outra)
     if (!(await loginOnlyHere(seller.user_id))) {
@@ -175,6 +189,15 @@ Deno.serve(async (req) => {
       .maybeSingle()
     if (!seller || seller.deleted_at) return json({ error: 'Pessoa não encontrada na equipe' }, 404)
     if (seller.user_id === userData.user.id) return json({ error: 'Você não pode excluir o seu próprio acesso' }, 400)
+    if (seller.user_id && (await isWbdevLogin(seller.user_id))) return json({ error: 'O acesso da WB.Dev não pode ser mudado pela loja.' }, 403)
+    // Excluir um administrador: a loja precisa continuar com pelo menos um
+    if (seller.user_id) {
+      const { data: link } = await admin.from('user_company').select('role').eq('user_id', seller.user_id).eq('company_id', companyId).maybeSingle()
+      if (link?.role === 'admin') {
+        const { data: other } = await admin.rpc('company_has_other_admin', { p_company: companyId, p_user: seller.user_id })
+        if (other !== true) return json({ error: 'A loja precisa de pelo menos um administrador.' }, 400)
+      }
+    }
 
     const { data: saved, error: updateError } = await admin
       .from('sellers')
@@ -191,7 +214,7 @@ Deno.serve(async (req) => {
       const onlyHere = await loginOnlyHere(seller.user_id)
       const { error: accessError } = onlyHere
         ? await admin.auth.admin.deleteUser(seller.user_id)
-        : await admin.from('user_company').delete().eq('user_id', seller.user_id).eq('company_id', companyId).neq('role', 'admin')
+        : await admin.from('user_company').delete().eq('user_id', seller.user_id).eq('company_id', companyId)
       if (accessError) {
         await admin.from('sellers').update({ active: seller.active, deleted_at: null, former_user_id: null }).eq('id', seller.id)
         return json({ error: 'Não foi possível apagar o login' }, 500)
@@ -207,7 +230,7 @@ Deno.serve(async (req) => {
       entity: 'sellers',
       entity_id: seller.id,
       label: seller.name,
-      details: seller.role === 'manager' ? 'Excluiu o gerente e o login dele' : 'Excluiu o vendedor e o login dele',
+      details: `Excluiu o ${ROLE_NAMES[seller.role] || 'vendedor'} e o login dele`,
     })
 
     return json({ seller: { ...saved, user_id: null } })

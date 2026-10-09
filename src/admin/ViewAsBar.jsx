@@ -46,7 +46,8 @@ export default function ViewAsBar() {
     if (next) {
       try {
         setError('')
-        setTeam((await fetchSellers()).filter((s) => s.active && !s.deletedAt))
+        // Administrador na Equipe (seção 69) não entra: ver como ele é o próprio painel
+        setTeam((await fetchSellers()).filter((s) => s.active && !s.deletedAt && s.role !== 'admin'))
       } catch (err) {
         setError(err.message || 'Não foi possível carregar a equipe.')
         setTeam((prev) => prev || [])

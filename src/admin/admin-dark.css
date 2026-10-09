@@ -834,6 +834,23 @@ html[data-admin-theme='escuro'] .admin-role-pill.role-manager {
   color: #9a89e6;
 }
 
+html[data-admin-theme='escuro'] .admin-role-pill.role-admin {
+  background: var(--color-primary-light);
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .admins-outside-row {
+  border: 1px solid var(--color-border);
+}
+
+html[data-admin-theme='escuro'] .admins-outside-email svg {
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .member-admin-note svg {
+  color: var(--admin-primary-text);
+}
+
 html[data-admin-theme='escuro'] .admin-action-btn.is-disabled:hover {
   border-color: var(--color-border);
   color: var(--color-text);
