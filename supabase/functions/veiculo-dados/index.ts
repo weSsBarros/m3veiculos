@@ -28,9 +28,10 @@
 // login é conferido pelo banco, como nas outras funções.
 // Segredos: FIPE_API_TOKEN (opcional; token gratuito da fipe.api.br, sobe o
 // limite de 500 para 1.000 consultas por dia), PLACA_PROVEDOR, APIBRASIL_TOKEN e
-// PLACA_LIMITE_DIA (opcional; consultas pagas por loja em 24 h, padrão 30),
+// PLACA_LIMITE_DIA (opcional; teto de consultas novas por loja em 24 h),
 // ANTHROPIC_API_KEY (a mesma da descrição com IA) e DOC_FOTO_LIMITE_DIA (opcional;
-// leituras de foto por loja em 24 h, padrão 30).
+// teto de leituras de foto por loja em 24 h). Sem os dois tetos, não há limite: o
+// saldo pré-pago da loja já controla o uso (decisão do Wesley em 10/10/2026).
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2'
 import { getDocumentProxy } from 'npm:unpdf@1'
 import Anthropic from 'npm:@anthropic-ai/sdk'
@@ -221,12 +222,14 @@ async function readCrlvPhoto(form: FormData, service: SupabaseClient, caller: Su
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY') || ''
   if (!apiKey) throw new CrlvError('ia_desligada')
 
-  // Teto diário por loja (protege o saldo da WB.Dev na Anthropic)
-  const limit = Number(Deno.env.get('DOC_FOTO_LIMITE_DIA')) || 30
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const { count } = await service.from('plate_credit_ledger').select('id', { count: 'exact', head: true })
-    .eq('company_id', companyId).eq('kind', 'documento').gte('created_at', since)
-  if ((count || 0) >= limit) throw new PlacaError(`A loja chegou a ${limit} leituras de documento nas últimas 24 horas. Tente mais tarde ou preencha à mão.`, 'recusado')
+  // Teto diário por loja só com o segredo DOC_FOTO_LIMITE_DIA (sem ele, sem teto)
+  const limit = Number(Deno.env.get('DOC_FOTO_LIMITE_DIA')) || 0
+  if (limit > 0) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const { count } = await service.from('plate_credit_ledger').select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId).eq('kind', 'documento').gte('created_at', since)
+    if ((count || 0) >= limit) throw new PlacaError(`A loja chegou a ${limit} leituras de documento nas últimas 24 horas. Tente mais tarde ou preencha à mão.`, 'recusado')
+  }
 
   const { data: hold, error: holdError } = await service.rpc('doc_photo_credit_hold', { p_company: companyId, p_user: userId })
   if (holdError) {
@@ -330,12 +333,14 @@ async function lookupPlate(service: SupabaseClient, caller: SupabaseClient, comp
       result = sanitizePlateResult(cached.data)
       fromCache = true
     } else {
-      // Teto diário por loja de consultas novas (protege o saldo da WB.Dev na APIBrasil)
-      const limit = Number(Deno.env.get('PLACA_LIMITE_DIA')) || 30
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-      const { count } = await service.from('placa_consultas').select('id', { count: 'exact', head: true })
-        .eq('company_id', companyId).eq('from_cache', false).gte('created_at', since)
-      if ((count || 0) >= limit) throw new PlacaError(`A loja chegou a ${limit} consultas por placa nas últimas 24 horas. Tente mais tarde ou preencha à mão.`, 'recusado')
+      // Teto diário de consultas novas só com o segredo PLACA_LIMITE_DIA (sem ele, sem teto)
+      const limit = Number(Deno.env.get('PLACA_LIMITE_DIA')) || 0
+      if (limit > 0) {
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        const { count } = await service.from('placa_consultas').select('id', { count: 'exact', head: true })
+          .eq('company_id', companyId).eq('from_cache', false).gte('created_at', since)
+        if ((count || 0) >= limit) throw new PlacaError(`A loja chegou a ${limit} consultas por placa nas últimas 24 horas. Tente mais tarde ou preencha à mão.`, 'recusado')
+      }
       const provider = makeApiBrasilProvider({ token: setup.token, homolog: setup.demo })
       result = sanitizePlateResult(await provider.lookupByPlate(plate))
       await service.from('placa_cache').upsert({ plate, data: result, fetched_at: new Date().toISOString() })

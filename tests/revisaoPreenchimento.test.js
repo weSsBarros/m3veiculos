@@ -1,6 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { reviewRows, applyAutofill, brandFromFipe, modelYearText, fieldsFromFipe, fipeRecord, fipeIsOld, fipePriceNote, filterFipeModels } from '../src/utils/preenchimento.js'
+import { reviewRows, applyAutofill, brandFromFipe, brandFromDocument, modelYearText, fieldsFromFipe, fipeRecord, fipeIsOld, fipePriceNote, filterFipeModels } from '../src/utils/preenchimento.js'
+
+test('marca do CRLV-e ou da placa: sigla vira a grafia do painel', () => {
+  const known = ['Toyota', 'Volkswagen', 'Chevrolet', 'Fiat']
+  assert.equal(brandFromDocument('VW', known), 'Volkswagen')
+  assert.equal(brandFromDocument('Vw', known), 'Volkswagen')
+  assert.equal(brandFromDocument('GM', known), 'Chevrolet')
+  assert.equal(brandFromDocument('I/TOYOTA', known), 'Toyota')
+  assert.equal(brandFromDocument('Fiat', known), 'Fiat')
+  assert.equal(brandFromDocument('M.BENZ', known), 'Mercedes-Benz')
+  assert.equal(brandFromDocument('MMC', known), 'Mitsubishi')
+  assert.equal(brandFromDocument('CITROEN', known), 'Citroën')
+  assert.equal(brandFromDocument('Marca Rara', known), 'Marca Rara')
+  assert.equal(brandFromDocument('', known), '')
+})
 
 const NEW_CAR = { brand: '', model: '', version: '', year: '', modelYear: '', transmission: 'Manual', fuel: 'Flex', color: '', doors: 4, category: 'suv', plate: '', chassis: '', renavam: '' }
 

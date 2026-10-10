@@ -9554,7 +9554,166 @@ end;
 $$;
 
 
--- 74) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 74) Conferência: passou para a seção 76, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 75) Créditos da assinatura digital (pedido do Wesley em 10/10/2026) -----------
+-- * Cada contrato mandado para assinar pela Autentique (função assinaturas) desconta
+--   dos mesmos créditos da loja (plate_credit_ledger, tipo 'assinatura'), com preço
+--   próprio (platform_settings.signature_price, padrão R$ 1,00).
+-- * Franquia: os primeiros signature_free_monthly envios do mês (padrão 5; mês de
+--   São Luís) saem de graça. Contam todos os envios do mês, inclusive os cancelados.
+-- * Cancelar não devolve (decisão do Wesley). Só o envio que falhou (a Autentique não
+--   criou o documento ou o registro não foi gravado) é devolvido (plate_credit_release).
+-- * signature_requests.charge_ledger_id: a cobrança daquele envio (vazio = franquia).
+alter table public.platform_settings add column if not exists signature_price numeric(6, 2) not null default 1.00;
+alter table public.platform_settings drop constraint if exists platform_settings_signature_price_check;
+alter table public.platform_settings add constraint platform_settings_signature_price_check check (signature_price > 0 and signature_price <= 50);
+alter table public.platform_settings add column if not exists signature_free_monthly integer not null default 5;
+alter table public.platform_settings drop constraint if exists platform_settings_signature_free_monthly_check;
+alter table public.platform_settings add constraint platform_settings_signature_free_monthly_check check (signature_free_monthly between 0 and 100);
+
+alter table public.plate_credit_ledger drop constraint if exists plate_credit_ledger_kind_check;
+alter table public.plate_credit_ledger add constraint plate_credit_ledger_kind_check
+  check (kind in ('recarga', 'consulta', 'documento', 'ajuste', 'assinatura'));
+alter table public.plate_credit_ledger drop constraint if exists plate_credit_ledger_assinatura_check;
+alter table public.plate_credit_ledger add constraint plate_credit_ledger_assinatura_check check (kind <> 'assinatura' or amount < 0);
+
+alter table public.signature_requests add column if not exists charge_ledger_id bigint references public.plate_credit_ledger(id) on delete set null;
+
+-- Quantos envios grátis ainda restam no mês da loja
+create or replace function public.signature_free_left(p_company uuid)
+returns integer
+language sql stable security definer set search_path = public
+as $$
+  select greatest(
+    coalesce((select signature_free_monthly from public.platform_settings where id = 1), 5)
+    - (select count(*)::int from public.signature_requests r
+       where r.company_id = p_company
+         and r.created_at >= (date_trunc('month', now() at time zone 'America/Fortaleza') at time zone 'America/Fortaleza')),
+    0)
+$$;
+revoke execute on function public.signature_free_left(uuid) from anon, authenticated, public;
+grant execute on function public.signature_free_left(uuid) to service_role;
+
+-- Só a função assinaturas (chave de serviço), antes de mandar à Autentique: usa a
+-- franquia do mês ou reserva o preço. Sem franquia e sem saldo: SALDO_INSUFICIENTE.
+create or replace function public.signature_credit_hold(p_company uuid, p_user uuid default null)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_price numeric;
+  v_balance numeric;
+  v_free integer;
+  v_id bigint;
+begin
+  if p_company is null then
+    raise exception 'Loja inválida' using errcode = '22023';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('plate_credit:' || p_company::text, 0));
+  v_balance := public.plate_credit_balance(p_company);
+  v_free := public.signature_free_left(p_company);
+  if v_free > 0 then
+    return jsonb_build_object('charged', false, 'free_left', v_free - 1, 'balance', v_balance);
+  end if;
+  v_price := coalesce((select signature_price from public.platform_settings where id = 1), 1.00);
+  if v_balance < v_price then
+    raise exception 'SALDO_INSUFICIENTE' using errcode = 'P0001';
+  end if;
+  insert into public.plate_credit_ledger (company_id, kind, amount, created_by)
+  values (p_company, 'assinatura', -v_price, p_user)
+  returning id into v_id;
+  return jsonb_build_object('charged', true, 'ledger_id', v_id, 'price', v_price, 'free_left', 0, 'balance', v_balance - v_price);
+end $$;
+revoke execute on function public.signature_credit_hold(uuid, uuid) from anon, authenticated, public;
+grant execute on function public.signature_credit_hold(uuid, uuid) to service_role;
+
+-- Devolve a reserva quando a consulta, a foto ou o envio para assinar não deu certo
+create or replace function public.plate_credit_release(p_id bigint)
+returns void
+language sql security definer set search_path = public
+as $$
+  delete from public.plate_credit_ledger where id = p_id and kind in ('consulta', 'documento', 'assinatura')
+$$;
+revoke execute on function public.plate_credit_release(bigint) from anon, authenticated, public;
+grant execute on function public.plate_credit_release(bigint) to service_role;
+
+-- Saldo, preços (placa, foto e assinatura), franquia e pacotes para a equipe da
+-- loja; pedidos e extrato só para o admin
+create or replace function public.my_plate_credits()
+returns jsonb
+language plpgsql stable security definer set search_path = public, auth
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_admin boolean := public.is_company_admin();
+  s public.platform_settings%rowtype;
+begin
+  if v_company is null then
+    raise exception 'Acesso restrito à equipe da loja' using errcode = '42501';
+  end if;
+  select * into s from public.platform_settings where id = 1;
+  return jsonb_build_object(
+    'balance', public.plate_credit_balance(v_company),
+    'price', coalesce(s.plate_price, 0.40),
+    'doc_price', coalesce(s.doc_photo_price, 0.20),
+    'signature_price', coalesce(s.signature_price, 1.00),
+    'signature_free_monthly', coalesce(s.signature_free_monthly, 5),
+    'signature_free_left', public.signature_free_left(v_company),
+    'packages', to_jsonb(coalesce(s.plate_packages, '{20,40,100}'::numeric[])),
+    'admin', v_admin,
+    'orders', case when v_admin then (
+      select coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'amount', o.amount, 'paid_on', o.paid_on, 'status', o.status,
+        'response', o.response, 'created_at', o.created_at) order by o.created_at desc), '[]'::jsonb)
+      from (select * from public.plate_credit_orders where company_id = v_company order by created_at desc limit 20) o
+    ) else '[]'::jsonb end,
+    'ledger', case when v_admin then (
+      select coalesce(jsonb_agg(jsonb_build_object('id', l.id, 'kind', l.kind, 'amount', l.amount, 'plate', l.plate,
+        'note', l.note, 'created_at', l.created_at, 'user_email', coalesce(u.email, '')) order by l.created_at desc, l.id desc), '[]'::jsonb)
+      from (select * from public.plate_credit_ledger where company_id = v_company order by created_at desc, id desc limit 50) l
+      left join auth.users u on u.id = l.created_by
+    ) else '[]'::jsonb end);
+end $$;
+revoke execute on function public.my_plate_credits() from anon, public;
+grant execute on function public.my_plate_credits() to authenticated;
+
+-- Saldo de cada loja e o que foi pago em 30 dias: placas, fotos e assinaturas
+-- (Plataforma → Cobrança)
+create or replace function public.platform_plate_credits()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'company_id', c.id, 'name', c.name, 'slug', c.slug,
+      'balance', coalesce(t.balance, 0), 'queries_30d', coalesce(t.queries_30d, 0), 'docs_30d', coalesce(t.docs_30d, 0),
+      'signatures_30d', coalesce(t.signatures_30d, 0),
+      'spent_30d', coalesce(t.spent_30d, 0), 'bought_total', coalesce(t.bought_total, 0),
+      'last_recharge_at', t.last_recharge_at) order by c.name), '[]'::jsonb)
+    from public.companies c
+    left join lateral (
+      select sum(l.amount) as balance,
+             count(*) filter (where l.kind = 'consulta' and l.created_at > now() - interval '30 days') as queries_30d,
+             count(*) filter (where l.kind = 'documento' and l.created_at > now() - interval '30 days') as docs_30d,
+             count(*) filter (where l.kind = 'assinatura' and l.created_at > now() - interval '30 days') as signatures_30d,
+             -sum(l.amount) filter (where l.kind in ('consulta', 'documento', 'assinatura') and l.created_at > now() - interval '30 days') as spent_30d,
+             sum(l.amount) filter (where l.kind = 'recarga') as bought_total,
+             max(l.created_at) filter (where l.kind = 'recarga') as last_recharge_at
+      from public.plate_credit_ledger l where l.company_id = c.id
+    ) t on true
+    where exists (select 1 from public.plate_credit_ledger l where l.company_id = c.id)
+       or exists (select 1 from public.plate_credit_orders o where o.company_id = c.id)
+  );
+end $$;
+revoke execute on function public.platform_plate_credits() from anon, public;
+grant execute on function public.platform_plate_credits() to authenticated;
+
+-- 76) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

@@ -66,6 +66,7 @@ export async function fetchPlatformPlateCredits() {
     balance: Number(r.balance) || 0,
     queries30d: Number(r.queries_30d) || 0,
     docs30d: Number(r.docs_30d) || 0,
+    signatures30d: Number(r.signatures_30d) || 0,
     spent30d: Number(r.spent_30d) || 0,
     boughtTotal: Number(r.bought_total) || 0,
     lastRechargeAt: r.last_recharge_at || null,

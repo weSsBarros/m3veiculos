@@ -166,6 +166,7 @@ export default function PlateCreditsPanel({ clients }) {
                   <th>Saldo</th>
                   <th>Placas em 30 dias</th>
                   <th>Fotos lidas em 30 dias</th>
+                  <th>Assinaturas pagas em 30 dias</th>
                   <th>Gasto em 30 dias</th>
                   <th>Comprado no total</th>
                 </tr>
@@ -177,6 +178,7 @@ export default function PlateCreditsPanel({ clients }) {
                     <td>{moneyBR(s.balance)}</td>
                     <td>{s.queries30d}</td>
                     <td>{s.docs30d}</td>
+                    <td>{s.signatures30d}</td>
                     <td>{moneyBR(s.spent30d)}</td>
                     <td>{moneyBR(s.boughtTotal)}</td>
                   </tr>

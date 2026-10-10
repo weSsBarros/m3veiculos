@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Save } from 'lucide-react'
-import { fetchPlatformSettings, savePlatformSettings } from '../../lib/clientsApi.js'
+import { fetchPlatformSettings, savePlatformSettings, parseFreeMonthly } from '../../lib/clientsApi.js'
 import { pixPayload } from '../../utils/pix.js'
 import { parseMoneyBR } from '../../utils/financing.js'
 import { moneyBR, parsePackages, queriesFor, queriesText } from '../../utils/plateCredits.js'
@@ -41,6 +41,9 @@ export default function PlatformPaymentSettings() {
     const docPrice = parseMoneyBR(form.docPhotoPrice) || 0
     if (docPrice <= 0 || docPrice > 50) return setError('Confira o preço da leitura da foto do documento (entre R$ 0,01 e R$ 50).')
     if (!parsePackages(form.platePackages)) return setError('Confira os pacotes de crédito: de 1 a 6 valores em reais inteiros, ex.: 20, 40, 100.')
+    const sigPrice = parseMoneyBR(form.signaturePrice) || 0
+    if (sigPrice <= 0 || sigPrice > 50) return setError('Confira o preço do contrato enviado para assinatura (entre R$ 0,01 e R$ 50).')
+    if (parseFreeMonthly(form.signatureFreeMonthly) == null) return setError('Confira os envios grátis por mês: um número de 0 a 100.')
     setSaving(true)
     setError('')
     setMessage('')
@@ -76,7 +79,7 @@ export default function PlatformPaymentSettings() {
           </label>
         ))}
       </div>
-      <h3 className="plate-settings-title">Consulta por placa e foto do documento (créditos pré-pagos)</h3>
+      <h3 className="plate-settings-title">Créditos pré-pagos: consulta por placa, foto do documento e assinatura digital</h3>
       <div className="admin-form-grid">
         <label>
           Preço cobrado por consulta de placa
@@ -90,12 +93,22 @@ export default function PlatformPaymentSettings() {
           Pacotes de crédito (reais, separados por vírgula)
           <input value={form.platePackages} maxLength={60} placeholder="Ex: 20, 40, 100" onChange={(e) => setForm((prev) => ({ ...prev, platePackages: e.target.value }))} />
         </label>
+        <label>
+          Preço por contrato enviado para assinatura digital
+          <MoneyInput cents value={form.signaturePrice} onChange={(v) => setForm((prev) => ({ ...prev, signaturePrice: v }))} />
+        </label>
+        <label>
+          Envios grátis por mês (por loja)
+          <input value={form.signatureFreeMonthly} inputMode="numeric" maxLength={3} placeholder="Ex: 5" onChange={(e) => setForm((prev) => ({ ...prev, signatureFreeMonthly: e.target.value.replace(/\D/g, '') }))} />
+        </label>
       </div>
       <p className="admin-form-note">
         {platePrice > 0 && docPrice > 0 && packages
           ? `As lojas veem: ${packages.map((p) => `${moneyBR(p)} = ${queriesText(queriesFor(p, platePrice))}`).join(' · ')}. ` +
-            `A leitura da foto do documento sai do mesmo saldo (${moneyBR(docPrice)} cada; a IA custa menos de R$ 0,01 por foto).`
-          : 'Preencha os dois preços (acima de zero) e de 1 a 6 pacotes em reais inteiros.'}
+            `A leitura da foto do documento sai do mesmo saldo (${moneyBR(docPrice)} cada; a IA custa menos de R$ 0,01 por foto). ` +
+            `Contratos para assinatura: ${form.signatureFreeMonthly || 0} grátis por mês em cada loja, depois ` +
+            `${moneyBR(parseMoneyBR(form.signaturePrice) || 0)} cada (a Autentique custa cerca de R$ 0,09); cancelar não devolve.`
+          : 'Preencha os preços (acima de zero) e de 1 a 6 pacotes em reais inteiros.'}
       </p>
       {error && <p className="admin-error">{error}</p>}
       {message && <p className="admin-success">{message}</p>}

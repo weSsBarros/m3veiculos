@@ -1,6 +1,33 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { queriesFor, queriesText, readsText, creditsFromRow, ledgerText, parsePackages, packagesText, moneyBR } from '../src/utils/plateCredits.js'
+import { queriesFor, queriesText, readsText, creditsFromRow, ledgerText, parsePackages, packagesText, moneyBR, signatureCost } from '../src/utils/plateCredits.js'
+
+test('créditos: assinatura digital com franquia do mês e depois R$ 1,00 do saldo', () => {
+  const base = { balance: 3, price: 0.4, doc_price: 0.2, signature_price: 1, signature_free_monthly: 5 }
+  const freeTwo = creditsFromRow({ ...base, signature_free_left: 2 })
+  assert.equal(freeTwo.signaturePrice, 1)
+  assert.equal(freeTwo.signatureFreeMonthly, 5)
+  assert.equal(freeTwo.signatureFreeLeft, 2)
+  assert.deepEqual({ ...signatureCost(freeTwo), text: undefined }, { free: true, canSend: true, text: undefined })
+  assert.match(signatureCost(freeTwo).text, /grátis.*resta 1 grátis/)
+  assert.match(signatureCost(creditsFromRow({ ...base, signature_free_left: 1 })).text, /último grátis/)
+  const paid = signatureCost(creditsFromRow({ ...base, signature_free_left: 0 }))
+  assert.equal(paid.free, false)
+  assert.equal(paid.canSend, true)
+  assert.match(paid.text, /acabaram: este custa R\$\s1,00 dos créditos \(saldo R\$\s3,00\)/)
+  const blocked = signatureCost(creditsFromRow({ ...base, balance: 0.5, signature_free_left: 0 }))
+  assert.equal(blocked.canSend, false)
+  assert.match(blocked.text, /não há crédito/)
+  // Sem franquia configurada (0 por mês)
+  assert.match(signatureCost(creditsFromRow({ ...base, signature_free_monthly: 0, signature_free_left: 0 })).text, /^Este envio custa/)
+  // Resposta antiga (sem os campos novos): R$ 1,00 e 5 por mês; sem saber o que sobra, cobra
+  const old = creditsFromRow({ balance: 0 })
+  assert.equal(old.signaturePrice, 1)
+  assert.equal(old.signatureFreeMonthly, 5)
+  assert.equal(signatureCost(old).canSend, false)
+  assert.equal(signatureCost(null).canSend, true)
+  assert.equal(ledgerText({ kind: 'assinatura' }), 'Contrato enviado para assinatura digital')
+})
 
 test('créditos: consultas que cabem no saldo (sem arredondar para cima)', () => {
   assert.equal(queriesFor(20, 0.4), 50)

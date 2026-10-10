@@ -45,7 +45,7 @@ function PlateCreditDialog({ pack, storeName, onClose, onDone }) {
 
   if (done) {
     const text =
-      `Olá! Aqui é da ${storeName}. Comprei ${moneyBR(pack.amount)} de créditos da consulta por placa ` +
+      `Olá! Aqui é da ${storeName}. Comprei ${moneyBR(pack.amount)} de créditos (placa, documento e assinatura) ` +
       `(${queriesText(pack.queries)}) em ${dateBR(paidOn)} pelo PIX. Segue o comprovante.`
     return (
       <div className="confirm-dialog-overlay" onClick={onDone}>
@@ -149,7 +149,7 @@ export default function PlateCredits({ payment, storeName }) {
 
   return (
     <section className="plate-credits" id="creditos">
-      <h2 className="admin-section-title"><ScanSearch size={18} /> Créditos da consulta por placa</h2>
+      <h2 className="admin-section-title"><ScanSearch size={18} /> Créditos (placa, documento e assinatura)</h2>
       <p className="plate-credits-lead">
         Saldo: <strong>{moneyBR(credits.balance)}</strong> · dá para <strong>{queriesText(credits.queries)}</strong> de placa ou{' '}
         <strong>{readsText(credits.docReads)}</strong> de foto do documento
@@ -158,6 +158,12 @@ export default function PlateCredits({ payment, storeName }) {
         No cadastro do carro, a consulta por placa traz os dados do veículo e a versão FIPE. Cada placa consultada custa {moneyBR(credits.price)}.
         Placa não encontrada não é cobrada, e a mesma placa de novo em 30 dias também não. A foto do documento (lida pela IA) custa{' '}
         {moneyBR(credits.docPrice)} e só é cobrada quando o documento é lido.
+      </p>
+      <p className="admin-form-hint plate-credits-hint">
+        Assinatura digital: {credits.signatureFreeMonthly > 0
+          ? `${credits.signatureFreeMonthly} contratos por mês são grátis (${credits.signatureFreeLeft === 1 ? 'resta 1' : `restam ${credits.signatureFreeLeft}`} neste mês); depois, cada contrato enviado custa ${moneyBR(credits.signaturePrice)}.`
+          : `cada contrato enviado custa ${moneyBR(credits.signaturePrice)}.`}{' '}
+        Gerar e imprimir o contrato continua grátis, e cancelar um envio não devolve o crédito.
       </p>
 
       {error && <p className="admin-error">{error}</p>}

@@ -3,7 +3,7 @@
 // marcou. Decisões do Wesley (09/10/2026): campo vazio vem marcado; campo com
 // valor diferente aparece com os dois valores, desmarcado.
 import { normalizePlate, normalizeChassis, normalizeRenavam } from './documentosVeiculo.js'
-import { fuelFromFipe, modelFromFipeName, versionFromFipeName, transmissionFromFipeName, FIPE_ZERO_KM, currentReferenceKey } from './fipeMatch.js'
+import { fuelFromFipe, modelFromFipeName, versionFromFipeName, transmissionFromFipeName, FIPE_ZERO_KM, currentReferenceKey, matchFipeBrand } from './fipeMatch.js'
 import { parseAnoModelo } from './anoModelo.js'
 
 export const AUTOFILL_SOURCES = { crlv: 'do CRLV-e', foto: 'da foto do documento', fipe: 'da FIPE', placa: 'da consulta da placa' }
@@ -97,6 +97,22 @@ export function brandFromFipe(name, known = []) {
     .split(/\s+/)
     .map((w) => (w.length <= 3 && w === w.toUpperCase() ? w : w.toLowerCase().replace(/(^|-)(\p{L})/gu, (m, s, c) => s + c.toUpperCase())))
     .join(' ')
+}
+
+// Marcas comuns fora da lista do painel, na grafia do cadastro
+const OTHER_BRANDS = [
+  'Mercedes-Benz', 'Mitsubishi', 'Land Rover', 'Caoa Chery', 'Chery', 'GWM', 'Harley-Davidson', 'Kia', 'Peugeot',
+  'Citroën', 'BMW', 'Audi', 'Volvo', 'Suzuki', 'Yamaha', 'Kawasaki', 'Ram', 'Dodge', 'JAC', 'BYD', 'Lexus', 'Porsche',
+  'Subaru', 'Troller', 'Iveco', 'Mini', 'Jaguar', 'Dafra', 'Shineray',
+]
+
+// Marca do CRLV-e ou da consulta por placa ("VW", "GM", "M.BENZ", "I/TOYOTA") na grafia
+// do painel ("Volkswagen", "Chevrolet", "Mercedes-Benz", "Toyota"); sem par, fica como veio
+export function brandFromDocument(raw, known = []) {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  const hit = matchFipeBrand(text, [...known, ...OTHER_BRANDS].map((name) => ({ name })))
+  return hit ? hit.name : text
 }
 
 // Ano/Modelo em texto a partir do ano-modelo da FIPE: com o ano de fabricação do

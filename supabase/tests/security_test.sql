@@ -2396,6 +2396,87 @@ select test.check('admin A: com o sócio rebaixado, os valores do carro voltam p
   and (car_values_state('ca000000-0000-0000-0000-0000000000aa') ->> 'can_lock')::boolean);
 reset role;
 
+-- ============================ créditos da assinatura digital (75)
+select test.login(null);
+select test.check('assinatura: R$ 1,00 por contrato e 5 envios grátis por mês por padrão',
+  (select signature_price = 1.00 and signature_free_monthly = 5 from public.platform_settings where id = 1));
+select test.check('assinatura: a loja A já mandou 2 envios este mês; sobram 3 grátis',
+  public.signature_free_left(test.company_a()) = 3);
+select test.check('assinatura: com franquia, o envio sai de graça',
+  not (public.signature_credit_hold(test.company_a()) ->> 'charged')::boolean);
+select test.check('assinatura: o envio grátis não mexe no saldo',
+  public.plate_credit_balance(test.company_a()) = 41.60);
+-- Mais 3 envios no mês (um deles cancelado): a franquia acaba, cancelado também conta
+insert into public.signature_requests (company_id, kind, title, external_id, status)
+select test.company_a(), 'venda', 'Envio ' || g, 'doc-a-franquia-' || g, case when g = 3 then 'cancelado' else 'enviado' end
+from generate_series(1, 3) g;
+select test.check('assinatura: sem franquia, o envio reserva R$ 1,00',
+  public.signature_free_left(test.company_a()) = 0
+  and (public.signature_credit_hold(test.company_a()) ->> 'price')::numeric = 1.00);
+select test.check('assinatura: o extrato mostra a assinatura e o saldo cai R$ 1,00',
+  public.plate_credit_balance(test.company_a()) = 40.60
+  and exists (select 1 from public.plate_credit_ledger where company_id = test.company_a() and kind = 'assinatura' and amount = -1.00));
+select test.check('assinatura: o extrato não aceita assinatura com valor positivo',
+  test.denied($$insert into public.plate_credit_ledger (company_id, kind, amount) values (test.company_a(), 'assinatura', 1)$$));
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: vê as assinaturas pagas da loja A e o gasto em 30 dias',
+  (select (x ->> 'signatures_30d')::int from jsonb_array_elements(platform_plate_credits()) x where x ->> 'company_id' = test.company_a()::text) = 1
+  and (select (x ->> 'spent_30d')::numeric from jsonb_array_elements(platform_plate_credits()) x where x ->> 'company_id' = test.company_a()::text) = 1.40);
+reset role;
+
+select public.plate_credit_release((select max(id) from public.plate_credit_ledger where kind = 'assinatura'));
+select test.check('assinatura: envio que falhou é devolvido',
+  public.plate_credit_balance(test.company_a()) = 41.60
+  and not exists (select 1 from public.plate_credit_ledger where kind = 'assinatura'));
+update public.platform_settings set signature_free_monthly = 0 where id = 1;
+select test.check('assinatura: loja sem franquia e sem saldo não envia',
+  test.denied($$select public.signature_credit_hold('bbbbbbbb-0000-0000-0000-00000000000b')$$));
+update public.platform_settings set signature_free_monthly = 5 where id = 1;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: vê o preço da assinatura, a franquia e o que sobra no mês',
+  (my_plate_credits() ->> 'signature_price')::numeric = 1.00
+  and (my_plate_credits() ->> 'signature_free_monthly')::int = 5
+  and (my_plate_credits() ->> 'signature_free_left')::int = 0);
+select test.check('admin A: não reserva assinatura, não consulta a franquia direto nem muda o preço',
+  test.denied($$select signature_credit_hold(current_company_id())$$)
+  and test.denied($$select signature_free_left(current_company_id())$$)
+  and test.denied($$update platform_settings set signature_price = 0.01, signature_free_monthly = 100 where id = 1$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: vê o preço da assinatura e a franquia, mas não reserva',
+  (my_plate_credits() ->> 'signature_price')::numeric = 1.00
+  and test.denied($$select signature_credit_hold(current_company_id())$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: a franquia é por loja (B mandou 1, sobram 4)',
+  (my_plate_credits() ->> 'signature_free_left')::int = 4);
+reset role;
+
+set role anon;
+select test.check('anon: não reserva assinatura nem vê a franquia',
+  test.denied($$select signature_credit_hold('bbbbbbbb-0000-0000-0000-00000000000b')$$)
+  and test.denied($$select signature_free_left('bbbbbbbb-0000-0000-0000-00000000000b')$$));
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: muda o preço e a franquia da assinatura',
+  test.allowed($$update platform_settings set signature_price = 1.50, signature_free_monthly = 3 where id = 1$$));
+reset role;
+select test.check('dono da plataforma: preço zero ou franquia fora de 0 a 100 são recusados',
+  (select signature_price = 1.50 and signature_free_monthly = 3 from public.platform_settings where id = 1)
+  and test.denied($$update public.platform_settings set signature_price = 0 where id = 1$$)
+  and test.denied($$update public.platform_settings set signature_free_monthly = 101 where id = 1$$));
+update public.platform_settings set signature_price = 1.00, signature_free_monthly = 5 where id = 1;
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;

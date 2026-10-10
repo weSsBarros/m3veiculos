@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Camera, FileUp, RefreshCcw, ScanSearch, Search } from 'lucide-react'
 import { moneyBR, queriesText, readsText } from '../utils/plateCredits.js'
 import { readCrlv, readCrlvPhoto, fipeValue, fipeValueByCode, lookupPlate, vehicleDataFeatures } from '../lib/veiculoDadosApi.js'
-import { reviewRows, applyAutofill, fieldsFromFipe, fipeRecord, fipeIsOld, AUTOFILL_FIELDS } from '../utils/preenchimento.js'
+import { reviewRows, applyAutofill, fieldsFromFipe, fipeRecord, fipeIsOld, brandFromDocument, AUTOFILL_FIELDS } from '../utils/preenchimento.js'
 import { normalizePlate, isValidPlate } from '../utils/documentosVeiculo.js'
 import { documentPhotoForReading } from '../utils/carPhotos.js'
 import { formatCurrency, todayISO } from '../utils/carFormat.js'
@@ -21,6 +21,8 @@ function foundFields(review, car, knownBrands) {
   const fipe = fipeSource ? fieldsFromFipe(fipeSource, { fabYear: Number(review.base.year) || Number(car.year), knownBrands, tipo: review.tipo }) : {}
   if (review.source === 'fipe') return { fields: fipe, fromFipe: new Set(Object.keys(fipe)) }
   const fields = { ...review.base }
+  // Sigla do documento ou da placa ("VW", "GM") na grafia do painel ("Volkswagen")
+  if (fields.brand) fields.brand = brandFromDocument(fields.brand, knownBrands)
   const fromFipe = new Set()
   for (const key of ['version', 'transmission', 'fuel']) {
     const useFipe = key === 'version' ? Boolean(fipe.version) : !fields[key] && Boolean(fipe[key])

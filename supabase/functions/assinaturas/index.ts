@@ -11,6 +11,9 @@
 // (customer_documents). A conta da Autentique é uma só, da WB.Dev: o token fica
 // no segredo AUTENTIQUE_TOKEN, cadastrado pelo Wesley. A loja de demonstração
 // (companies.is_demo) manda em modo de teste (sem custo e sem validade).
+// Créditos (seção 75): cada envio usa a franquia do mês da loja (5 grátis) ou
+// desconta o preço (R$ 1,00) do saldo de créditos; cancelar não devolve, só o
+// envio que falhou aqui. Sem franquia e sem saldo: 402.
 // Publicar com "Verify JWT" desligado (o webhook não tem login); as ações do
 // painel conferem o login pelo banco (can_edit_stock e a RLS das tabelas).
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2'
@@ -323,6 +326,18 @@ async function send(caller: SupabaseClient, service: SupabaseClient, token: stri
   const { data: open } = await pending.limit(1)
   if (open?.length) throw new UserError('Este documento já está aguardando assinatura. Cancele o envio anterior para mandar de novo.', 409)
 
+  // Créditos (seção 75): usa a franquia do mês ou reserva o preço antes de mandar.
+  // Cancelar depois não devolve; só o envio que falhou aqui é devolvido.
+  const { data: hold, error: holdError } = await service.rpc('signature_credit_hold', { p_company: companyId, p_user: userId })
+  if (holdError) {
+    if (String(holdError.message || '').includes('SALDO_INSUFICIENTE')) {
+      throw new UserError('Sem crédito para enviar: os envios grátis do mês acabaram. O administrador da loja compra créditos na página Mensalidade.', 402)
+    }
+    throw new UserError('Não foi possível conferir os créditos agora. Tente de novo em instantes.', 503)
+  }
+  const ledgerId = hold?.ledger_id ? Number(hold.ledger_id) : null
+  const release = () => (ledgerId ? service.rpc('plate_credit_release', { p_id: ledgerId }).then(() => {}, () => {}) : Promise.resolve())
+
   const { data: company } = await service.from('companies').select('name, is_demo').eq('id', companyId).single()
   const sandbox = !!company?.is_demo
 
@@ -342,9 +357,18 @@ async function send(caller: SupabaseClient, service: SupabaseClient, token: stri
   form.append('operations', JSON.stringify({ query, variables: { document, signers: remoteSigners, file: null } }))
   form.append('map', JSON.stringify({ file: ['variables.file'] }))
   form.append('file', new Blob([bytes], { type: mime }), `${slug(title)}.${ext}`)
-  const data = await fetch(API, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form }).then(readGql)
+  let data: Record<string, unknown>
+  try {
+    data = await fetch(API, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form }).then(readGql)
+  } catch (err) {
+    await release()
+    throw err
+  }
   const created = data.createDocument as RemoteDocument | undefined
-  if (!created?.id) throw new UserError('A Autentique não devolveu o documento criado.', 502)
+  if (!created?.id) {
+    await release()
+    throw new UserError('A Autentique não devolveu o documento criado.', 502)
+  }
 
   const { data: row, error } = await service
     .from('signature_requests')
@@ -363,15 +387,23 @@ async function send(caller: SupabaseClient, service: SupabaseClient, token: stri
       signers: mergeSigners(signers, created.signatures || []),
       sent_by: userId,
       checked_at: new Date().toISOString(),
+      charge_ledger_id: ledgerId,
     })
     .select('*')
     .single()
   if (error) {
     // Sem o registro, o documento ficaria perdido na Autentique
     await gql(token, `mutation { deleteDocument(id: "${safeId(created.id)}") }`).catch(() => {})
+    await release()
     throw new UserError('Não foi possível guardar o envio. Nada foi mandado aos assinantes.', 500)
   }
-  return row as Row
+  const credits = {
+    charged: hold?.charged === true,
+    price: Number(hold?.price) || 0,
+    freeLeft: Number(hold?.free_left) || 0,
+    balance: Number(hold?.balance) || 0,
+  }
+  return { row: row as Row, credits }
 }
 
 // -- Webhook ----------------------------------------------------------------------
@@ -463,8 +495,8 @@ Deno.serve(async (req) => {
 
     switch (body.action) {
       case 'enviar': {
-        const row = await send(caller, service, token, userData.user.id, companyId as string, body)
-        return json({ request: row })
+        const { row, credits } = await send(caller, service, token, userData.user.id, companyId as string, body)
+        return json({ request: row, credits })
       }
       case 'atualizar': {
         const ids = (body.ids || []).map(String).slice(0, 10)

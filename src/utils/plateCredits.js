@@ -1,9 +1,13 @@
 // Créditos da consulta por placa (seção 71): pré-pago, saldo em reais. A loja
 // compra pacotes pelo PIX da WB.Dev e cada consulta nova debita o preço. A
-// leitura da foto do documento pela IA usa o mesmo saldo, com preço próprio.
+// leitura da foto do documento pela IA usa o mesmo saldo, com preço próprio, e o
+// contrato mandado para assinatura digital também (seção 75), depois da franquia
+// de envios grátis do mês.
 
 export const PLATE_PRICE_DEFAULT = 0.4
 export const DOC_PHOTO_PRICE_DEFAULT = 0.2
+export const SIGNATURE_PRICE_DEFAULT = 1
+export const SIGNATURE_FREE_DEFAULT = 5
 export const PLATE_PACKAGES_DEFAULT = [20, 40, 100]
 
 const toNumber = (v) => {
@@ -39,6 +43,9 @@ export function creditsFromRow(row) {
   const balance = toNumber(row.balance)
   const price = toNumber(row.price) || PLATE_PRICE_DEFAULT
   const docPrice = toNumber(row.doc_price ?? row.docPrice) || DOC_PHOTO_PRICE_DEFAULT
+  const signaturePrice = toNumber(row.signature_price ?? row.signaturePrice) || SIGNATURE_PRICE_DEFAULT
+  const signatureFreeMonthly = row.signature_free_monthly ?? row.signatureFreeMonthly
+  const signatureFreeLeft = row.signature_free_left ?? row.signatureFreeLeft
   const packages = (Array.isArray(row.packages) && row.packages.length ? row.packages : PLATE_PACKAGES_DEFAULT).map(toNumber).filter((v) => v > 0)
   return {
     balance,
@@ -46,6 +53,9 @@ export function creditsFromRow(row) {
     queries: queriesFor(balance, price),
     docPrice,
     docReads: queriesFor(balance, docPrice),
+    signaturePrice,
+    signatureFreeMonthly: signatureFreeMonthly == null ? SIGNATURE_FREE_DEFAULT : Math.max(0, Math.floor(toNumber(signatureFreeMonthly))),
+    signatureFreeLeft: signatureFreeLeft == null ? 0 : Math.max(0, Math.floor(toNumber(signatureFreeLeft))),
     packages: packages.map((amount) => ({ amount, queries: queriesFor(amount, price) })),
     admin: row.admin === true,
     orders: (row.orders || []).map((o) => ({
@@ -73,7 +83,35 @@ export function ledgerText(entry) {
   if (entry.kind === 'recarga') return 'Compra de créditos'
   if (entry.kind === 'consulta') return `Consulta da placa ${entry.plate}`
   if (entry.kind === 'documento') return 'Leitura da foto do documento'
+  if (entry.kind === 'assinatura') return 'Contrato enviado para assinatura digital'
   return entry.note ? `Ajuste da WB.Dev: ${entry.note}` : 'Ajuste da WB.Dev'
+}
+
+// Próximo envio para assinatura digital: grátis (franquia do mês), pago com os
+// créditos ou bloqueado (sem franquia e sem saldo). { free, canSend, text }
+export function signatureCost(credits) {
+  if (!credits) return { free: false, canSend: true, text: '' }
+  const total = credits.signatureFreeMonthly
+  const left = credits.signatureFreeLeft
+  if (left > 0) {
+    const rest = left - 1
+    return {
+      free: true,
+      canSend: true,
+      text: `Este envio é grátis (franquia de ${total} por mês). ${rest === 0 ? 'É o último grátis deste mês.' : `Depois dele, ${rest === 1 ? 'resta 1 grátis' : `restam ${rest} grátis`} no mês.`}`,
+    }
+  }
+  const ended = total > 0 ? `Os ${total} envios grátis do mês acabaram` : ''
+  if (credits.balance + 1e-9 >= credits.signaturePrice) {
+    const cost = `${moneyBR(credits.signaturePrice)} dos créditos (saldo ${moneyBR(credits.balance)})`
+    return { free: false, canSend: true, text: ended ? `${ended}: este custa ${cost}.` : `Este envio custa ${cost}.` }
+  }
+  const price = `${moneyBR(credits.signaturePrice)} por contrato`
+  return {
+    free: false,
+    canSend: false,
+    text: ended ? `${ended} e não há crédito para este (${price}).` : `Não há crédito para este envio (${price}).`,
+  }
 }
 
 // Pacotes digitados na Plataforma, em reais inteiros ("20, 40, 100") -> [20, 40, 100].

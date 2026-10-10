@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { X, Send, Plus, Trash2 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchSignatureTeam, sendForSignature } from '../lib/signaturesApi.js'
+import { fetchMyPlateCredits } from '../lib/plateCreditsApi.js'
 import { validateSigners, MAX_WITNESSES } from '../utils/signatures.js'
+import { signatureCost } from '../utils/plateCredits.js'
 import './admin.css'
 
 const OTHER = '__outra'
@@ -25,6 +28,14 @@ export default function SignatureDialog({ kind = 'venda', contractId, carId, def
   const [witnesses, setWitnesses] = useState([])
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
+  // Créditos (seção 75): franquia do mês ou R$ 1,00 do saldo. Sem conseguir ler,
+  // deixa enviar (a função confere de novo e recusa se não der)
+  const [credits, setCredits] = useState(null)
+  const cost = signatureCost(credits)
+
+  useEffect(() => {
+    fetchMyPlateCredits().then(setCredits, () => setCredits(null))
+  }, [])
 
   useEffect(() => {
     fetchSignatureTeam()
@@ -163,13 +174,24 @@ export default function SignatureDialog({ kind = 'venda', contractId, carId, def
           ))}
         </div>
 
+        {cost.text && (
+          <p className={cost.canSend ? 'admin-form-note' : 'admin-error'}>
+            {cost.text}{' '}
+            {!cost.canSend &&
+              (credits?.admin ? (
+                <Link className="admin-link-btn" to="/admin/mensalidade#creditos">Comprar créditos</Link>
+              ) : (
+                'Peça ao administrador da loja para comprar créditos.'
+              ))}
+          </p>
+        )}
         {error && <p className="admin-error">{error}</p>}
 
         <div className="admin-form-actions">
           <button type="button" className="btn btn-outline" onClick={onClose} disabled={sending}>
             Cancelar
           </button>
-          <button type="submit" className="btn btn-primary" disabled={sending}>
+          <button type="submit" className="btn btn-primary" disabled={sending || !cost.canSend}>
             <Send size={15} /> {sending ? 'Enviando…' : 'Enviar para assinatura'}
           </button>
         </div>

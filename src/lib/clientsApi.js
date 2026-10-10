@@ -1,5 +1,5 @@
 import { supabase, publicSupabase, COMPANY_ID } from './supabaseClient.js'
-import { PLATE_PRICE_DEFAULT, DOC_PHOTO_PRICE_DEFAULT, PLATE_PACKAGES_DEFAULT, packagesText, parsePackages } from '../utils/plateCredits.js'
+import { PLATE_PRICE_DEFAULT, DOC_PHOTO_PRICE_DEFAULT, SIGNATURE_PRICE_DEFAULT, SIGNATURE_FREE_DEFAULT, PLATE_PACKAGES_DEFAULT, packagesText, parsePackages } from '../utils/plateCredits.js'
 import { formatMoneyInput, parseMoneyBR } from '../utils/financing.js'
 
 // Painel WB.Dev (seção 39 do schema.sql): clientes, planos, pagamentos e
@@ -458,7 +458,18 @@ function settingsFromRow(s = {}) {
     platePrice: formatMoneyInput(s.plate_price != null ? Number(s.plate_price) : PLATE_PRICE_DEFAULT),
     docPhotoPrice: formatMoneyInput(s.doc_photo_price != null ? Number(s.doc_photo_price) : DOC_PHOTO_PRICE_DEFAULT),
     platePackages: packagesText(s.plate_packages || PLATE_PACKAGES_DEFAULT),
+    // Contrato para assinatura digital (seção 75): preço e envios grátis por mês
+    signaturePrice: formatMoneyInput(s.signature_price != null ? Number(s.signature_price) : SIGNATURE_PRICE_DEFAULT),
+    signatureFreeMonthly: String(s.signature_free_monthly != null ? s.signature_free_monthly : SIGNATURE_FREE_DEFAULT),
   }
+}
+
+// Envios grátis por mês digitados na Plataforma: inteiro de 0 a 100 (null se não)
+export function parseFreeMonthly(text) {
+  const t = String(text ?? '').trim()
+  if (!/^\d{1,3}$/.test(t)) return null
+  const n = Number(t)
+  return n <= 100 ? n : null
 }
 
 export async function fetchPlatformSettings() {
@@ -486,6 +497,10 @@ export async function savePlatformSettings(s) {
   if (platePrice > 0) row.plate_price = platePrice
   if (docPhotoPrice > 0) row.doc_photo_price = docPhotoPrice
   if (platePackages) row.plate_packages = platePackages
+  const signaturePrice = parseMoneyBR(s.signaturePrice)
+  const signatureFree = parseFreeMonthly(s.signatureFreeMonthly)
+  if (signaturePrice > 0) row.signature_price = signaturePrice
+  if (signatureFree != null) row.signature_free_monthly = signatureFree
   return settingsFromRow(await run(supabase.from('platform_settings').update(row).eq('id', 1).select().single()))
 }
 
