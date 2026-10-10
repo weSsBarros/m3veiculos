@@ -5,6 +5,7 @@ import {
   storeBillingNotice,
   chargeMessage,
   whatsappLink,
+  phoneWithDdd,
   billingTotals,
   receivedByMonth,
   domainAlert,
@@ -80,6 +81,14 @@ test('cobrança: mensagem do WhatsApp e link', () => {
   assert.match(chargeMessage({ storeName: 'Loja X', responsibleName: '', billing: vencendo }), /^Olá! .*vence em 10\/10\/2026/)
   assert.equal(whatsappLink('(98) 98129-5577', 'oi'), 'https://wa.me/5598981295577?text=oi')
   assert.equal(whatsappLink('', 'oi'), '')
+  // Telefone do responsável sem DDD: completa com o 98 (e o 9 do celular antigo)
+  assert.equal(whatsappLink('991143627', 'oi'), 'https://wa.me/5598991143627?text=oi')
+  assert.equal(whatsappLink('88975777', 'oi'), 'https://wa.me/5598988975777?text=oi')
+  assert.equal(whatsappLink('3222-1111', 'oi'), 'https://wa.me/559832221111?text=oi')
+  assert.equal(whatsappLink('5598981295577', 'oi'), 'https://wa.me/5598981295577?text=oi')
+  assert.equal(whatsappLink('12345', 'oi'), '')
+  assert.equal(phoneWithDdd('99083493'), '98999083493')
+  assert.equal(phoneWithDdd('(98) 98129-5577'), '98981295577')
 })
 
 test('cobrança: totais, recebido por mês, domínio e implantação', () => {

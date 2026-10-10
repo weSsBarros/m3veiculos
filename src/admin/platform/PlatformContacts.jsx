@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCcw, MessageCircle, Mail, Globe, Trash2, PlusCircle, Search } from 'lucide-react'
 import { fetchClients, fetchContactNotes, addContactNote, deleteContactNote } from '../../lib/clientsApi.js'
-import { whatsappLink, dateBR } from '../../utils/billing.js'
+import { whatsappLink, phoneWithDdd, dateBR } from '../../utils/billing.js'
+import { formatWaPhone } from '../../utils/whatsappRotation.js'
 import { todayISO } from '../../utils/carFormat.js'
 import DateInputBR from '../../components/DateInputBR.jsx'
 import useConfirm from '../../components/useConfirm.jsx'
@@ -172,6 +173,7 @@ export default function PlatformContacts() {
             const a = c.account
             const first = (a.responsibleName || '').split(' ')[0]
             const hello = `Olá${first ? `, ${first}` : ''}! Aqui é da WB.Dev, sobre o sistema da ${c.name}.`
+            const phoneLink = a.responsiblePhone ? whatsappLink(a.responsiblePhone, hello) : ''
             return (
               <section className="contact-card" key={c.companyId}>
                 <div className="contact-card-head">
@@ -182,11 +184,15 @@ export default function PlatformContacts() {
                   <BillingPill billing={c.billing} />
                 </div>
                 <div className="contact-card-links">
-                  {a.responsiblePhone && (
-                    <a className="btn btn-outline" href={whatsappLink(a.responsiblePhone, hello)} target="_blank" rel="noreferrer">
-                      <MessageCircle size={15} /> {a.responsiblePhone}
+                  {a.responsiblePhone && (phoneLink ? (
+                    <a className="btn btn-outline" href={phoneLink} target="_blank" rel="noreferrer">
+                      <MessageCircle size={15} /> {formatWaPhone(phoneWithDdd(a.responsiblePhone))}
                     </a>
-                  )}
+                  ) : (
+                    <span className="admin-muted" title="Corrija o telefone na ficha do cliente (com DDD)">
+                      {a.responsiblePhone}: telefone incompleto
+                    </span>
+                  ))}
                   {a.responsibleEmail && (
                     <a className="btn btn-outline" href={`mailto:${a.responsibleEmail}`}>
                       <Mail size={15} /> {a.responsibleEmail}

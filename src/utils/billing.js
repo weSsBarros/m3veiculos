@@ -122,8 +122,18 @@ export function chargeMessage({ storeName, responsibleName, billing, pixKey = ''
   return `${hello} Aqui é da WB.Dev, sobre o sistema da ${storeName}.`
 }
 
+// Telefone do responsável cadastrado sem DDD ("991143627", "88975777"): as lojas
+// são de São Luís, então completa com o 98 e, no celular antigo de 8 dígitos,
+// com o 9 da frente (fixo, que começa de 2 a 5, só ganha o DDD)
+export function phoneWithDdd(phone, ddd = '98') {
+  const digits = String(phone || '').replace(/\D/g, '')
+  if (digits.length === 9) return `${ddd}${digits}`
+  if (digits.length === 8) return `${ddd}${/^[6-9]/.test(digits) ? '9' : ''}${digits}`
+  return digits
+}
+
 export function whatsappLink(phone, text) {
-  const digits = waDigits(phone)
+  const digits = waDigits(phoneWithDdd(phone))
   if (!digits) return ''
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
 }
