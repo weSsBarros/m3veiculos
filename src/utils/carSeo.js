@@ -1,8 +1,12 @@
 import { useEffect } from 'react'
 
-// Página do carro no Google: resumo na <meta name="description"> e dados
-// estruturados (schema.org Car + oferta) para a busca mostrar preço, km e foto.
-// O Google lê a página já montada pelo React, então basta pôr no <head>.
+// Página do carro no Google: título com a cidade ("à venda em São Luís"),
+// resumo na <meta name="description"> e dados estruturados (schema.org Car +
+// oferta) para a busca mostrar preço, km e foto. O Google lê a página já montada
+// pelo React; o api/pagina.php põe o mesmo no HTML (prévia do WhatsApp).
+// A cidade vem do build (vite.config.js, VITE_STORE_CITY).
+
+const STORE_CITY = import.meta.env?.VITE_STORE_CITY || ''
 
 function absolute(origin, url) {
   return url && url.startsWith('/') ? origin + url : url
@@ -22,11 +26,16 @@ export function carTitle(car) {
   return [car.brand, car.model, car.version, yearLabel(car)].filter(Boolean).join(' ')
 }
 
-export function carSummary(car, storeName) {
+export function carSummary(car, storeName, city = STORE_CITY) {
   const km = car.km != null && car.km !== '' ? `${Number(car.km).toLocaleString('pt-BR')} km` : ''
   const price = car.price ? `R$ ${Number(car.price).toLocaleString('pt-BR')}` : 'consulte o valor'
   const facts = [km, car.transmission, car.fuel, car.color].filter(Boolean).join(', ')
-  return `${carTitle(car)}${facts ? ` — ${facts}` : ''}, por ${price}${storeName ? ` na ${storeName}` : ''}.`
+  return `${carTitle(car)}${facts ? ` — ${facts}` : ''}, por ${price}${storeName ? ` na ${storeName}` : ''}${city ? `, em ${city}` : ''}.`
+}
+
+// "Toyota Corolla XEi 2021/2022 à venda em São Luís | Loja"
+export function carPageTitle(car, storeName, city = STORE_CITY) {
+  return `${car.status === 'vendido' ? 'Vendido: ' : ''}${carTitle(car)}${city ? ` à venda em ${city}` : ''}${storeName ? ` | ${storeName}` : ''}`
 }
 
 export function carJsonLd(car, { storeName, origin }) {
@@ -73,6 +82,8 @@ export function useCarSeo(car, storeName) {
     const meta = document.querySelector('meta[name="description"]')
     const previous = meta?.getAttribute('content')
     meta?.setAttribute('content', carSummary(car, storeName))
+    // O título que o Google indexa (a tela da loja pode ter posto outro antes)
+    document.title = carPageTitle(car, storeName)
     return () => {
       script.remove()
       if (meta && previous != null) meta.setAttribute('content', previous)

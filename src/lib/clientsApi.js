@@ -1,4 +1,6 @@
 import { supabase, publicSupabase, COMPANY_ID } from './supabaseClient.js'
+import { PLATE_PRICE_DEFAULT, DOC_PHOTO_PRICE_DEFAULT, PLATE_PACKAGES_DEFAULT, packagesText, parsePackages } from '../utils/plateCredits.js'
+import { formatMoneyInput, parseMoneyBR } from '../utils/financing.js'
 
 // Painel WB.Dev (seção 39 do schema.sql): clientes, planos, pagamentos e
 // avisos. As tabelas só abrem para o dono da plataforma (platform_admins);
@@ -452,6 +454,10 @@ function settingsFromRow(s = {}) {
     notifyPhone: s.notify_phone || '',
     supportEmail: s.support_email || '',
     supportHours: s.support_hours || '',
+    // Consulta por placa e foto do documento (seção 71): preços e pacotes de crédito
+    platePrice: formatMoneyInput(s.plate_price != null ? Number(s.plate_price) : PLATE_PRICE_DEFAULT),
+    docPhotoPrice: formatMoneyInput(s.doc_photo_price != null ? Number(s.doc_photo_price) : DOC_PHOTO_PRICE_DEFAULT),
+    platePackages: packagesText(s.plate_packages || PLATE_PACKAGES_DEFAULT),
   }
 }
 
@@ -473,6 +479,13 @@ export async function savePlatformSettings(s) {
     support_email: s.supportEmail.trim(),
     support_hours: s.supportHours.trim(),
   }
+  // Preços e pacotes dos créditos: só grava se vieram certos (a tela confere)
+  const platePrice = parseMoneyBR(s.platePrice)
+  const docPhotoPrice = parseMoneyBR(s.docPhotoPrice)
+  const platePackages = parsePackages(s.platePackages)
+  if (platePrice > 0) row.plate_price = platePrice
+  if (docPhotoPrice > 0) row.doc_photo_price = docPhotoPrice
+  if (platePackages) row.plate_packages = platePackages
   return settingsFromRow(await run(supabase.from('platform_settings').update(row).eq('id', 1).select().single()))
 }
 

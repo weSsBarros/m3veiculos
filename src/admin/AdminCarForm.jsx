@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, Trash2, Receipt, Lock, Sparkles, Copy, Eye, FileText, PenLine } from 'lucide-react'
 import { fetchCarById, createCar, updateCar, deleteCar, uploadCarDocument, updateCarDocuments, deleteCarImage } from '../lib/carsApi.js'
 import { removedPhotos } from '../utils/carPhotos.js'
@@ -16,7 +16,10 @@ import { IntakeChecklist, InspectionChecklist } from './CarChecklists.jsx'
 import { buildIntake, buildInspection, compactChecklist } from '../utils/carChecklists.js'
 import { parseMoneyBR } from '../utils/financing.js'
 import DateInputBR from '../components/DateInputBR.jsx'
-import FipeLookup from '../components/FipeLookup.jsx'
+import VehicleAutofill from './VehicleAutofill.jsx'
+import { AUTOFILL_SOURCES, fipePriceNote } from '../utils/preenchimento.js'
+import { vehicleDocWarnings } from '../utils/documentosVeiculo.js'
+import { formatCurrency } from '../utils/carFormat.js'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -36,15 +39,21 @@ import { RENAVE_STATUSES } from '../utils/renave.js'
 import { DEFAULT_INTAKE_CHECKLIST, DEFAULT_INSPECTION_CHECKLIST } from '../utils/carChecklists.js'
 import { DEFAULT_BANKS } from '../utils/payment.js'
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
+import AnoModeloInput from '../components/AnoModeloInput.jsx'
+import { parseAnoModelo, anoModeloFromSaved } from '../utils/anoModelo.js'
+import { fetchCarDraft, deleteCarDraft } from '../lib/carDraftsApi.js'
+import { lockCarValues } from '../lib/privateValuesApi.js'
+import PrivateValuesPanel from './PrivateValuesPanel.jsx'
 import OlxCarSection from './OlxCarSection.jsx'
 import WebmotorsCarSection from './WebmotorsCarSection.jsx'
+import NewCarTabs from './NewCarTabs.jsx'
 import { olxSellerPhones } from '../utils/olxStatus.js'
 
 const EMPTY_CAR = {
   brand: '',
   model: '',
   version: '',
-  year: new Date().getFullYear(),
+  year: '',
   modelYear: '',
   km: 0,
   transmission: TRANSMISSIONS[0],
@@ -82,6 +91,7 @@ const EMPTY_CAR = {
   renaveExitStatus: 'pendente',
   renaveExitOn: '',
   renaveExitProtocol: '',
+  fipe: {},
 }
 
 export default function AdminCarForm() {
@@ -90,6 +100,8 @@ export default function AdminCarForm() {
   const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
   // Documentos escolhidos antes de o carro existir: sobem logo após o cadastro
   const [pendingDocs, setPendingDocs] = useState([])
+  // Valores privados (seção 73): o admin ativa o cadeado já no cadastro
+  const [privateOnSave, setPrivateOnSave] = useState(false)
   // Listas da loja (itens que vêm com o carro, vistoria e bancos)
   const [lists, setLists] = useState({ intake: DEFAULT_INTAKE_CHECKLIST, inspection: DEFAULT_INSPECTION_CHECKLIST, banks: DEFAULT_BANKS })
   const [intake, setIntake] = useState(() => buildIntake(DEFAULT_INTAKE_CHECKLIST))
@@ -123,8 +135,14 @@ export default function AdminCarForm() {
   const { id } = useParams()
   const isEditing = Boolean(id)
   const navigate = useNavigate()
+  // "Completar cadastro" de um rascunho do celular (seção 72): /admin/carros/novo?rascunho=<id>
+  const [searchParams] = useSearchParams()
+  const draftId = isEditing ? null : searchParams.get('rascunho')
+  const [draft, setDraft] = useState(null)
 
   const [car, setCar] = useState(EMPTY_CAR)
+  // Carro com o cadeado de outro sócio: sem custo, gastos nem margem (seção 73)
+  const seeCosts = canSeeCosts && !car.valuesHidden
   const [originalStatus, setOriginalStatus] = useState(null)
   const [highlightsText, setHighlightsText] = useState('')
   const [loading, setLoading] = useState(isEditing)
@@ -138,6 +156,25 @@ export default function AdminCarForm() {
   // Todas as fotos que passaram pelo formulário (gravadas ou enviadas agora):
   // as que não ficarem no carro são apagadas do site depois de salvar
   const seenImages = useRef(new Set())
+
+  useEffect(() => {
+    if (!draftId) return
+    fetchCarDraft(draftId)
+      .then((found) => {
+        if (!found) {
+          setError('Esse rascunho não existe mais (talvez alguém já tenha completado o cadastro).')
+          return
+        }
+        setDraft(found)
+        found.images.forEach((url) => seenImages.current.add(url))
+        setCar((prev) => ({
+          ...prev,
+          images: [...found.images, ...prev.images.filter((url) => !found.images.includes(url))],
+          internalNotes: prev.internalNotes || found.note,
+        }))
+      })
+      .catch((err) => setError('Não foi possível abrir o rascunho: ' + err.message))
+  }, [draftId])
 
   useEffect(() => {
     fetchAllCustomers().then(setCustomers).catch(() => {})
@@ -172,7 +209,7 @@ export default function AdminCarForm() {
     if (!isEditing) return
     fetchCarById(id).then((found) => {
       if (found) {
-        setCar({ ...found, customerId: found.customerId || '', ownerCustomerId: found.ownerCustomerId || '', whatsappSellerId: found.whatsappSellerId || '' })
+        setCar({ ...found, modelYear: anoModeloFromSaved(found.modelYear, found.year), customerId: found.customerId || '', ownerCustomerId: found.ownerCustomerId || '', whatsappSellerId: found.whatsappSellerId || '' })
         found.images.forEach((url) => seenImages.current.add(url))
         setOriginalStatus(found.status)
         if (found.status === 'reservado') {
@@ -196,9 +233,52 @@ export default function AdminCarForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lists, car.id])
 
+  // Campos preenchidos pelo CRLV-e, pela FIPE ou pela placa: ficam destacados
+  // até a pessoa mexer neles
+  const [filled, setFilled] = useState({})
+  // Placa, chassi e RENAVAM: o aviso de formato aparece fora do campo em edição
+  const [docFocus, setDocFocus] = useState('')
+
   function update(field, value) {
     setCar((prev) => ({ ...prev, [field]: value }))
+    setFilled((prev) => {
+      if (!prev[field]) return prev
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
   }
+
+  // Ano/Modelo num campo só: o ano de fabricação sai do texto ("2025/2026")
+  function updateAnoModelo(text, parsed) {
+    update('modelYear', text)
+    if (parsed.ok) update('year', parsed.year)
+  }
+
+  // sources: campo -> de onde veio ('crlv', 'foto', 'fipe' ou 'placa'); pdf: o
+  // documento (PDF ou foto) que a pessoa pediu para guardar
+  async function handleAutofill({ car: next, sources, pdf }) {
+    setCar(next)
+    setFilled((prev) => ({ ...prev, ...sources }))
+    if (!pdf) return
+    if (!isEditing) {
+      setPendingDocs((prev) => [...prev, pdf])
+      return
+    }
+    try {
+      const doc = await uploadCarDocument(id, pdf)
+      setCar((prev) => ({ ...prev, documents: [...(prev.documents || []), doc] }))
+    } catch (err) {
+      setError('Os dados foram aplicados, mas o documento não foi guardado (' + err.message + '). Anexe em "Documentos do carro".')
+    }
+  }
+
+  const autofillClass = (field) => (filled[field] ? 'is-autofilled' : undefined)
+  const autofillNote = (field) =>
+    filled[field] ? <small className="autofill-note">Preenchido {AUTOFILL_SOURCES[filled[field]]}, confira</small> : null
+  const docWarnings = vehicleDocWarnings(car)
+  const docWarning = (field) =>
+    docWarnings[field] && docFocus !== field ? <small className="autofill-doc-warning" role="status">{docWarnings[field]}</small> : null
 
   // RENAVE (seção 55): ao marcar como registrada, a data vem com hoje
   function updateRenave(which, status) {
@@ -242,6 +322,12 @@ export default function AdminCarForm() {
       setSaving(false)
       return
     }
+    const anoModelo = parseAnoModelo(car.modelYear)
+    if (!anoModelo.ok) {
+      setError(anoModelo.error)
+      setSaving(false)
+      return
+    }
     if (car.status === 'reservado' && originalStatus !== 'reservado') {
       setError('Para reservar, use o status "Reservado" no Estoque (a janela pede o cliente e o sinal).')
       setSaving(false)
@@ -271,7 +357,8 @@ export default function AdminCarForm() {
 
     const payload = {
       ...car,
-      year: Number(car.year),
+      year: anoModelo.year,
+      modelYear: anoModelo.modelYear,
       km: parseIntBR(car.km),
       doors: car.category === 'moto' ? 0 : Number(car.doors) || 4,
       ownerCustomerId: car.ownerCustomerId || null,
@@ -294,6 +381,17 @@ export default function AdminCarForm() {
       // Carro salvo: agora sim tira do site as fotos removidas no formulário
       for (const url of removedPhotos(seenImages.current, saved.images)) deleteCarImage(url).catch(() => {})
       seenImages.current = new Set(saved.images)
+      // Carro novo vindo de um rascunho do celular: o rascunho sai (as fotos ficam no carro)
+      if (!isEditing && draft) await deleteCarDraft(draft).catch(() => {})
+      // Valores privados marcados no cadastro: o cadeado entra logo depois de salvar
+      let lockError = null
+      if (!isEditing && privateOnSave) {
+        try {
+          await lockCarValues(saved.id)
+        } catch (err) {
+          lockError = err
+        }
+      }
       let docError = null
       if (!isEditing && pendingDocs.length > 0) {
         try {
@@ -323,9 +421,12 @@ export default function AdminCarForm() {
       if (originalStatus === 'reservado' && car.status !== 'reservado' && activeReservation) {
         await closeReservation(activeReservation.id, isSold ? 'convertida' : 'cancelada').catch(() => {})
       }
-      if (docError) {
-        // O carro já foi cadastrado: abre a edição dele para anexar de novo
-        setError('Carro cadastrado, mas os documentos não foram enviados (' + docError.message + '). Anexe de novo abaixo.')
+      if (docError || lockError) {
+        // O carro já foi cadastrado: abre a edição dele para acertar o que faltou
+        const parts = []
+        if (docError) parts.push(`os documentos não foram enviados (${docError.message}). Anexe de novo abaixo`)
+        if (lockError) parts.push(`os valores privados não foram ativados (${lockError.message}). Ative em "Custo de aquisição"`)
+        setError(`Carro cadastrado, mas ${parts.join('; ')}.`)
         setPendingDocs([])
         setSaving(false)
         navigate(`/admin/carros/${saved.id}`, { replace: true })
@@ -343,7 +444,7 @@ export default function AdminCarForm() {
   // Dados do contrato da entrada: loja (da tela Contratos), dono e carro deste cadastro
   function entryData() {
     const owner = customers.find((c) => c.id === car.ownerCustomerId) || null
-    const showValue = canSeeCosts || (isStaff && !isEditing)
+    const showValue = seeCosts || (isStaff && !isEditing)
     return buildEntryTemplateData({
       company: companyForDocuments(storeName),
       owner,
@@ -464,6 +565,22 @@ export default function AdminCarForm() {
     }
   }
 
+  // Passou o cadeado sem continuar vendo: o formulário fica, sem os valores
+  function handleValuesAccessLost() {
+    fetchCarById(id)
+      .then((found) => {
+        if (!found) return
+        setCar((prev) => ({
+          ...prev,
+          valuesHidden: found.valuesHidden,
+          privateValues: found.privateValues,
+          purchasePrice: found.valuesHidden ? '' : prev.purchasePrice,
+          purchaseDate: found.valuesHidden ? '' : prev.purchaseDate,
+        }))
+      })
+      .catch(() => {})
+  }
+
   async function handleDelete() {
     if (!(await confirm(`Excluir "${car.brand} ${car.model}"? Essa ação não pode ser desfeita.`))) return
     setSaving(true)
@@ -480,7 +597,7 @@ export default function AdminCarForm() {
 
   // Gerente informa o custo só no cadastro; na edição o campo nem aparece.
   // O vendedor não informa custo.
-  const showPurchase = canSeeCosts || (isStaff && !isEditing)
+  const showPurchase = seeCosts || (isStaff && !isEditing)
   // Status que o vendedor não pode mudar
   const statusLocked = !isStaff && (originalStatus === 'vendido' || originalStatus === 'reservado')
 
@@ -495,9 +612,9 @@ export default function AdminCarForm() {
         {isEditing && (
           <div className="admin-row-actions">
             <Link to={`/admin/carros/${id}/gastos`} className="btn btn-outline">
-              <Receipt size={15} /> {canSeeCosts ? 'Ver gastos' : 'Lançar gasto'}
+              <Receipt size={15} /> {seeCosts ? 'Ver gastos' : 'Lançar gasto'}
             </Link>
-            {isAdmin && (
+            {isAdmin && !car.valuesHidden && (
               <button type="button" className="btn btn-outline admin-delete-btn" onClick={handleDelete} disabled={saving}>
                 <Trash2 size={15} /> Excluir
               </button>
@@ -505,10 +622,26 @@ export default function AdminCarForm() {
           </div>
         )}
       </div>
+      {!isEditing && <NewCarTabs />}
 
       {error && <p className="admin-error">{error}</p>}
+      {draft && (
+        <p className="car-draft-banner" role="status">
+          Completando o rascunho do celular{draft.note ? ` "${draft.note}"` : ''}: {draft.images.length}{' '}
+          {draft.images.length === 1 ? 'foto' : 'fotos'}, por {draft.createdByName || 'equipe'}. Ao salvar o carro, o rascunho sai da lista.
+        </p>
+      )}
 
       <form className="admin-form" onSubmit={handleSubmit}>
+        <VehicleAutofill
+          car={car}
+          defaults={isEditing ? {} : EMPTY_CAR}
+          knownBrands={BRANDS}
+          onApply={handleAutofill}
+          onFipeUpdate={(fipe) => setCar((prev) => ({ ...prev, fipe }))}
+          disabled={saving}
+        />
+
         <section className="admin-form-section">
           <h2>Fotos</h2>
           <ImageUploader images={car.images} onChange={updateImages} />
@@ -517,26 +650,30 @@ export default function AdminCarForm() {
         <section className="admin-form-section">
           <h2>Identificação</h2>
           <div className="admin-form-grid">
-            <label>
+            <label className={autofillClass('brand')}>
               Marca
               <input list="brands" required value={car.brand} onChange={(e) => update('brand', e.target.value)} />
               <datalist id="brands">
                 {BRANDS.map((b) => <option key={b} value={b} />)}
               </datalist>
+              {autofillNote('brand')}
             </label>
-            <label>
+            <label className={autofillClass('model')}>
               Modelo
               <input required value={car.model} onChange={(e) => update('model', e.target.value)} />
+              {autofillNote('model')}
             </label>
-            <label>
+            <label className={autofillClass('version')}>
               Versão
               <input required value={car.version} onChange={(e) => update('version', e.target.value)} placeholder="Ex: XEi 2.0 Flex" />
+              {autofillNote('version')}
             </label>
-            <label>
+            <label className={autofillClass('category')}>
               Categoria
               <select required value={car.category} onChange={(e) => update('category', e.target.value)}>
                 {VEHICLE_CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
               </select>
+              {autofillNote('category')}
             </label>
           </div>
         </section>
@@ -544,39 +681,40 @@ export default function AdminCarForm() {
         <section className="admin-form-section">
           <h2>Ficha técnica</h2>
           <div className="admin-form-grid">
-            <label>
-              Ano de fabricação
-              <input type="number" required value={car.year} onChange={(e) => update('year', e.target.value)} />
-            </label>
-            <label>
-              Ano/Modelo (texto)
-              <input required value={car.modelYear} onChange={(e) => update('modelYear', e.target.value)} placeholder="Ex: 2022/2023" />
+            <label className={autofillClass('modelYear')}>
+              Ano/Modelo
+              <AnoModeloInput required value={car.modelYear} onChange={updateAnoModelo} />
+              {autofillNote('modelYear')}
             </label>
             <label>
               Quilometragem
               <KmInput required value={car.km} onChange={(v) => update('km', v)} />
             </label>
-            <label>
+            <label className={autofillClass('transmission')}>
               Câmbio
               <input list="transmissions" required value={car.transmission} onChange={(e) => update('transmission', e.target.value)} />
               <datalist id="transmissions">
                 {TRANSMISSIONS.map((t) => <option key={t} value={t} />)}
               </datalist>
+              {autofillNote('transmission')}
             </label>
-            <label>
+            <label className={autofillClass('fuel')}>
               Combustível
               <select required value={car.fuel} onChange={(e) => update('fuel', e.target.value)}>
                 {FUELS.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
+              {autofillNote('fuel')}
             </label>
-            <label>
+            <label className={autofillClass('color')}>
               Cor
               <input required value={car.color} onChange={(e) => update('color', e.target.value)} />
+              {autofillNote('color')}
             </label>
             {car.category !== 'moto' && (
-              <label>
+              <label className={autofillClass('doors')}>
                 Portas
                 <input type="number" min="2" max="5" required value={car.doors || 4} onChange={(e) => update('doors', e.target.value)} />
+                {autofillNote('doors')}
               </label>
             )}
             <label>
@@ -594,37 +732,48 @@ export default function AdminCarForm() {
             Usados para preencher o contrato de venda automaticamente. Não aparecem no site público.
           </p>
           <div className="admin-form-grid">
-            <label>
+            <label className={autofillClass('plate')}>
               Placa
-              <input value={car.plate} onChange={(e) => update('plate', e.target.value)} placeholder="Ex: ABC1D23" />
+              <input
+                value={car.plate}
+                onChange={(e) => update('plate', e.target.value)}
+                onFocus={() => setDocFocus('plate')}
+                onBlur={() => setDocFocus('')}
+                placeholder="Ex: ABC1D23"
+                autoCapitalize="characters"
+              />
+              {autofillNote('plate')}
+              {docWarning('plate')}
             </label>
-            <label>
+            <label className={autofillClass('chassis')}>
               Chassi
-              <input value={car.chassis} onChange={(e) => update('chassis', e.target.value)} />
+              <input
+                value={car.chassis}
+                onChange={(e) => update('chassis', e.target.value)}
+                onFocus={() => setDocFocus('chassis')}
+                onBlur={() => setDocFocus('')}
+                autoCapitalize="characters"
+              />
+              {autofillNote('chassis')}
+              {docWarning('chassis')}
             </label>
-            <label>
+            <label className={autofillClass('renavam')}>
               Renavam
-              <input value={car.renavam} onChange={(e) => update('renavam', e.target.value)} />
+              <input
+                value={car.renavam}
+                onChange={(e) => update('renavam', e.target.value)}
+                onFocus={() => setDocFocus('renavam')}
+                onBlur={() => setDocFocus('')}
+                inputMode="numeric"
+              />
+              {autofillNote('renavam')}
+              {docWarning('renavam')}
             </label>
           </div>
         </section>
 
         <section className="admin-form-section">
           <h2>Preço e status</h2>
-
-          <details className="fipe-lookup-details">
-            <summary>Consultar tabela FIPE (opcional)</summary>
-            <p className="admin-form-hint">
-              Ajuda a ver o valor de referência FIPE do modelo. Não altera o preço até você clicar em "Usar como preço de venda".
-            </p>
-            <FipeLookup
-              onUseValue={(value) => {
-                if (value == null) return
-                setNoPrice(false)
-                update('price', String(value))
-              }}
-            />
-          </details>
 
           <div className="admin-form-grid">
             <label>
@@ -636,6 +785,23 @@ export default function AdminCarForm() {
                 onChange={(v) => update('price', v)}
                 placeholder={noPrice ? 'Sem preço definido' : ''}
               />
+              {car.fipe?.value != null && (
+                <small className="fipe-price-ref">
+                  FIPE {formatCurrency(car.fipe.value)} ({car.fipe.reference}).{' '}
+                  {!noPrice && fipePriceNote(parseIntBR(car.price), car.fipe.value)}
+                  {' '}
+                  <button
+                    type="button"
+                    className="admin-link-btn"
+                    onClick={() => {
+                      setNoPrice(false)
+                      update('price', String(car.fipe.value))
+                    }}
+                  >
+                    Usar como preço de venda
+                  </button>
+                </small>
+              )}
             </label>
             <label>
               Preço "de" — opcional, mostra desconto
@@ -881,10 +1047,23 @@ export default function AdminCarForm() {
         </section>
 
         <section className="admin-form-section">
-          <h2>{showPurchase ? (car.entryType === 'consignado' ? 'Valor combinado com o dono' : 'Custo de aquisição') : 'Aviso de estoque'}</h2>
+          <h2>{showPurchase || car.valuesHidden ? (car.entryType === 'consignado' ? 'Valor combinado com o dono' : 'Custo de aquisição') : 'Aviso de estoque'}</h2>
+          {isAdmin && isEditing && <PrivateValuesPanel carId={id} onAccessLost={handleValuesAccessLost} />}
+          {isAdmin && !isEditing && (
+            <label className="admin-checkbox admin-checkbox-note private-values-new">
+              <input type="checkbox" checked={privateOnSave} onChange={(e) => setPrivateOnSave(e.target.checked)} />
+              <span>
+                <Lock size={14} aria-hidden="true" /> Valores privados: só eu vejo o custo, os gastos e a margem deste carro
+                <small className="admin-form-hint">
+                  Os outros administradores veem e editam o carro, mas sem esses valores, e ele fica fora das contas de dinheiro deles. Dá
+                  para liberar depois.
+                </small>
+              </span>
+            </label>
+          )}
           {showPurchase && (
             <p className="admin-form-hint">
-              {canSeeCosts
+              {seeCosts
                 ? 'Usado para calcular o custo total e a margem do carro (junto com os gastos cadastrados em "Ver gastos"). Não aparece no site público.'
                 : 'Informe quanto a loja pagou pelo carro. Depois de cadastrar, só o administrador vê e altera esse valor.'}
             </p>

@@ -69,6 +69,14 @@ function fromRow(row) {
     // Seção 61: publicar na Webmotors e marca, modelo e versão (e, se escolhidos, cor, câmbio e combustível) da Webmotors
     webmotorsPublish: row.webmotors_publish !== false,
     webmotorsCatalog: row.webmotors_catalog && typeof row.webmotors_catalog === 'object' ? row.webmotors_catalog : {},
+    // Seção 69: versão FIPE escolhida e o valor do mês (fora do site)
+    fipe: row.fipe && typeof row.fipe === 'object' && !Array.isArray(row.fipe) ? row.fipe : {},
+    // Seção 73: quem cadastrou e o cadeado dos valores privados ({ ownerName,
+    // isOwner, canSee }). valuesHidden: outro sócio trancou os valores, então o
+    // carro veio da staff_cars, sem o custo
+    createdBy: row.created_by || null,
+    privateValues: row.private_values || null,
+    valuesHidden: row.values_hidden === true,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -88,7 +96,52 @@ export function setCarsAccess(role) {
   canSetPurchase = role === 'admin' || role === 'manager'
 }
 
-function toRow(car) {
+// Valores privados (seção 73): o admin lê pela tabela "cars" só os carros cujos
+// valores vê. Os trancados por outro sócio vêm da staff_cars (sem o custo), com
+// valuesHidden, e as gravações deles também vão por ela.
+const hiddenIds = new Set()
+
+async function privateValuesMap() {
+  const { data, error } = await supabase.rpc('car_private_values_list')
+  // Banco ainda sem a seção 73: nenhum carro trancado
+  if (error || !Array.isArray(data)) return new Map()
+  return new Map(data.map((v) => [v.car_id, { ownerName: v.owner_name || '', isOwner: v.is_owner === true, canSee: v.can_see !== false }]))
+}
+
+// Linhas do admin: as da tabela "cars" + as trancadas por outro sócio. filter
+// recebe a consulta e devolve com os filtros (vale para as duas origens).
+async function adminRows(filter) {
+  const [own, locks] = await Promise.all([filter(supabase.from('cars').select('*')), privateValuesMap()])
+  if (own.error) throw own.error
+  const hidden = []
+  for (const [id, v] of locks) {
+    if (v.canSee) {
+      hiddenIds.delete(id)
+    } else {
+      hiddenIds.add(id)
+      hidden.push(id)
+    }
+  }
+  let rows = own.data
+  if (hidden.length) {
+    const extra = await filter(supabase.from('staff_cars').select('*')).in('id', hidden)
+    if (extra.error) throw extra.error
+    rows = [...rows, ...extra.data.map((r) => ({ ...r, values_hidden: true }))]
+  }
+  return rows.map((r) => ({ ...r, private_values: locks.get(r.id) || null }))
+}
+
+// Tabela para gravar o carro: a staff_cars quando outro sócio trancou os valores
+function tableFor(id, car) {
+  if (staffTable !== 'cars') return staffTable
+  return car?.valuesHidden || hiddenIds.has(id) ? 'staff_cars' : 'cars'
+}
+
+function rowFrom(table, data) {
+  return fromRow(table === 'staff_cars' && staffTable === 'cars' ? { ...data, values_hidden: true } : data)
+}
+
+function toRow(car, table = staffTable) {
   const row = {
     slug: car.slug,
     brand: car.brand,
@@ -138,8 +191,9 @@ function toRow(car) {
     olx_catalog: car.olxCatalog || {},
     webmotors_publish: car.webmotorsPublish !== false,
     webmotors_catalog: car.webmotorsCatalog || {},
+    fipe: car.fipe || {},
   }
-  if (staffTable !== 'cars') {
+  if (table !== 'cars') {
     delete row.purchase_price
     delete row.purchase_date
   }
@@ -210,6 +264,12 @@ export async function fetchSimilarCars(car, count = 4) {
 
 export async function fetchAllCarsAdmin() {
   requireSupabase()
+  if (staffTable === 'cars') {
+    hiddenIds.clear()
+    const rows = await adminRows((q) => q.eq('company_id', COMPANY_ID).order('created_at', { ascending: false }))
+    rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    return scopeCars(rows.map(fromRow))
+  }
   const { data, error } = await supabase
     .from(staffTable)
     .select('*')
@@ -227,6 +287,10 @@ export async function fetchSellerCars() {
 
 export async function fetchCarById(id) {
   requireSupabase()
+  if (staffTable === 'cars') {
+    const rows = await adminRows((q) => q.eq('id', id).eq('company_id', COMPANY_ID))
+    return rows[0] ? scopeCars([fromRow(rows[0])])[0] : null
+  }
   const { data, error } = await supabase.from(staffTable).select('*').eq('id', id).eq('company_id', COMPANY_ID).maybeSingle()
   if (error) throw error
   return data ? scopeCars([fromRow(data)])[0] : null
@@ -237,7 +301,7 @@ async function uniqueSlug(base, ignoreId) {
   let attempt = 0
   while (true) {
     const candidate = attempt === 0 ? slug : `${slug}-${attempt}`
-    let query = supabase.from(staffTable).select('id').eq('company_id', COMPANY_ID).eq('slug', candidate)
+    let query = supabase.from('staff_cars').select('id').eq('company_id', COMPANY_ID).eq('slug', candidate)
     if (ignoreId) query = query.neq('id', ignoreId)
     const { data, error } = await query.maybeSingle()
     if (error) throw error
@@ -267,18 +331,20 @@ export async function createCar(car) {
 
 export async function updateCar(id, car) {
   requireSupabase()
-  const { data, error } = await supabase.from(staffTable).update(toRow(car)).eq('id', id).eq('company_id', COMPANY_ID).select().single()
+  const table = tableFor(id, car)
+  const { data, error } = await supabase.from(table).update(toRow(car, table)).eq('id', id).eq('company_id', COMPANY_ID).select().single()
   if (error) throw error
   portalsSyncSoon()
-  return fromRow(data)
+  return rowFrom(table, data)
 }
 
 // Status, visibilidade e o resto também chegam aos portais (só age com a conta do portal conectada)
 async function patchCar(id, patch) {
-  const { data, error } = await supabase.from(staffTable).update(patch).eq('id', id).eq('company_id', COMPANY_ID).select().single()
+  const table = tableFor(id)
+  const { data, error } = await supabase.from(table).update(patch).eq('id', id).eq('company_id', COMPANY_ID).select().single()
   if (error) throw error
   portalsSyncSoon()
-  return fromRow(data)
+  return rowFrom(table, data)
 }
 
 // Opções: hidden (boolean), saleDate (yyyy-mm-dd, informada na janela de
@@ -376,6 +442,7 @@ export async function registerTradeIn(tradeIn) {
 
 export async function deleteCar(id) {
   requireSupabase()
+  if (hiddenIds.has(id)) throw new Error('Os valores deste carro são privados: só quem ativou o cadeado exclui o carro.')
   const { error } = await supabase.from('cars').delete().eq('id', id).eq('company_id', COMPANY_ID)
   if (error) throw error
   portalsSyncSoon()
@@ -394,7 +461,8 @@ const SITE_PHOTO = /^\/uploads\/carros\//
 
 async function callPhotoApi(form) {
   assertCanWrite()
-  if (import.meta.env.DEV) {
+  // No teste local (design/painel-teste) o vite simula o api/fotos.php
+  if (import.meta.env.DEV && !import.meta.env.VITE_FOTOS_SIMULADAS) {
     throw new Error('O envio de fotos só funciona no site publicado (o api/fotos.php roda na Hostinger).')
   }
   const { data } = await supabase.auth.getSession()

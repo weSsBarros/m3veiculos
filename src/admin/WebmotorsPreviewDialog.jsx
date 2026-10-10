@@ -41,7 +41,6 @@ export default function WebmotorsPreviewDialog({ preview, onClose }) {
         <div className="olx-preview">
           <p>
             <strong>{labels.marca} {labels.modelo} {labels.versao}</strong> ·{' '}
-            {ad.PrecoReal > ad.PrecoVenda ? <>de {formatCurrency(ad.PrecoReal)} por </> : null}
             {formatCurrency(ad.PrecoVenda)}
           </p>
           {flags.length > 0 && <p className="admin-table-sub">{flags.join(' · ')}</p>}

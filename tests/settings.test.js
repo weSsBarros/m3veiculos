@@ -64,6 +64,7 @@ test('menu: cargo personalizado e menu próprio mostram só as abas da lista', (
 
 test('painel: aba de cada endereço (edição do carro conta como Estoque)', () => {
   assert.equal(tabForPath('/admin/carros/novo'), 'novo-carro')
+  assert.equal(tabForPath('/admin/carros/novo/fotos'), 'novo-carro')
   assert.equal(tabForPath('/admin/carros/abc/gastos'), 'estoque')
   assert.equal(tabForPath('/admin/financeiro/clientes'), 'financeiro')
   assert.equal(tabForPath('/admin/contratos/modelos'), 'contratos')

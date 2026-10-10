@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from 'react'
+import { useEffect, useRef, useState, lazy, Suspense } from 'react'
 import { Routes, Route, Outlet, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { CarsProvider } from './context/CarsContext.jsx'
@@ -11,34 +11,40 @@ import Estoque from './pages/Estoque.jsx'
 import CarDetail from './pages/CarDetail.jsx'
 import About from './pages/About.jsx'
 import Contact from './pages/Contact.jsx'
-import AdminLogin from './admin/AdminLogin.jsx'
 import AdminGuard, { AdminOnly, StaffOnly, CustomerFinanceOnly } from './admin/AdminGuard.jsx'
-import AdminLayout from './admin/AdminLayout.jsx'
-import AdminCarList from './admin/AdminCarList.jsx'
-import AdminCarForm from './admin/AdminCarForm.jsx'
-import AdminCarExpenses from './admin/AdminCarExpenses.jsx'
-import AdminDashboard from './admin/AdminDashboard.jsx'
-import AdminFinance from './admin/AdminFinance.jsx'
-import AdminCustomerFinance from './admin/AdminCustomerFinance.jsx'
-import AdminCompanyExpenses from './admin/AdminCompanyExpenses.jsx'
-import AdminBilling from './admin/AdminBilling.jsx'
-import AdminSupport from './admin/AdminSupport.jsx'
-import AdminSales from './admin/AdminSales.jsx'
-import AdminExternalFinance from './admin/AdminExternalFinance.jsx'
-import AdminReports from './admin/AdminReports.jsx'
-import AdminContracts from './admin/AdminContracts.jsx'
-import AdminContractTemplates from './admin/AdminContractTemplates.jsx'
-import AdminHistory from './admin/AdminHistory.jsx'
-import AdminSuppliers from './admin/AdminSuppliers.jsx'
-import AdminCustomers from './admin/AdminCustomers.jsx'
-import AdminSellers from './admin/AdminSellers.jsx'
-import AdminActivity from './admin/AdminActivity.jsx'
-import AdminSettings from './admin/AdminSettings.jsx'
-import SellerSales from './admin/SellerSales.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 import { trackSiteVisit } from './lib/statsApi.js'
 import { fetchCompanyStatus } from './lib/clientsApi.js'
 import MaintenancePage from './components/MaintenancePage.jsx'
+import { pageSeo } from './utils/seoPages.js'
+
+// Painel da loja (/admin): carrega à parte, só quando alguém entra nele. O site
+// público não baixa o código do painel (fica mais leve e mais rápido, o que
+// também conta no Google).
+const AdminLogin = lazy(() => import('./admin/AdminLogin.jsx'))
+const AdminLayout = lazy(() => import('./admin/AdminLayout.jsx'))
+const AdminCarList = lazy(() => import('./admin/AdminCarList.jsx'))
+const AdminCarForm = lazy(() => import('./admin/AdminCarForm.jsx'))
+const AdminQuickPhotos = lazy(() => import('./admin/AdminQuickPhotos.jsx'))
+const AdminCarExpenses = lazy(() => import('./admin/AdminCarExpenses.jsx'))
+const AdminDashboard = lazy(() => import('./admin/AdminDashboard.jsx'))
+const AdminFinance = lazy(() => import('./admin/AdminFinance.jsx'))
+const AdminCustomerFinance = lazy(() => import('./admin/AdminCustomerFinance.jsx'))
+const AdminCompanyExpenses = lazy(() => import('./admin/AdminCompanyExpenses.jsx'))
+const AdminBilling = lazy(() => import('./admin/AdminBilling.jsx'))
+const AdminSupport = lazy(() => import('./admin/AdminSupport.jsx'))
+const AdminSales = lazy(() => import('./admin/AdminSales.jsx'))
+const AdminExternalFinance = lazy(() => import('./admin/AdminExternalFinance.jsx'))
+const AdminReports = lazy(() => import('./admin/AdminReports.jsx'))
+const AdminContracts = lazy(() => import('./admin/AdminContracts.jsx'))
+const AdminContractTemplates = lazy(() => import('./admin/AdminContractTemplates.jsx'))
+const AdminHistory = lazy(() => import('./admin/AdminHistory.jsx'))
+const AdminSuppliers = lazy(() => import('./admin/AdminSuppliers.jsx'))
+const AdminCustomers = lazy(() => import('./admin/AdminCustomers.jsx'))
+const AdminSellers = lazy(() => import('./admin/AdminSellers.jsx'))
+const AdminActivity = lazy(() => import('./admin/AdminActivity.jsx'))
+const AdminSettings = lazy(() => import('./admin/AdminSettings.jsx'))
+const SellerSales = lazy(() => import('./admin/SellerSales.jsx'))
 
 // Painel WB.Dev (/wbdev, só o dono do sistema) e aba "Desempenho" (admin da
 // loja): carregam à parte, quando abrem
@@ -119,8 +125,30 @@ function useMaintenance() {
   return preview || blocked
 }
 
+// Título e descrição de cada página ao navegar no site (os mesmos que o
+// api/pagina.php põe no HTML; na primeira página o HTML já veio certo). A página
+// do carro cuida dos seus (carSeo.js).
+function usePageSeo() {
+  const { pathname } = useLocation()
+  const first = useRef(true)
+  useEffect(() => {
+    if (first.current) {
+      first.current = false
+      return
+    }
+    if (pathname.startsWith('/carro/')) return
+    const env = import.meta.env
+    const store = { name: env.VITE_STORE_NAME || '', city: env.VITE_STORE_CITY || '', hasAddress: env.VITE_STORE_HAS_ADDRESS === '1' }
+    const page = pathname === '/' ? { title: env.VITE_STORE_TITLE, description: env.VITE_STORE_DESCRIPTION } : pageSeo(pathname, store)
+    if (!page?.title || !store.name) return
+    document.title = page.title
+    document.querySelector('meta[name="description"]')?.setAttribute('content', page.description || '')
+  }, [pathname])
+}
+
 function PublicLayout() {
   const maintenance = useMaintenance()
+  usePageSeo()
   if (maintenance) return <MaintenancePage />
 
   return (
@@ -150,12 +178,21 @@ export default function App() {
           <Route path="/contato" element={<Contact />} />
         </Route>
 
-        <Route path="/admin/login" element={<AdminLogin />} />
+        <Route
+          path="/admin/login"
+          element={
+            <Suspense fallback={<div className="admin-boot">Carregando…</div>}>
+              <AdminLogin />
+            </Suspense>
+          }
+        />
         <Route
           path="/admin"
           element={
             <AdminGuard>
-              <AdminLayout />
+              <Suspense fallback={<div className="admin-boot">Carregando…</div>}>
+                <AdminLayout />
+              </Suspense>
             </AdminGuard>
           }
         >
@@ -167,6 +204,8 @@ export default function App() {
           <Route path="financiamentos-externos" element={<AdminExternalFinance />} />
           <Route path="relatorios" element={<AdminReports />} />
           <Route path="carros/novo" element={<AdminCarForm />} />
+          <Route path="carros/novo/fotos" element={<AdminQuickPhotos />} />
+          <Route path="fotos-celular" element={<Navigate to="/admin/carros/novo/fotos" replace />} />
           <Route path="carros/:id" element={<AdminCarForm />} />
           <Route path="carros/:id/gastos" element={<AdminCarExpenses />} />
           <Route path="suporte" element={<AdminSupport />} />

@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { Save } from 'lucide-react'
 import { fetchPlatformSettings, savePlatformSettings } from '../../lib/clientsApi.js'
 import { pixPayload } from '../../utils/pix.js'
+import { parseMoneyBR } from '../../utils/financing.js'
+import { moneyBR, parsePackages, queriesFor, queriesText } from '../../utils/plateCredits.js'
+import { MoneyInput } from '../../components/NumberInputs.jsx'
 
 const FIELDS = [
   { key: 'pixKey', label: 'Chave PIX', placeholder: 'E-mail, CPF/CNPJ, telefone ou chave aleatória', max: 77 },
@@ -33,6 +36,11 @@ export default function PlatformPaymentSettings() {
 
   async function save(e) {
     e.preventDefault()
+    const price = parseMoneyBR(form.platePrice) || 0
+    if (price <= 0 || price > 50) return setError('Confira o preço da consulta por placa (entre R$ 0,01 e R$ 50).')
+    const docPrice = parseMoneyBR(form.docPhotoPrice) || 0
+    if (docPrice <= 0 || docPrice > 50) return setError('Confira o preço da leitura da foto do documento (entre R$ 0,01 e R$ 50).')
+    if (!parsePackages(form.platePackages)) return setError('Confira os pacotes de crédito: de 1 a 6 valores em reais inteiros, ex.: 20, 40, 100.')
     setSaving(true)
     setError('')
     setMessage('')
@@ -48,12 +56,16 @@ export default function PlatformPaymentSettings() {
 
   if (!form) return error ? <p className="admin-error">{error}</p> : null
   const pixReady = Boolean(pixPayload({ key: form.pixKey, name: form.pixName, city: form.pixCity }))
+  const platePrice = parseMoneyBR(form.platePrice) || 0
+  const docPrice = parseMoneyBR(form.docPhotoPrice) || 0
+  const packages = parsePackages(form.platePackages)
 
   return (
     <form className="admin-form admin-form-section" onSubmit={save}>
       <h2>Dados de pagamento e suporte</h2>
       <p className="admin-form-hint">
-        As lojas pagam a mensalidade por estes dados (QR code e "copia e cola" na página Mensalidade e nos e-mails de lembrete).
+        As lojas pagam a mensalidade e compram os créditos da consulta por placa por estes dados (QR code e "copia e cola" na página
+        Mensalidade e nos e-mails de lembrete).
         {pixReady ? ' O PIX está pronto.' : ' Para o QR code funcionar, preencha a chave, o nome e a cidade do recebedor.'}
       </p>
       <div className="admin-form-grid">
@@ -64,6 +76,27 @@ export default function PlatformPaymentSettings() {
           </label>
         ))}
       </div>
+      <h3 className="plate-settings-title">Consulta por placa e foto do documento (créditos pré-pagos)</h3>
+      <div className="admin-form-grid">
+        <label>
+          Preço cobrado por consulta de placa
+          <MoneyInput cents value={form.platePrice} onChange={(v) => setForm((prev) => ({ ...prev, platePrice: v }))} />
+        </label>
+        <label>
+          Preço cobrado por leitura da foto do documento
+          <MoneyInput cents value={form.docPhotoPrice} onChange={(v) => setForm((prev) => ({ ...prev, docPhotoPrice: v }))} />
+        </label>
+        <label>
+          Pacotes de crédito (reais, separados por vírgula)
+          <input value={form.platePackages} maxLength={60} placeholder="Ex: 20, 40, 100" onChange={(e) => setForm((prev) => ({ ...prev, platePackages: e.target.value }))} />
+        </label>
+      </div>
+      <p className="admin-form-note">
+        {platePrice > 0 && docPrice > 0 && packages
+          ? `As lojas veem: ${packages.map((p) => `${moneyBR(p)} = ${queriesText(queriesFor(p, platePrice))}`).join(' · ')}. ` +
+            `A leitura da foto do documento sai do mesmo saldo (${moneyBR(docPrice)} cada; a IA custa menos de R$ 0,01 por foto).`
+          : 'Preencha os dois preços (acima de zero) e de 1 a 6 pacotes em reais inteiros.'}
+      </p>
       {error && <p className="admin-error">{error}</p>}
       {message && <p className="admin-success">{message}</p>}
       <div className="admin-form-actions">

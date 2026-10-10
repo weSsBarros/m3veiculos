@@ -27,7 +27,8 @@ export const DARK_OUTPUT = 'src/admin/admin-dark.css'
 const ATTR = "html[data-admin-theme='escuro']"
 
 // Documentos (página do editor de contrato, prévia do Word) continuam brancos
-const KEEP_LIGHT = /\.tpl-doc\b|\.docx-wrapper|section\.docx/
+// A câmera do "Fotos pelo celular" fica igual nos dois temas (sempre com fundo preto)
+const KEEP_LIGHT = /\.tpl-doc\b|\.docx-wrapper|section\.docx|\.camera-capture/
 
 const HEADER = `/* Tema escuro do painel. GERADO por scripts/tema-escuro.mjs a partir do admin.css e
    dos CSS dos componentes do painel: não editar à mão. Depois de mudar o admin.css,

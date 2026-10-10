@@ -187,7 +187,7 @@ test('webmotors: anúncio completo', () => {
     GarantiaDeFabrica: 'N',
     Licenciado: 'N',
     Leilao: 'N',
-    PrecoReal: 145000,
+    PrecoReal: 139899,
     PrecoVenda: 139900,
     Observacao: 'Corolla impecável, revisado.\n\nAceitamos cartão.',
     Opcional: [4, 5, 6, 13, 15],
@@ -196,12 +196,13 @@ test('webmotors: anúncio completo', () => {
   assert.equal(labels.cor, 'Prata')
   assert.equal(labels.cambio, 'CVT')
   assert.deepEqual(labels.opcionais, ['Ar condicionado', 'Bancos de couro', 'Câmera de ré', 'Controle automático de velocidade', 'Isofix'])
-  // Sem preço antigo maior, "de" e "por" iguais; blindado, garantia, licenciado e revisões pelos destaques
+  // O PrecoReal fica R$ 1 abaixo do PrecoVenda (iguais = erro 22|78), com ou sem preço antigo; blindado, garantia, licenciado e revisões pelos destaques
   const other = buildWebmotorsAd(car({
     originalPrice: null, condition: 'Segundo dono',
     highlights: ['Blindado nível III', 'Na garantia de fábrica', 'Licenciado 2026', 'Revisões feitas na concessionária'],
   }), ctx).ad
-  assert.equal(other.PrecoReal, 139900)
+  assert.equal(other.PrecoReal, 139899)
+  assert.ok(other.PrecoVenda > other.PrecoReal)
   assert.equal(other.UnicoDono, 'N')
   assert.deepEqual([other.Blindado, other.GarantiaDeFabrica, other.Licenciado, other.RevisoesEmConcessionaria, other.NaoAceitaTroca], ['S', 'S', 'S', 'S', 'N'])
 })

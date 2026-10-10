@@ -8,7 +8,8 @@
 //     Mensalidade do painel da loja (QR code e o botão "Já paguei").
 //   action "recibo": manda o recibo em PDF de um pagamento (o painel gera o PDF).
 //   action "teste": manda um e-mail de teste para o próprio remetente.
-//   action "pagamento_informado" (id do client_payment_claims) e "chamado" (id da
+//   action "pagamento_informado" (id do client_payment_claims), "credito_informado"
+//     (id do plate_credit_orders, créditos da consulta por placa) e "chamado" (id da
 //     support_messages): avisam o dono da plataforma no WhatsApp pelo CallMeBot
 //     (segredo CALLMEBOT_APIKEY; número em platform_settings.notify_phone). Quem
 //     chama é o painel da loja, com o login de quem informou ou escreveu; sem o
@@ -174,6 +175,21 @@ Deno.serve(async (req) => {
       `pago em ${dateBR(row.paid_on)}${row.receipt ? ', com comprovante' : ''}. Confira em Plataforma > Cobrança.`
     const sent = await whatsappToOwner(service, text)
     if (sent) await service.from('client_payment_claims').update({ notified_at: new Date().toISOString() }).eq('id', row.id)
+    return json({ ok: true, notified: sent })
+  }
+
+  if (body.action === 'credito_informado') {
+    // Compra de créditos da consulta por placa (seção 71); o admin da loja enxerga o pedido
+    const { data: order } = await caller.from('plate_credit_orders').select('id').eq('id', body.id || '').maybeSingle()
+    if (!order) return json({ error: 'Compra de créditos não encontrada' }, 404)
+    const { data: row } = await service.from('plate_credit_orders').select('*').eq('id', order.id).single()
+    if (row.notified_at) return json({ ok: true, notified: false })
+    const { data: company } = await service.from('companies').select('name').eq('id', row.company_id).single()
+    const text =
+      `WB.AUTO: ${company?.name || 'Uma loja'} informou a compra de créditos da consulta por placa: ${money(row.amount)}, ` +
+      `pago em ${dateBR(row.paid_on)}${row.receipt ? ', com comprovante' : ''}. Confira em Plataforma > Cobrança.`
+    const sent = await whatsappToOwner(service, text)
+    if (sent) await service.from('plate_credit_orders').update({ notified_at: new Date().toISOString() }).eq('id', row.id)
     return json({ ok: true, notified: sent })
   }
 

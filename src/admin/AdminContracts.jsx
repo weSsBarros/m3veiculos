@@ -27,6 +27,7 @@ import SignatureDialog from './SignatureDialog.jsx'
 import SignatureStatus from './SignatureStatus.jsx'
 import DateInputBR from '../components/DateInputBR.jsx'
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
+import AnoModeloInput from '../components/AnoModeloInput.jsx'
 import './admin.css'
 
 const EMPTY_BUYER = { name: '', document: '', rg: '', address: '', phone: '', email: '' }
@@ -457,7 +458,7 @@ export default function AdminContracts() {
             </label>
             <label>
               Ano Fab./Modelo
-              <input value={vehicle.modelYear} onChange={(e) => updateVehicle('modelYear', e.target.value)} placeholder="Ex: 2022/2023" />
+              <AnoModeloInput value={vehicle.modelYear} onChange={(text) => updateVehicle('modelYear', text)} />
             </label>
             <label>
               Cor

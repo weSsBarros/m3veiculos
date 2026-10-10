@@ -380,7 +380,6 @@ export function buildWebmotorsAd(car, ctx = {}) {
   const text = plain((car.highlights || []).join(' \n '))
   const settings = ctx.settings || {}
   const price = Math.round(Number(car.price))
-  const original = Math.round(Number(car.originalPrice) || 0)
   const optionals = wmOptionals(car, lists.opcionais)
   const ad = {
     CodigoModalidade: Number(ctx.modality.code),
@@ -407,8 +406,11 @@ export function buildWebmotorsAd(car, ctx = {}) {
     GarantiaDeFabrica: yesNo(/garantia de fabrica|na garantia/.test(text)),
     Licenciado: yesNo(/licenciad/.test(text)),
     Leilao: 'N',
-    // "De" (PrecoReal) e "por" (PrecoVenda): sem o preço antigo, os dois iguais
-    PrecoReal: original > price ? original : price,
+    // PrecoVenda é o preço do anúncio. A Webmotors exige PrecoVenda maior que
+    // PrecoReal (iguais = erro 22|78; Gabriel, Webmotors, 09/10/2026). O PrecoReal
+    // parece ser o antigo PrecoRevenda (preço para outros revendedores): vai R$ 1
+    // abaixo (decisão do Wesley). Não há "de/por": o preço antigo não vai.
+    PrecoReal: price - 1,
     PrecoVenda: price,
     Observacao: wmObservation(car, settings),
     Opcional: optionals,

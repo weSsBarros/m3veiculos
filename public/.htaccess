@@ -14,10 +14,24 @@
   # robots.txt e sitemap.xml saem do PHP (endereço do próprio site e carros do banco)
   RewriteRule ^robots\.txt$ api/robots.php [L]
   RewriteRule ^sitemap\.xml$ api/sitemap.php [L]
-  RewriteRule ^index\.html$ - [L]
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule . /index.html [L]
+
+  # Página inicial: o PHP põe título, descrição e dados da loja (Google e WhatsApp)
+  RewriteRule ^$ api/pagina.php [L]
+
+  # Pagina do carro sempre pelo PHP (as previas antigas do build ficaram em carro/<slug>/)
+  RewriteRule ^carro/ api/pagina.php [L]
+
+  # Se o arquivo ou pasta existir de verdade (JS, CSS, imagens etc.), serve normal
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Painel: o index.html direto, e o React cuida da rota
+  RewriteRule ^(admin|wbdev)(/|$) index.html [L]
+
+  # Páginas do site (estoque, carro, contato...): o PHP põe título, descrição e
+  # dados de cada página no index.html, e o React cuida da rota
+  RewriteRule ^ api/pagina.php [L]
 </IfModule>
 
 # Evita listagem de diretórios
@@ -31,5 +45,6 @@ Options -Indexes
   Header always set Content-Security-Policy "frame-ancestors 'self'"
   Header always set X-Content-Type-Options "nosniff"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
-  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  # Câmera só para o próprio site: "Fotos pelo celular" abre a câmera no painel
+  Header always set Permissions-Policy "camera=(self), microphone=(), geolocation=()"
 </IfModule>

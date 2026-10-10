@@ -93,6 +93,36 @@ export async function compressCarPhoto(file) {
   }
 }
 
+// Foto do CRLV para a leitura pela IA (preenchimento automático do carro): JPEG de
+// até 1600 px, que cabe no limite da função (4 MB) e continua legível. O HEIC do
+// iPhone vira JPEG aqui; se o navegador não abrir a foto, ela vai como está e a
+// função responde que o formato não serve.
+const READ_MAX_SIDE = 1600
+
+export async function documentPhotoForReading(file) {
+  let source
+  try {
+    source = await loadImage(file)
+  } catch {
+    return file
+  }
+  try {
+    const scale = Math.min(1, READ_MAX_SIDE / Math.max(source.width, source.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(source.width * scale))
+    canvas.height = Math.max(1, Math.round(source.height * scale))
+    const ctx = canvas.getContext('2d')
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height)
+    const blob = await canvasToBlob(canvas, 'image/jpeg', DOC_QUALITY)
+    if (!blob) return file
+    const base = file.name.replace(/\.[^.]+$/, '') || 'documento'
+    return new File([blob], `${base}.jpg`, { type: 'image/jpeg' })
+  } finally {
+    source.close?.()
+  }
+}
+
 // Foto de documento do cliente (CNH, RG, comprovantes): JPEG de até 2000 px, que
 // continua legível e abre em qualquer aparelho. PDF, arquivo pequeno ou foto que
 // o navegador não consegue abrir (ex.: HEIC no computador) vão como estão.

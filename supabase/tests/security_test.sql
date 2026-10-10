@@ -1997,6 +1997,404 @@ select test.check('chave de serviço: rebaixar o único administrador da loja é
   test.denied($$update public.sellers set role = 'seller' where user_id = 'aaaaaaaa-0000-0000-0000-000000000001'$$)
   and (select role from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000001' and company_id = test.company_a()) = 'admin');
 select set_config('request.jwt.claim.role', '', false);
+-- ============================ preenchimento automático: FIPE, CRLV-e e placa (71)
+insert into public.fipe_cache (key, data, reference) values ('marcas/carros', '[{"code": "56", "name": "Toyota"}]', '');
+insert into public.placa_cache (plate, data) values ('ABC1D23', '{"vehicle": {"brand": "Toyota"}, "fipeCandidates": []}');
+insert into public.placa_consultas (company_id, plate, from_cache, provider) values (test.company_a(), 'ABC1D23', false, 'apibrasil');
+
+select test.check('fipe: o valor FIPE do carro é um objeto; placa fora do padrão não entra no cache nem no registro',
+  test.denied($$update public.cars set fipe = '[]' where id = 'ca000000-0000-0000-0000-0000000000a1'$$)
+  and test.allowed($$update public.cars set fipe = '{"code": "002111-3", "value": 118500, "reference": "outubro de 2026"}'
+                    where id = 'ca000000-0000-0000-0000-0000000000a1'$$)
+  and test.denied($$insert into public.placa_cache (plate, data) values ('abc1d23', '{}')$$)
+  and test.denied($$insert into public.placa_cache (plate, data) values ('ABC1D24', '[]')$$)
+  and test.denied($$insert into public.placa_consultas (company_id, plate) values (test.company_a(), 'ABC-1D23')$$));
+
+set role anon;
+select test.check('anon: não lê o valor FIPE do carro nem os caches e registros da função veiculo-dados',
+  test.count('select fipe from cars') = -1
+  and test.count('select * from fipe_cache') <= 0
+  and test.count('select * from placa_cache') <= 0
+  and test.count('select * from placa_consultas') <= 0
+  and test.denied($$insert into fipe_cache (key, data) values ('x', '[]')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: vê o valor FIPE do carro, mas não lê nem grava os caches e o registro de consultas',
+  (select fipe ->> 'code' from cars where id = 'ca000000-0000-0000-0000-0000000000a1') = '002111-3'
+  and test.count('select * from fipe_cache') <= 0
+  and test.count('select * from placa_cache') <= 0
+  and test.count('select * from placa_consultas') <= 0
+  and test.denied($$insert into fipe_cache (key, data) values ('marcas/motos', '[]')$$)
+  and test.denied($$insert into placa_consultas (company_id, plate) values (current_company_id(), 'XYZ9A99')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: grava o valor FIPE do carro pela staff_cars e não lê o cache das placas',
+  test.allowed($$update staff_cars set fipe = '{"code": "002110-5", "value": 110200}' where id = 'ca000000-0000-0000-0000-0000000000a1'$$)
+  and test.count('select * from placa_cache') <= 0);
+-- Em outra consulta: a leitura não enxerga o que o test.allowed gravou na mesma consulta
+select test.check('vendedor: lê o valor FIPE que gravou',
+  (select fipe ->> 'code' from staff_cars where id = 'ca000000-0000-0000-0000-0000000000a1') = '002110-5');
+reset role;
+
+-- ============================ créditos da consulta por placa (71)
+select test.check('créditos: preço de R$ 0,40 e pacotes de R$ 20, 40 e 100 por padrão',
+  (select plate_price = 0.40 and plate_packages = '{20,40,100}'::numeric[] from public.platform_settings where id = 1));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: começa sem saldo e vê o preço e os pacotes',
+  (my_plate_credits() ->> 'balance')::numeric = 0
+  and (my_plate_credits() ->> 'price')::numeric = 0.40
+  and jsonb_array_length(my_plate_credits() -> 'packages') = 3
+  and (my_plate_credits() ->> 'admin')::boolean);
+select test.check('admin A: informa a compra de um pacote pago no PIX',
+  test.allowed($$select request_plate_credit(40, (now() at time zone 'America/Fortaleza')::date, null, 'PIX da conta da loja')$$));
+select test.check('admin A: valor fora dos pacotes, data no futuro, comprovante de outra loja e clique repetido são recusados',
+  test.denied($$select request_plate_credit(35, (now() at time zone 'America/Fortaleza')::date)$$)
+  and test.denied($$select request_plate_credit(20, (now() at time zone 'America/Fortaleza')::date + 5)$$)
+  and test.denied($$select request_plate_credit(20, (now() at time zone 'America/Fortaleza')::date, '{"path": "bbbbbbbb-0000-0000-0000-00000000000b/x.pdf"}')$$)
+  and test.denied($$select request_plate_credit(40, (now() at time zone 'America/Fortaleza')::date)$$));
+select test.check('admin A: não grava direto nos pedidos e no extrato, não confirma a compra, não se dá crédito e não reserva consulta',
+  test.denied($$insert into plate_credit_orders (company_id, amount, paid_on) values (current_company_id(), 20, current_date)$$)
+  and test.denied($$update plate_credit_orders set status = 'confirmado'$$)
+  and test.denied($$insert into plate_credit_ledger (company_id, kind, amount, note) values (current_company_id(), 'ajuste', 100, 'x')$$)
+  and test.denied($$select platform_review_plate_credit((select id from plate_credit_orders limit 1), true)$$)
+  and test.denied($$select platform_adjust_plate_credit(current_company_id(), 100, 'bônus')$$)
+  and test.denied($$select plate_credit_hold(current_company_id(), 'ABC1D23')$$)
+  and test.denied($$select doc_photo_credit_hold(current_company_id())$$)
+  and test.denied($$select plate_credit_release(1)$$));
+select test.check('admin A: vê o pedido aguardando a WB.Dev',
+  jsonb_array_length(my_plate_credits() -> 'orders') = 1
+  and my_plate_credits() -> 'orders' -> 0 ->> 'status' = 'pendente');
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: vê o saldo e os preços (placa e foto do documento), mas não o extrato, os pedidos nem compra créditos',
+  (my_plate_credits() ->> 'price')::numeric = 0.40
+  and (my_plate_credits() ->> 'doc_price')::numeric = 0.20
+  and not (my_plate_credits() ->> 'admin')::boolean
+  and jsonb_array_length(my_plate_credits() -> 'orders') = 0
+  and jsonb_array_length(my_plate_credits() -> 'ledger') = 0
+  and test.count('select * from plate_credit_orders') <= 0
+  and test.count('select * from plate_credit_ledger') <= 0
+  and test.denied($$select request_plate_credit(20, (now() at time zone 'America/Fortaleza')::date)$$));
+reset role;
+
+set role anon;
+select test.check('anon: não vê créditos, pedidos nem extrato',
+  test.count('select * from plate_credit_orders') <= 0
+  and test.count('select * from plate_credit_ledger') <= 0
+  and test.denied($$select my_plate_credits()$$));
+reset role;
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: recusar sem motivo não vale; confirmar põe o valor no saldo',
+  test.denied($$select platform_review_plate_credit((select id from plate_credit_orders where status = 'pendente' limit 1), false, '')$$)
+  and test.allowed($$select platform_review_plate_credit((select id from plate_credit_orders where status = 'pendente' limit 1), true)$$));
+select test.check('dono da plataforma: a mesma compra não é confirmada duas vezes; a loja A fica com R$ 40',
+  test.denied($$select platform_review_plate_credit((select id from plate_credit_orders where company_id = test.company_a() limit 1), true)$$)
+  and (select (x ->> 'balance')::numeric from jsonb_array_elements(platform_plate_credits()) x where x ->> 'company_id' = test.company_a()::text) = 40);
+select test.check('dono da plataforma: ajuste com motivo; sem motivo ou deixando o saldo negativo é recusado',
+  test.allowed($$select platform_adjust_plate_credit(test.company_a(), 2, 'Bônus de teste')$$)
+  and test.denied($$select platform_adjust_plate_credit(test.company_a(), 5, '')$$)
+  and test.denied($$select platform_adjust_plate_credit(test.company_a(), -1000, 'Estorno')$$));
+reset role;
+
+-- A função veiculo-dados (chave de serviço) reserva antes de consultar e devolve se não der certo
+select test.check('créditos: a consulta nova reserva o preço',
+  (public.plate_credit_hold(test.company_a(), 'ABC1D23') ->> 'charged')::boolean);
+select test.check('créditos: a mesma placa de novo na mesma loja não cobra',
+  not (public.plate_credit_hold(test.company_a(), 'ABC1D23') ->> 'charged')::boolean
+  and public.plate_credit_balance(test.company_a()) = 41.60);
+do $$
+declare h jsonb;
+begin
+  h := public.plate_credit_hold(test.company_a(), 'XYZ9A99');
+  perform public.plate_credit_release((h ->> 'ledger_id')::bigint);
+end $$;
+select test.check('créditos: consulta que não deu certo é devolvida',
+  public.plate_credit_balance(test.company_a()) = 41.60
+  and not exists (select 1 from public.plate_credit_ledger where plate = 'XYZ9A99'));
+select test.check('créditos: loja sem saldo não consulta (nem a placa que outra loja já pagou)',
+  test.denied($$select public.plate_credit_hold('bbbbbbbb-0000-0000-0000-00000000000b', 'ABC1D23')$$));
+
+-- Leitura da foto do documento pela IA: reserva o preço próprio e devolve se a foto não der leitura
+select test.check('créditos: a leitura da foto do documento reserva o preço dela (R$ 0,20)',
+  (public.doc_photo_credit_hold(test.company_a()) ->> 'price')::numeric = 0.20);
+select test.check('créditos: o extrato mostra a leitura do documento',
+  public.plate_credit_balance(test.company_a()) = 41.40
+  and exists (select 1 from public.plate_credit_ledger where company_id = test.company_a() and kind = 'documento' and amount = -0.20 and plate is null));
+select public.plate_credit_release((select max(id) from public.plate_credit_ledger where kind = 'documento'));
+select test.check('créditos: foto que não deu leitura é devolvida; loja sem saldo não lê documento',
+  public.plate_credit_balance(test.company_a()) = 41.60
+  and not exists (select 1 from public.plate_credit_ledger where kind = 'documento')
+  and test.denied($$select public.doc_photo_credit_hold('bbbbbbbb-0000-0000-0000-00000000000b')$$));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: extrato com a recarga, o ajuste e a consulta; compra confirmada',
+  jsonb_array_length(my_plate_credits() -> 'ledger') = 3
+  and (my_plate_credits() ->> 'balance')::numeric = 41.60
+  and my_plate_credits() -> 'orders' -> 0 ->> 'status' = 'confirmado');
+reset role;
+
+-- ============================ rascunhos do celular (72)
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: salva o rascunho com as fotos do site',
+  test.allowed($$insert into car_drafts (id, images, note, created_by_name)
+                 values ('d7000000-0000-0000-0000-000000000001', '["/uploads/carros/aaa.webp", "/uploads/carros/bbb.webp"]', 'Corolla prata', 'Outro nome')$$));
+select test.check('vendedor A: autor e loja do rascunho vêm do login, não do que o navegador mandou',
+  (select created_by from car_drafts where id = 'd7000000-0000-0000-0000-000000000001') = 'aaaaaaaa-0000-0000-0000-000000000004'
+  and (select created_by_name from car_drafts where id = 'd7000000-0000-0000-0000-000000000001') <> 'Outro nome'
+  and (select company_id from car_drafts where id = 'd7000000-0000-0000-0000-000000000001') = test.company_a());
+select test.check('vendedor A: foto fora do site, texto no lugar da lista ou rascunho de outra loja são recusados',
+  test.denied($$insert into car_drafts (images) values ('["https://outro.site/x.jpg"]')$$)
+  and test.denied($$insert into car_drafts (images) values ('[1, 2]')$$)
+  and test.denied($$insert into car_drafts (images) values ('{"a": 1}')$$)
+  and test.denied($$insert into car_drafts (company_id, images) values ('bbbbbbbb-0000-0000-0000-00000000000b', '[]')$$));
+select test.check('vendedor A: acrescenta fotos ao rascunho',
+  test.allowed($$update car_drafts set images = images || '["/uploads/carros/ccc.webp"]', created_by = null
+                 where id = 'd7000000-0000-0000-0000-000000000001'$$));
+select test.check('vendedor A: o rascunho ficou com 3 fotos e o mesmo autor',
+  (select jsonb_array_length(images) from car_drafts where id = 'd7000000-0000-0000-0000-000000000001') = 3
+  and (select created_by from car_drafts where id = 'd7000000-0000-0000-0000-000000000001') = 'aaaaaaaa-0000-0000-0000-000000000004');
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente A: vê o rascunho do vendedor (a equipe toda completa o cadastro)',
+  (select count(*) from car_drafts where id = 'd7000000-0000-0000-0000-000000000001') = 1);
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('loja B: não vê nem apaga o rascunho da loja A',
+  (select count(*) from car_drafts) = 0
+  and test.denied($$delete from car_drafts where id = 'd7000000-0000-0000-0000-000000000001'$$));
+reset role;
+select test.check('o rascunho da loja A continua lá depois da tentativa da loja B',
+  (select count(*) from public.car_drafts where id = 'd7000000-0000-0000-0000-000000000001') = 1);
+
+set role anon;
+select test.check('visitante do site: não lê nem cria rascunho',
+  test.denied($$select * from car_drafts$$)
+  and test.denied($$insert into car_drafts (images) values ('[]')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: apaga o rascunho depois de completar o cadastro',
+  test.allowed($$delete from car_drafts where id = 'd7000000-0000-0000-0000-000000000001'$$));
+select test.check('admin A: não sobra rascunho na loja',
+  (select count(*) from car_drafts) = 0);
+reset role;
+
+-- ============================ valores privados do carro (73)
+-- Loja A ganha um segundo administrador (o sócio) e um carro cadastrado pelo admin A,
+-- com custo, um gasto, um anexo do gasto e a linha do gasto no histórico
+reset role;
+select test.login(null);
+insert into auth.users (id, email) values ('aaaaaaaa-0000-0000-0000-0000000000d1', 'socio@loja-a') on conflict (id) do nothing;
+insert into public.user_company (user_id, company_id, role) values ('aaaaaaaa-0000-0000-0000-0000000000d1', test.company_a(), 'admin');
+insert into public.sellers (company_id, user_id, name, email, role, commission_type, commission_value)
+values (test.company_a(), 'aaaaaaaa-0000-0000-0000-0000000000d1', 'Sócio Dois', 'socio@loja-a', 'admin', 'none', 0);
+insert into public.cars (id, company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, category, price, status, purchase_price, purchase_date, created_by)
+values ('ca000000-0000-0000-0000-0000000000a9', test.company_a(), 'privado-a', 'Toyota', 'Corolla', 'XEi', 2021, '2021/2022', 30000, 'Automático', 'Flex', 'Prata', 'sedan',
+        120000, 'disponivel', 98000, current_date, 'aaaaaaaa-0000-0000-0000-000000000001');
+insert into public.car_expenses (id, company_id, car_id, category, description, amount)
+values ('e7300000-0000-0000-0000-000000000001', test.company_a(), 'ca000000-0000-0000-0000-0000000000a9', 'funilaria', 'Funilaria', 500);
+insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label)
+values (test.company_a(), 'aaaaaaaa-0000-0000-0000-000000000001', 'admin@loja-a', 'insert', 'car_expenses', 'e7300000-0000-0000-0000-000000000001', 'Funilaria — R$ 500');
+insert into storage.objects (bucket_id, name)
+values ('expense-attachments', test.company_a() || '/ca000000-0000-0000-0000-0000000000a9/nota.pdf');
+
+set role anon;
+select test.check('anon: não lê quem cadastrou o carro', test.count('select created_by from cars') = -1);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-0000000000d1');
+set role authenticated;
+select test.check('sócio: carro cadastrado pelo admin A, só ele ativa os valores privados',
+  (car_values_state('ca000000-0000-0000-0000-0000000000a9') ->> 'can_lock')::boolean = false
+  and car_values_state('ca000000-0000-0000-0000-0000000000a9') ->> 'creator_name' is not null
+  and test.denied($$select car_values_lock('ca000000-0000-0000-0000-0000000000a9')$$));
+select test.check('sócio: sem cadeado, vê o custo e o gasto do carro',
+  (select purchase_price from cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 98000
+  and (select count(*) from car_expenses where car_id = 'ca000000-0000-0000-0000-0000000000a9') = 1);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: ativa os valores privados do carro que cadastrou',
+  (car_values_state('ca000000-0000-0000-0000-0000000000a9') ->> 'can_lock')::boolean
+  and test.allowed($$select car_values_lock('ca000000-0000-0000-0000-0000000000a9')$$));
+select test.check('admin A: é o dono do cadeado e continua vendo custo, gasto e anexo',
+  (car_values_state('ca000000-0000-0000-0000-0000000000a9') ->> 'is_owner')::boolean
+  and (select purchase_price from cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 98000
+  and (select count(*) from car_expenses where car_id = 'ca000000-0000-0000-0000-0000000000a9') = 1
+  and test.count($$select * from storage.objects where bucket_id = 'expense-attachments' and name like '%0000000000a9/nota.pdf'$$) = 1);
+select test.check('admin A: ativar de novo avisa que já é privado',
+  test.denied($$select car_values_lock('ca000000-0000-0000-0000-0000000000a9')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-0000000000d1');
+set role authenticated;
+select test.check('sócio: com o cadeado, o carro some da tabela cars e o gasto e o anexo somem',
+  (select count(*) from cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 0
+  and (select count(*) from car_expenses where car_id = 'ca000000-0000-0000-0000-0000000000a9') = 0
+  and test.count($$select * from storage.objects where bucket_id = 'expense-attachments' and name like '%0000000000a9/nota.pdf'$$) = 0);
+select test.check('sócio: o carro continua no estoque pela staff_cars, sem o custo',
+  (select count(*) from staff_cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 1
+  and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'staff_cars' and column_name = 'purchase_price'));
+select test.check('sócio: a lista mostra o cadeado do admin A, sem acesso',
+  exists (select 1 from jsonb_array_elements(car_private_values_list()) e
+          where e ->> 'car_id' = 'ca000000-0000-0000-0000-0000000000a9' and not (e ->> 'can_see')::boolean
+            and coalesce(e ->> 'owner_name', '') <> '' and not (e ->> 'is_owner')::boolean));
+select test.check('sócio: não lê a tabela do cadeado direto',
+  test.denied($$select * from car_private_values$$));
+select test.check('sócio: muda o preço pela staff_cars',
+  test.allowed($$update staff_cars set price = 119000 where id = 'ca000000-0000-0000-0000-0000000000a9'$$));
+select test.check('sócio: não muda o custo pela função; pela tabela, nada acontece',
+  test.denied($$select set_car_purchase('ca000000-0000-0000-0000-0000000000a9', 1, current_date)$$)
+  and test.denied($$update cars set purchase_price = 1 where id = 'ca000000-0000-0000-0000-0000000000a9'$$)
+  and test.denied($$delete from cars where id = 'ca000000-0000-0000-0000-0000000000a9'$$)
+  and test.denied($$update car_expenses set amount = 1 where car_id = 'ca000000-0000-0000-0000-0000000000a9'$$));
+select test.check('sócio: lança um gasto no carro, mas não vê o que lançou',
+  test.allowed($$insert into car_expenses (id, company_id, car_id, category, description, amount)
+                 values ('e7300000-0000-0000-0000-000000000002', current_company_id(), 'ca000000-0000-0000-0000-0000000000a9', 'mecanica', 'Revisão', 800)$$)
+  and (select count(*) from car_expenses where id = 'e7300000-0000-0000-0000-000000000002') = 0);
+select test.check('sócio: não libera, não escolhe quem vê e não passa o cadeado',
+  test.denied($$select car_values_unlock('ca000000-0000-0000-0000-0000000000a9')$$)
+  and test.denied($$select car_values_share('ca000000-0000-0000-0000-0000000000a9', array['aaaaaaaa-0000-0000-0000-0000000000d1'::uuid])$$)
+  and test.denied($$select car_values_transfer('ca000000-0000-0000-0000-0000000000a9', 'aaaaaaaa-0000-0000-0000-0000000000d1')$$));
+select test.check('sócio: no histórico, os gastos do carro aparecem sem o valor',
+  (select label from activity_log where entity_id = 'e7300000-0000-0000-0000-000000000001' order by id limit 1) = 'Funilaria — valor privado'
+  and (select label from activity_log where entity_id = 'e7300000-0000-0000-0000-000000000002' order by id limit 1) = 'Revisão — valor privado');
+reset role;
+select test.check('a tentativa do sócio não mudou custo nem gasto e não apagou o carro (o preço pela staff_cars mudou)',
+  (select purchase_price from public.cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 98000
+  and (select price from public.cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 119000
+  and (select amount from public.car_expenses where id = 'e7300000-0000-0000-0000-000000000001') = 500
+  and (select count(*) from public.car_expenses where car_id = 'ca000000-0000-0000-0000-0000000000a9') = 2);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente A: não mexe no cadeado e a lista vem vazia',
+  test.denied($$select car_values_state('ca000000-0000-0000-0000-0000000000a9')$$)
+  and test.denied($$select car_values_lock('ca000000-0000-0000-0000-0000000000a9')$$)
+  and jsonb_array_length(car_private_values_list()) = 0
+  and (select count(*) from staff_cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 1);
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('loja B: não enxerga o cadeado nem o carro da loja A',
+  test.denied($$select car_values_state('ca000000-0000-0000-0000-0000000000a9')$$)
+  and jsonb_array_length(car_private_values_list()) = 0);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: só libera e passa para administradores da loja',
+  test.denied($$select car_values_share('ca000000-0000-0000-0000-0000000000a9', array['aaaaaaaa-0000-0000-0000-000000000004'::uuid])$$)
+  and test.denied($$select car_values_share('ca000000-0000-0000-0000-0000000000a9', array['bbbbbbbb-0000-0000-0000-000000000001'::uuid])$$)
+  and test.denied($$select car_values_transfer('ca000000-0000-0000-0000-0000000000a9', 'aaaaaaaa-0000-0000-0000-000000000002')$$));
+select test.check('admin A: a lista de pessoas traz o sócio e não traz o próprio admin A',
+  exists (select 1 from jsonb_array_elements(car_values_people()) e where e ->> 'id' = 'aaaaaaaa-0000-0000-0000-0000000000d1' and e ->> 'name' = 'Sócio Dois')
+  and not exists (select 1 from jsonb_array_elements(car_values_people()) e where e ->> 'id' = 'aaaaaaaa-0000-0000-0000-000000000001'));
+select test.check('admin A: libera os valores para o sócio',
+  test.allowed($$select car_values_share('ca000000-0000-0000-0000-0000000000a9', array['aaaaaaaa-0000-0000-0000-0000000000d1'::uuid])$$));
+select test.check('admin A: o sócio aparece entre os liberados',
+  car_values_state('ca000000-0000-0000-0000-0000000000a9') -> 'viewers' -> 0 ->> 'name' = 'Sócio Dois');
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-0000000000d1');
+set role authenticated;
+select test.check('sócio liberado: vê o custo e os dois gastos',
+  (select purchase_price from cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 98000
+  and (select count(*) from car_expenses where car_id = 'ca000000-0000-0000-0000-0000000000a9') = 2);
+select test.check('sócio liberado: ainda não é o dono (não libera para todos)',
+  test.denied($$select car_values_unlock('ca000000-0000-0000-0000-0000000000a9')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: tira a liberação do sócio (só o dono vê)',
+  test.allowed($$select car_values_share('ca000000-0000-0000-0000-0000000000a9', '{}')$$));
+reset role;
+select test.login('aaaaaaaa-0000-0000-0000-0000000000d1');
+set role authenticated;
+select test.check('sócio: sem a liberação, volta a não ver',
+  (select count(*) from cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 0);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: passa o cadeado para o sócio e continua vendo',
+  test.allowed($$select car_values_transfer('ca000000-0000-0000-0000-0000000000a9', 'aaaaaaaa-0000-0000-0000-0000000000d1', true)$$));
+select test.check('admin A: depois de passar, vê os valores mas não é mais o dono',
+  (select count(*) from cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 1
+  and not (car_values_state('ca000000-0000-0000-0000-0000000000a9') ->> 'is_owner')::boolean
+  and test.denied($$select car_values_unlock('ca000000-0000-0000-0000-0000000000a9')$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-0000000000d1');
+set role authenticated;
+select test.check('sócio: agora é o dono do cadeado',
+  (car_values_state('ca000000-0000-0000-0000-0000000000a9') ->> 'is_owner')::boolean
+  and (select purchase_price from cars where id = 'ca000000-0000-0000-0000-0000000000a9') = 98000);
+select test.check('sócio: libera os valores para todos',
+  test.allowed($$select car_values_unlock('ca000000-0000-0000-0000-0000000000a9')$$));
+select test.check('sócio: sem cadeado, a lista da loja fica vazia',
+  jsonb_array_length(car_private_values_list()) = 0);
+select test.check('o histórico registra ativar, liberar, tirar, passar e liberar para todos',
+  (select count(*) from activity_log where entity_id = 'ca000000-0000-0000-0000-0000000000a9' and details like 'valores privados:%') = 5);
+reset role;
+
+-- Quem cadastrou vem do login e não muda
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: cadastra um carro pela staff_cars',
+  test.allowed($$insert into staff_cars (id, company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, category, price, status)
+                 values ('ca000000-0000-0000-0000-0000000000aa', current_company_id(), 'vendedor-cadastrou', 'Fiat', 'Argo', 'Drive', 2020, '2020/2020', 1, 'Manual', 'Flex', 'Branco', 'hatch', 60000, 'disponivel')$$));
+reset role;
+select test.check('o carro do vendedor guarda quem cadastrou',
+  (select created_by from public.cars where id = 'ca000000-0000-0000-0000-0000000000aa') = 'aaaaaaaa-0000-0000-0000-000000000004');
+
+select test.login('aaaaaaaa-0000-0000-0000-0000000000d1');
+set role authenticated;
+select test.check('sócio: carro cadastrado por vendedor, qualquer administrador ativa',
+  (car_values_state('ca000000-0000-0000-0000-0000000000aa') ->> 'can_lock')::boolean
+  and test.allowed($$select car_values_lock('ca000000-0000-0000-0000-0000000000aa')$$));
+select test.check('sócio: tenta trocar quem cadastrou',
+  test.allowed($$update cars set created_by = 'aaaaaaaa-0000-0000-0000-0000000000d1' where id = 'ca000000-0000-0000-0000-0000000000aa'$$));
+reset role;
+select test.check('quem cadastrou continua o vendedor',
+  (select created_by from public.cars where id = 'ca000000-0000-0000-0000-0000000000aa') = 'aaaaaaaa-0000-0000-0000-000000000004');
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não vê os valores do carro trancado pelo sócio',
+  (select count(*) from cars where id = 'ca000000-0000-0000-0000-0000000000aa') = 0);
+reset role;
+
+-- Dono que deixou de ser administrador: o cadeado não vale mais
+select test.login(null);
+update public.user_company set role = 'manager' where user_id = 'aaaaaaaa-0000-0000-0000-0000000000d1' and company_id = test.company_a();
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: com o sócio rebaixado, os valores do carro voltam para todos',
+  (select count(*) from cars where id = 'ca000000-0000-0000-0000-0000000000aa') = 1
+  and not (car_values_state('ca000000-0000-0000-0000-0000000000aa') ->> 'locked')::boolean
+  and (car_values_state('ca000000-0000-0000-0000-0000000000aa') ->> 'can_lock')::boolean);
+reset role;
 
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe

@@ -81,6 +81,7 @@ const FIELD_LABELS = {
   olx_catalog: 'versão da OLX',
   webmotors_publish: 'publicar na Webmotors',
   webmotors_catalog: 'versão da Webmotors',
+  fipe: 'versão e valor FIPE',
   signed_on: 'data da assinatura',
   title: 'descrição',
   car_id: 'carro',

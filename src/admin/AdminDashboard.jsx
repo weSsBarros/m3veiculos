@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw, AlertTriangle, Clock, Wallet, ImageOff, FileWarning, ClipboardList, Landmark, HandCoins, Bookmark, BellRing, CircleDollarSign, Megaphone, Receipt } from 'lucide-react'
+import { RefreshCcw, AlertTriangle, Clock, Wallet, ImageOff, FileWarning, ClipboardList, Landmark, HandCoins, Bookmark, BellRing, CircleDollarSign, Megaphone, Receipt, Lock } from 'lucide-react'
 import { fetchOverdueInstallments, fetchUpcomingInstallments } from '../lib/financingApi.js'
 import { fetchContractsAdmin } from '../lib/contractsApi.js'
 import { fetchCustomerDocuments } from '../lib/customerDocumentsApi.js'
@@ -22,6 +22,7 @@ import { fetchSales, effectiveSalePrice, effectiveSaleDate } from '../lib/salesA
 import { fetchSellers } from '../lib/sellersApi.js'
 import { expenseCategoryLabel, formatCurrency, formatCurrencyCents, daysInStock, todayISO } from '../utils/carFormat.js'
 import { periodRange, inRange } from '../utils/period.js'
+import { withoutPrivate, privateNote } from '../utils/privateValues.js'
 import BarChart from '../components/charts/BarChart.jsx'
 import DonutChart from '../components/charts/DonutChart.jsx'
 import HBarChart from '../components/charts/HBarChart.jsx'
@@ -160,8 +161,12 @@ export default function AdminDashboard() {
     () => soldEntries.filter((e) => inRange(e.date, { start: range.start, end: range.end })),
     [soldEntries, range.start, range.end]
   )
-  const periodRevenue = periodEntries.reduce((sum, e) => sum + (e.price || 0), 0)
-  const periodCommission = periodEntries.reduce((sum, e) => sum + (e.sale?.commissionAmount || 0), 0)
+  // Valores privados (seção 73): carro com o cadeado de outro sócio fica fora das
+  // contas de dinheiro (a quantidade de vendas continua contando)
+  const privateCount = useMemo(() => withoutPrivate(cars).hidden, [cars])
+  const moneyEntries = periodEntries.filter((e) => !e.car.valuesHidden)
+  const periodRevenue = moneyEntries.reduce((sum, e) => sum + (e.price || 0), 0)
+  const periodCommission = moneyEntries.reduce((sum, e) => sum + (e.sale?.commissionAmount || 0), 0)
 
   const expensesByCar = useMemo(() => {
     const map = {}
@@ -199,7 +204,7 @@ export default function AdminDashboard() {
       months.push({ year: d.getFullYear(), monthIdx: d.getMonth(), label: MONTH_LABELS[d.getMonth()], value: 0 })
     }
     for (const e of soldEntries) {
-      if (!e.date) continue
+      if (!e.date || e.car.valuesHidden) continue
       const [y, m] = e.date.split('-').map(Number)
       const match = months.find((mo) => mo.year === y && mo.monthIdx === m - 1)
       if (match) match.value += e.price || 0
@@ -221,8 +226,9 @@ export default function AdminDashboard() {
     for (const e of periodEntries) {
       const key = e.sale?.sellerId || 'loja'
       if (!map[key]) map[key] = { revenue: 0, count: 0, commission: 0 }
-      map[key].revenue += e.price || 0
       map[key].count += 1
+      if (e.car.valuesHidden) continue
+      map[key].revenue += e.price || 0
       map[key].commission += e.sale?.commissionAmount || 0
     }
     return Object.entries(map)
@@ -430,6 +436,11 @@ export default function AdminDashboard() {
           <strong>{availableCars.length ? `${avgDaysInStock} ${avgDaysInStock === 1 ? 'dia' : 'dias'}` : '—'}</strong>
         </div>
       </div>
+      )}
+      {show('stats') && privateCount > 0 && (canSeeCosts || canSeeSaleValues) && (
+        <p className="private-values-note">
+          <Lock size={14} aria-hidden="true" /> {privateNote(privateCount)} A quantidade de carros e de vendas conta todos.
+        </p>
       )}
 
       <div className="charts-grid charts-grid-3">

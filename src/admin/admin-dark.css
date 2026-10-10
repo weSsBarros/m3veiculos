@@ -321,16 +321,180 @@ html[data-admin-theme='escuro'] .admin-form-hint {
   color: var(--color-text-muted);
 }
 
-html[data-admin-theme='escuro'] .fipe-lookup-details {
-  background: var(--color-bg-alt);
-}
-
-html[data-admin-theme='escuro'] .fipe-lookup-details summary {
+html[data-admin-theme='escuro'] .autofill-actions .btn.is-open {
+  border-color: var(--color-primary);
   color: var(--admin-primary-text);
 }
 
-html[data-admin-theme='escuro'] .fipe-lookup-result {
+html[data-admin-theme='escuro'] .fipe-saved {
+  background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .fipe-saved-name strong,
+html[data-admin-theme='escuro'] .fipe-result-name strong {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .fipe-saved-name span,
+html[data-admin-theme='escuro'] .fipe-saved-price span,
+html[data-admin-theme='escuro'] .fipe-result-name span,
+html[data-admin-theme='escuro'] .fipe-result-price span {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .fipe-saved-price strong,
+html[data-admin-theme='escuro'] .fipe-result-price strong {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .fipe-saved-price span.is-old {
+  color: #f1c47e;
+}
+
+html[data-admin-theme='escuro'] .fipe-cascade,
+html[data-admin-theme='escuro'] .autofill-review {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .fipe-cascade-status,
+html[data-admin-theme='escuro'] .autofill-versions-status {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .fipe-result {
+  border: 1px solid var(--color-border);
   background: var(--admin-surface);
+}
+
+html[data-admin-theme='escuro'] .fipe-result-stale {
+  color: #f1c47e;
+}
+
+html[data-admin-theme='escuro'] .autofill-review-head p {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .autofill-warning {
+  background: rgba(245, 166, 35, 0.21);
+  color: #f1c47e;
+}
+
+html[data-admin-theme='escuro'] .autofill-versions {
+  border: none;
+}
+
+html[data-admin-theme='escuro'] .autofill-versions legend {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .autofill-versions-hint {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .admin-form label.autofill-version,
+html[data-admin-theme='escuro'] .admin-form label.autofill-row {
+  border: 1px solid var(--color-border);
+  background: var(--admin-surface);
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .admin-form label.autofill-version:hover,
+html[data-admin-theme='escuro'] .admin-form label.autofill-row:hover {
+  border-color: var(--color-primary);
+}
+
+html[data-admin-theme='escuro'] .admin-form .autofill-version input,
+html[data-admin-theme='escuro'] .admin-form .autofill-row input {
+  accent-color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .autofill-version small {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .admin-form label.autofill-version.is-chosen {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+html[data-admin-theme='escuro'] .admin-form label.autofill-row.is-diferente {
+  border-color: #745a2f;
+  background: #41341b;
+}
+
+html[data-admin-theme='escuro'] .autofill-row-label {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .autofill-row-value {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .autofill-row-current {
+  color: #f1c47e;
+}
+
+html[data-admin-theme='escuro'] .autofill-same {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .admin-form .autofill-save-file {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .admin-form label.is-autofilled input,
+html[data-admin-theme='escuro'] .admin-form label.is-autofilled select {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+html[data-admin-theme='escuro'] .autofill-note {
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .autofill-doc-warning {
+  color: #f1c47e;
+}
+
+html[data-admin-theme='escuro'] .ano-modelo-erro {
+  color: var(--admin-danger-text);
+}
+
+html[data-admin-theme='escuro'] .fipe-price-ref {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .autofill-plate-block {
+  border-top: 1px solid var(--color-border);
+}
+
+html[data-admin-theme='escuro'] .autofill-credits {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .autofill-credits strong {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .plate-credits-lead {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .plate-credits-in {
+  color: var(--admin-success-text);
+}
+
+html[data-admin-theme='escuro'] .plate-credits-out {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .plate-credits-empty {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .plate-credits-adjust summary {
+  color: var(--admin-primary-text);
 }
 
 html[data-admin-theme='escuro'] .admin-form label {
@@ -2519,6 +2683,141 @@ html[data-admin-theme='escuro'] .wbdev-showcase-store-head small {
 
 html[data-admin-theme='escuro'] .wbdev-showcase:fullscreen {
   background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .quick-photos-intro {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .quick-photos-shot {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+}
+
+html[data-admin-theme='escuro'] .quick-photos-shot.is-erro {
+  border-color: var(--color-danger);
+}
+
+html[data-admin-theme='escuro'] .quick-photos-badge {
+  background: rgba(14, 17, 23, 0.72);
+  color: #ffffff;
+}
+
+html[data-admin-theme='escuro'] .quick-photos-badge.is-ok {
+  background: var(--color-success);
+}
+
+html[data-admin-theme='escuro'] .quick-photos-remove {
+  border: 0;
+  background: rgba(14, 17, 23, 0.72);
+  color: #ffffff;
+}
+
+html[data-admin-theme='escuro'] .quick-photos-retry {
+  border: 0;
+  background: var(--color-danger);
+  color: #ffffff;
+}
+
+html[data-admin-theme='escuro'] .quick-photos-status {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .car-draft-card {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+html[data-admin-theme='escuro'] .car-draft-thumbs img {
+  background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .car-draft-empty {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .car-draft-banner {
+  background: var(--color-primary-light);
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .camera-capture {
+  background: #000000;
+  color: #ffffff;
+}
+
+html[data-admin-theme='escuro'] .camera-capture-icon {
+  border: 0;
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+html[data-admin-theme='escuro'] .camera-capture-view video {
+  background: #000000;
+}
+
+html[data-admin-theme='escuro'] .camera-capture-flash {
+  background: #ffffff;
+}
+
+html[data-admin-theme='escuro'] .camera-capture-last {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+html[data-admin-theme='escuro'] .camera-capture-shutter {
+  border: 5px solid rgba(255, 255, 255, 0.55);
+  background: #ffffff;
+}
+
+html[data-admin-theme='escuro'] .camera-capture-done {
+  border: 0;
+  background: #ffffff;
+  color: #000000;
+}
+
+html[data-admin-theme='escuro'] .private-values {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .private-values.is-locked {
+  border-color: transparent;
+  background: var(--color-primary-light);
+}
+
+html[data-admin-theme='escuro'] .private-values-icon {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .private-values.is-locked .private-values-icon {
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .private-values-text span {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .private-values-box {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+html[data-admin-theme='escuro'] .private-values-note {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .private-values-cell {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .stock-card-badge.is-private {
+  background: #334155;
+}
+
+html[data-admin-theme='escuro'] .admin-hidden-badge.is-private {
+  background: rgba(51, 65, 85, 0.19);
+  color: #a6b4c9;
 }
 
 /* src/components/ConfirmDialog.css */

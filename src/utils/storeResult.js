@@ -3,13 +3,17 @@
 // pagas no período (pela data do pagamento, mesmo de carro vendido em outro mês;
 // decisão do Wesley em 07/10/2026) − despesas da empresa com vencimento no período.
 // soldEntries: [{ car, sale, price, date }] de todos os carros vendidos (valor e
-// data efetivos da venda). Testado em tests/storeResult.test.js.
+// data efetivos da venda). Venda de carro com o cadeado de outro sócio (valores
+// privados, seção 73) fica de fora e é contada em privateCount.
+// Testado em tests/storeResult.test.js.
 
 import { inRange } from './period.js'
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
-export function storeResult({ soldEntries = [], carExpenses = [], companyExpenses = [], range }) {
+export function storeResult({ soldEntries: allEntries = [], carExpenses = [], companyExpenses = [], range }) {
+  const privateCount = allEntries.filter((e) => e.car?.valuesHidden && e.date && inRange(e.date, range)).length
+  const soldEntries = allEntries.filter((e) => !e.car?.valuesHidden)
   const expensesByCar = {}
   for (const e of carExpenses) expensesByCar[e.carId] = (expensesByCar[e.carId] || 0) + (Number(e.amount) || 0)
 
@@ -52,6 +56,7 @@ export function storeResult({ soldEntries = [], carExpenses = [], companyExpense
     companyPaid,
     companyOpen: round2(company - companyPaid),
     net: round2(grossMargin - commissions - company),
+    privateCount,
   }
 }
 

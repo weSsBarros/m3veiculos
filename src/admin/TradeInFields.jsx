@@ -1,4 +1,5 @@
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
+import AnoModeloInput from '../components/AnoModeloInput.jsx'
 
 export const EMPTY_TRADE_IN = {
   enabled: false,
@@ -42,12 +43,12 @@ export default function TradeInFields({ value, onChange, disabled }) {
               <input value={value.version} onChange={(e) => update('version', e.target.value)} disabled={disabled} />
             </label>
             <label>
-              Ano de fabricação
-              <input inputMode="numeric" value={value.year} onChange={(e) => update('year', e.target.value.replace(/\D/g, '').slice(0, 4))} disabled={disabled} />
-            </label>
-            <label>
               Ano/Modelo
-              <input value={value.modelYear} onChange={(e) => update('modelYear', e.target.value)} placeholder="Ex: 2019/2020" disabled={disabled} />
+              <AnoModeloInput
+                value={value.modelYear}
+                onChange={(text, parsed) => onChange({ ...value, modelYear: text, ...(parsed.ok ? { year: parsed.year } : {}) })}
+                disabled={disabled}
+              />
             </label>
             <label>
               Quilometragem

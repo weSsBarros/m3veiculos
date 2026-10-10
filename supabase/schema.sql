@@ -8566,7 +8566,995 @@ end;
 $$;
 
 
--- 70) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 70) Conferência: passou para a seção 74, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 71) Preenchimento automático do cadastro do carro (FIPE, CRLV-e, foto e placa) ---
+-- Pedido do Wesley em 09/10/2026. Quem fala com a tabela FIPE, lê o CRLV-e (PDF
+-- ou foto, esta pela IA) e consulta a placa é a Edge Function veiculo-dados; o
+-- painel nunca chama esses serviços direto.
+-- * cars.fipe: a versão FIPE escolhida e o valor do mês (código FIPE, nome,
+--   códigos de marca, modelo e ano, ano-modelo, combustível, valor e mês de
+--   referência). Não vai para o site: a coluna fica fora da lista de colunas que
+--   o anônimo lê. A staff_cars ganha a coluna (gerente e vendedor também usam).
+-- * fipe_cache: respostas da FIPE, as mesmas para todas as lojas (listas por 30
+--   dias; o valor até virar o mês de referência).
+-- * placa_cache: consulta paga por placa (só com os segredos da APIBrasil), por 30
+--   dias, só com dados do veículo (nada do dono). placa_consultas: cada consulta
+--   (loja, placa, se veio do cache), para conferir a cobrança e o teto diário.
+-- Só a chave de serviço (a função) lê e grava as três tabelas: RLS ligada, sem
+-- regras, e nenhuma permissão para anon ou authenticated.
+-- * Créditos da consulta por placa (pré-pago, no fim da seção): a loja compra
+--   pacotes pelo PIX da WB.Dev e cada consulta nova debita o preço do saldo; a
+--   leitura da foto do documento sai do mesmo saldo, com preço próprio.
+
+alter table public.cars add column if not exists fipe jsonb not null default '{}';
+alter table public.cars drop constraint if exists cars_fipe_check;
+alter table public.cars add constraint cars_fipe_check check (jsonb_typeof(fipe) = 'object');
+
+-- Estoque da equipe (admin, gerente e vendedor): tudo menos o custo de compra.
+drop view if exists public.staff_cars;
+create view public.staff_cars as
+select
+  id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
+  category, condition, price, original_price, badge, status, highlights, description, images,
+  featured, hidden, sold_at, plate, chassis, renavam, documents, customer_id, stock_alert_days,
+  company_id, created_at, updated_at, internal_notes, intake_items, inspection,
+  entry_type, owner_customer_id, whatsapp_seller_id,
+  renave_entry_status, renave_entry_on, renave_entry_protocol,
+  renave_exit_status, renave_exit_on, renave_exit_protocol,
+  olx_publish, olx_catalog, webmotors_publish, webmotors_catalog, fipe
+from public.cars
+where company_id = public.current_company_id() and public.can_edit_stock()
+with local check option;
+
+revoke all on public.staff_cars from anon, authenticated, public;
+grant select, insert, update on public.staff_cars to authenticated;
+
+create table if not exists public.fipe_cache (
+  key text primary key check (char_length(key) between 1 and 120),
+  data jsonb not null,
+  reference text not null default '',
+  fetched_at timestamptz not null default now()
+);
+alter table public.fipe_cache enable row level security;
+revoke all on public.fipe_cache from anon, authenticated, public;
+
+create table if not exists public.placa_cache (
+  plate text primary key check (plate ~ '^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$'),
+  data jsonb not null check (jsonb_typeof(data) = 'object'),
+  fetched_at timestamptz not null default now()
+);
+alter table public.placa_cache enable row level security;
+revoke all on public.placa_cache from anon, authenticated, public;
+
+create table if not exists public.placa_consultas (
+  id bigint generated always as identity primary key,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  plate text not null check (plate ~ '^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$'),
+  from_cache boolean not null default false,
+  provider text not null default '',
+  created_at timestamptz not null default now()
+);
+create index if not exists placa_consultas_company_idx on public.placa_consultas (company_id, created_at desc);
+alter table public.placa_consultas enable row level security;
+revoke all on public.placa_consultas from anon, authenticated, public;
+
+-- Créditos da consulta por placa (decisões do Wesley em 09/10/2026) ----------------
+-- * Pré-pago: o admin da loja escolhe um pacote (platform_settings.plate_packages,
+--   em reais), paga pelo PIX da WB.Dev e clica em "Já paguei" (plate_credit_orders).
+--   A WB.Dev confirma em Plataforma → Cobrança e o valor entra no saldo.
+-- * O saldo é a soma do extrato (plate_credit_ledger): recarga (+), consulta (−) e
+--   ajuste feito pela WB.Dev (+ ou −).
+-- * Cada consulta nova que acha o carro debita o preço (plate_price, R$ 0,40).
+--   Placa não encontrada ou erro não cobra; a mesma placa de novo na mesma loja em
+--   30 dias também não. Quem debita é a função veiculo-dados, com a chave de
+--   serviço: plate_credit_hold (reserva antes de consultar, com trava por loja) e
+--   plate_credit_release (devolve se a consulta não deu certo).
+-- * A equipe toda vê o saldo (para consultar); extrato e compra são do admin.
+-- * Leitura da FOTO do documento pela IA (decisão do Wesley: desconta dos mesmos
+--   créditos, com preço próprio, doc_photo_price, padrão R$ 0,20): reserva com
+--   doc_photo_credit_hold e devolve com plate_credit_release se a foto não der leitura.
+alter table public.platform_settings add column if not exists plate_price numeric(6, 2) not null default 0.40;
+alter table public.platform_settings add column if not exists doc_photo_price numeric(6, 2) not null default 0.20;
+alter table public.platform_settings drop constraint if exists platform_settings_doc_photo_price_check;
+alter table public.platform_settings add constraint platform_settings_doc_photo_price_check check (doc_photo_price > 0 and doc_photo_price <= 50);
+alter table public.platform_settings add column if not exists plate_packages numeric(10, 2)[] not null default '{20,40,100}';
+alter table public.platform_settings drop constraint if exists platform_settings_plate_price_check;
+alter table public.platform_settings add constraint platform_settings_plate_price_check check (plate_price > 0 and plate_price <= 50);
+alter table public.platform_settings drop constraint if exists platform_settings_plate_packages_check;
+alter table public.platform_settings add constraint platform_settings_plate_packages_check
+  check (cardinality(plate_packages) between 1 and 6 and 0 < all (plate_packages) and 10000 >= all (plate_packages));
+
+create table if not exists public.plate_credit_orders (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  amount numeric(10, 2) not null check (amount > 0),
+  paid_on date not null,
+  receipt jsonb check (receipt is null or jsonb_typeof(receipt) = 'object'),
+  note text not null default '' check (char_length(note) <= 500),
+  status text not null default 'pendente' check (status in ('pendente', 'confirmado', 'recusado')),
+  response text not null default '' check (char_length(response) <= 500),
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_by_email text not null default '',
+  created_at timestamptz not null default now(),
+  reviewed_at timestamptz,
+  notified_at timestamptz
+);
+create index if not exists plate_credit_orders_company_idx on public.plate_credit_orders (company_id, created_at desc);
+create index if not exists plate_credit_orders_pending_idx on public.plate_credit_orders (created_at) where status = 'pendente';
+alter table public.plate_credit_orders enable row level security;
+revoke all on public.plate_credit_orders from anon;
+revoke insert, update, delete on public.plate_credit_orders from authenticated;
+
+drop policy if exists "Store admins and platform read plate credit orders" on public.plate_credit_orders;
+create policy "Store admins and platform read plate credit orders"
+on public.plate_credit_orders for select
+to authenticated
+using ((company_id = public.current_company_id() and public.is_company_admin()) or public.is_platform_admin());
+
+create table if not exists public.plate_credit_ledger (
+  id bigint generated always as identity primary key,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  kind text not null check (kind in ('recarga', 'consulta', 'documento', 'ajuste')),
+  amount numeric(10, 2) not null check (amount <> 0),
+  plate text check (plate is null or plate ~ '^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$'),
+  order_id uuid references public.plate_credit_orders(id) on delete set null,
+  note text not null default '' check (char_length(note) <= 200),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  check ((kind = 'consulta') = (plate is not null)),
+  check (kind not in ('consulta', 'documento') or amount < 0),
+  check (kind <> 'recarga' or amount > 0)
+);
+create index if not exists plate_credit_ledger_company_idx on public.plate_credit_ledger (company_id, created_at desc);
+create index if not exists plate_credit_ledger_plate_idx on public.plate_credit_ledger (company_id, plate, created_at desc) where kind = 'consulta';
+alter table public.plate_credit_ledger enable row level security;
+revoke all on public.plate_credit_ledger from anon;
+revoke insert, update, delete on public.plate_credit_ledger from authenticated;
+
+drop policy if exists "Store admins and platform read plate credit ledger" on public.plate_credit_ledger;
+create policy "Store admins and platform read plate credit ledger"
+on public.plate_credit_ledger for select
+to authenticated
+using ((company_id = public.current_company_id() and public.is_company_admin()) or public.is_platform_admin());
+
+create or replace function public.plate_credit_balance(p_company uuid)
+returns numeric
+language sql stable security definer set search_path = public
+as $$
+  select coalesce(sum(amount), 0) from public.plate_credit_ledger where company_id = p_company
+$$;
+revoke execute on function public.plate_credit_balance(uuid) from anon, authenticated, public;
+grant execute on function public.plate_credit_balance(uuid) to service_role;
+
+-- Saldo, preço e pacotes para a equipe da loja; pedidos e extrato só para o admin
+create or replace function public.my_plate_credits()
+returns jsonb
+language plpgsql stable security definer set search_path = public, auth
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_admin boolean := public.is_company_admin();
+  s public.platform_settings%rowtype;
+begin
+  if v_company is null then
+    raise exception 'Acesso restrito à equipe da loja' using errcode = '42501';
+  end if;
+  select * into s from public.platform_settings where id = 1;
+  return jsonb_build_object(
+    'balance', public.plate_credit_balance(v_company),
+    'price', coalesce(s.plate_price, 0.40),
+    'doc_price', coalesce(s.doc_photo_price, 0.20),
+    'packages', to_jsonb(coalesce(s.plate_packages, '{20,40,100}'::numeric[])),
+    'admin', v_admin,
+    'orders', case when v_admin then (
+      select coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'amount', o.amount, 'paid_on', o.paid_on, 'status', o.status,
+        'response', o.response, 'created_at', o.created_at) order by o.created_at desc), '[]'::jsonb)
+      from (select * from public.plate_credit_orders where company_id = v_company order by created_at desc limit 20) o
+    ) else '[]'::jsonb end,
+    'ledger', case when v_admin then (
+      select coalesce(jsonb_agg(jsonb_build_object('id', l.id, 'kind', l.kind, 'amount', l.amount, 'plate', l.plate,
+        'note', l.note, 'created_at', l.created_at, 'user_email', coalesce(u.email, '')) order by l.created_at desc, l.id desc), '[]'::jsonb)
+      from (select * from public.plate_credit_ledger where company_id = v_company order by created_at desc, id desc limit 50) l
+      left join auth.users u on u.id = l.created_by
+    ) else '[]'::jsonb end);
+end $$;
+revoke execute on function public.my_plate_credits() from anon, public;
+grant execute on function public.my_plate_credits() to authenticated;
+
+-- "Já paguei" dos créditos: o admin da loja informa o pacote pago
+create or replace function public.request_plate_credit(p_amount numeric, p_paid_on date, p_receipt jsonb default null, p_note text default '')
+returns public.plate_credit_orders
+language plpgsql security definer set search_path = public, auth
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_packages numeric[];
+  v_row public.plate_credit_orders;
+begin
+  if v_company is null or not public.is_company_admin() then
+    raise exception 'Só o administrador da loja compra créditos' using errcode = '42501';
+  end if;
+  select plate_packages into v_packages from public.platform_settings where id = 1;
+  if p_amount is null or not (p_amount = any (coalesce(v_packages, '{20,40,100}'::numeric[]))) then
+    raise exception 'Escolha um dos pacotes de crédito' using errcode = '22023';
+  end if;
+  if p_paid_on is null or p_paid_on > (now() at time zone 'America/Fortaleza')::date + 1 then
+    raise exception 'Informe a data do pagamento' using errcode = '22023';
+  end if;
+  if p_receipt is not null and (p_receipt ->> 'path') is not null
+     and split_part(p_receipt ->> 'path', '/', 1) <> v_company::text then
+    raise exception 'Comprovante de outra loja' using errcode = '42501';
+  end if;
+  -- Clique repetido: o mesmo pacote, no mesmo dia, há poucos minutos
+  if exists (select 1 from public.plate_credit_orders o where o.company_id = v_company and o.status = 'pendente'
+             and o.amount = p_amount and o.paid_on = p_paid_on and o.created_at > now() - interval '10 minutes') then
+    raise exception 'Esse pagamento já foi informado. Aguarde a WB.Dev conferir.' using errcode = '23505';
+  end if;
+  insert into public.plate_credit_orders (company_id, amount, paid_on, receipt, note, created_by_email)
+  values (v_company, p_amount, p_paid_on, p_receipt, left(coalesce(p_note, ''), 500),
+          coalesce((select u.email from auth.users u where u.id = auth.uid()), ''))
+  returning * into v_row;
+  return v_row;
+end $$;
+revoke execute on function public.request_plate_credit(numeric, date, jsonb, text) from anon, public;
+grant execute on function public.request_plate_credit(numeric, date, jsonb, text) to authenticated;
+
+-- A WB.Dev confirma (o valor entra no saldo) ou recusa com o motivo (a loja vê)
+create or replace function public.platform_review_plate_credit(p_id uuid, p_confirm boolean, p_response text default '')
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  o public.plate_credit_orders;
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  select * into o from public.plate_credit_orders where id = p_id for update;
+  if not found then
+    raise exception 'Compra de créditos não encontrada' using errcode = 'P0002';
+  end if;
+  if o.status <> 'pendente' then
+    raise exception 'Esta compra já foi conferida' using errcode = '22023';
+  end if;
+  if not p_confirm and btrim(coalesce(p_response, '')) = '' then
+    raise exception 'Escreva o motivo (a loja vê)' using errcode = '22023';
+  end if;
+  if p_confirm then
+    insert into public.plate_credit_ledger (company_id, kind, amount, order_id, note, created_by)
+    values (o.company_id, 'recarga', o.amount, o.id, 'Pacote pago por PIX', auth.uid());
+  end if;
+  update public.plate_credit_orders
+  set status = case when p_confirm then 'confirmado' else 'recusado' end,
+      response = left(coalesce(p_response, ''), 500),
+      reviewed_at = now()
+  where id = p_id;
+  return jsonb_build_object('status', case when p_confirm then 'confirmado' else 'recusado' end,
+                            'balance', public.plate_credit_balance(o.company_id));
+end $$;
+revoke execute on function public.platform_review_plate_credit(uuid, boolean, text) from anon, public;
+grant execute on function public.platform_review_plate_credit(uuid, boolean, text) to authenticated;
+
+-- Ajuste da WB.Dev (bônus, devolução): com motivo e sem deixar o saldo negativo
+create or replace function public.platform_adjust_plate_credit(p_company uuid, p_amount numeric, p_note text)
+returns numeric
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  if p_amount is null or p_amount = 0 or abs(p_amount) > 10000 then
+    raise exception 'Informe o valor do ajuste' using errcode = '22023';
+  end if;
+  if btrim(coalesce(p_note, '')) = '' then
+    raise exception 'Escreva o motivo do ajuste' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.companies where id = p_company) then
+    raise exception 'Loja não encontrada' using errcode = 'P0002';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('plate_credit:' || p_company::text, 0));
+  if public.plate_credit_balance(p_company) + p_amount < 0 then
+    raise exception 'O ajuste deixaria o saldo negativo' using errcode = '22023';
+  end if;
+  insert into public.plate_credit_ledger (company_id, kind, amount, note, created_by)
+  values (p_company, 'ajuste', p_amount, left(btrim(p_note), 200), auth.uid());
+  return public.plate_credit_balance(p_company);
+end $$;
+revoke execute on function public.platform_adjust_plate_credit(uuid, numeric, text) from anon, public;
+grant execute on function public.platform_adjust_plate_credit(uuid, numeric, text) to authenticated;
+
+-- Saldo de cada loja e consultas pagas em 30 dias (Plataforma → Cobrança)
+create or replace function public.platform_plate_credits()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'company_id', c.id, 'name', c.name, 'slug', c.slug,
+      'balance', coalesce(t.balance, 0), 'queries_30d', coalesce(t.queries_30d, 0), 'docs_30d', coalesce(t.docs_30d, 0),
+      'spent_30d', coalesce(t.spent_30d, 0), 'bought_total', coalesce(t.bought_total, 0),
+      'last_recharge_at', t.last_recharge_at) order by c.name), '[]'::jsonb)
+    from public.companies c
+    left join lateral (
+      select sum(l.amount) as balance,
+             count(*) filter (where l.kind = 'consulta' and l.created_at > now() - interval '30 days') as queries_30d,
+             count(*) filter (where l.kind = 'documento' and l.created_at > now() - interval '30 days') as docs_30d,
+             -sum(l.amount) filter (where l.kind in ('consulta', 'documento') and l.created_at > now() - interval '30 days') as spent_30d,
+             sum(l.amount) filter (where l.kind = 'recarga') as bought_total,
+             max(l.created_at) filter (where l.kind = 'recarga') as last_recharge_at
+      from public.plate_credit_ledger l where l.company_id = c.id
+    ) t on true
+    where exists (select 1 from public.plate_credit_ledger l where l.company_id = c.id)
+       or exists (select 1 from public.plate_credit_orders o where o.company_id = c.id)
+  );
+end $$;
+revoke execute on function public.platform_plate_credits() from anon, public;
+grant execute on function public.platform_plate_credits() to authenticated;
+
+-- Só a função veiculo-dados (chave de serviço): reserva o valor antes de consultar.
+-- A mesma placa já cobrada desta loja em 30 dias sai de graça (charged = false).
+-- Sem saldo: erro SALDO_INSUFICIENTE.
+create or replace function public.plate_credit_hold(p_company uuid, p_plate text, p_user uuid default null)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_price numeric;
+  v_balance numeric;
+  v_id bigint;
+begin
+  if p_company is null or p_plate is null or p_plate !~ '^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$' then
+    raise exception 'Placa inválida' using errcode = '22023';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('plate_credit:' || p_company::text, 0));
+  v_balance := public.plate_credit_balance(p_company);
+  if exists (select 1 from public.plate_credit_ledger l where l.company_id = p_company and l.kind = 'consulta'
+             and l.plate = p_plate and l.created_at > now() - interval '30 days') then
+    return jsonb_build_object('charged', false, 'balance', v_balance);
+  end if;
+  v_price := coalesce((select plate_price from public.platform_settings where id = 1), 0.40);
+  if v_balance < v_price then
+    raise exception 'SALDO_INSUFICIENTE' using errcode = 'P0001';
+  end if;
+  insert into public.plate_credit_ledger (company_id, kind, amount, plate, created_by)
+  values (p_company, 'consulta', -v_price, p_plate, p_user)
+  returning id into v_id;
+  return jsonb_build_object('charged', true, 'ledger_id', v_id, 'price', v_price, 'balance', v_balance - v_price);
+end $$;
+revoke execute on function public.plate_credit_hold(uuid, text, uuid) from anon, authenticated, public;
+grant execute on function public.plate_credit_hold(uuid, text, uuid) to service_role;
+
+-- Só a função veiculo-dados: reserva o preço da leitura da foto do documento.
+-- Sem saldo: erro SALDO_INSUFICIENTE.
+create or replace function public.doc_photo_credit_hold(p_company uuid, p_user uuid default null)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_price numeric;
+  v_balance numeric;
+  v_id bigint;
+begin
+  if p_company is null then
+    raise exception 'Loja inválida' using errcode = '22023';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('plate_credit:' || p_company::text, 0));
+  v_balance := public.plate_credit_balance(p_company);
+  v_price := coalesce((select doc_photo_price from public.platform_settings where id = 1), 0.20);
+  if v_balance < v_price then
+    raise exception 'SALDO_INSUFICIENTE' using errcode = 'P0001';
+  end if;
+  insert into public.plate_credit_ledger (company_id, kind, amount, created_by)
+  values (p_company, 'documento', -v_price, p_user)
+  returning id into v_id;
+  return jsonb_build_object('charged', true, 'ledger_id', v_id, 'price', v_price, 'balance', v_balance - v_price);
+end $$;
+revoke execute on function public.doc_photo_credit_hold(uuid, uuid) from anon, authenticated, public;
+grant execute on function public.doc_photo_credit_hold(uuid, uuid) to service_role;
+
+-- Devolve a reserva quando a consulta não achou o carro, a foto não deu leitura ou deu erro
+create or replace function public.plate_credit_release(p_id bigint)
+returns void
+language sql security definer set search_path = public
+as $$
+  delete from public.plate_credit_ledger where id = p_id and kind in ('consulta', 'documento')
+$$;
+revoke execute on function public.plate_credit_release(bigint) from anon, authenticated, public;
+grant execute on function public.plate_credit_release(bigint) to service_role;
+
+-- 72) Rascunhos do celular (pedido do Wesley em 09/10/2026) -----------------------
+-- * "Fotos pelo celular" (painel): a pessoa da equipe tira as fotos do carro pela
+--   câmera e elas ficam num rascunho, fora do estoque e do site. Depois, no
+--   computador, "Completar cadastro" abre o Novo carro com as fotos; ao salvar o
+--   carro, o rascunho sai.
+-- * As fotos são as do site (/uploads/carros/...), como as de cars.images.
+-- * Quem vê e mexe: a equipe ativa da loja (can_edit_stock). Quem criou e o nome
+--   vêm do login, não do que o navegador manda.
+create table if not exists public.car_drafts (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null default public.current_company_id() references public.companies(id) on delete cascade,
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_by_name text not null default '' check (char_length(created_by_name) <= 160),
+  images jsonb not null default '[]'::jsonb,
+  note text not null default '' check (char_length(note) <= 500),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint car_drafts_images_check check (
+    jsonb_typeof(images) = 'array'
+    and jsonb_array_length(images) <= 60
+    and not jsonb_path_exists(images, '$[*] ? (@.type() != "string")')
+    and not jsonb_path_exists(images, '$[*] ? (!(@ starts with "/uploads/carros/"))')
+  )
+);
+create index if not exists car_drafts_company_idx on public.car_drafts (company_id, created_at desc);
+
+-- Autor: o login de quem cria (nome da Equipe ou o e-mail); a loja e o autor não mudam depois
+create or replace function public.car_drafts_set_author()
+returns trigger
+language plpgsql security definer set search_path = public, auth
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if public.is_service_request() then return new; end if;
+    new.created_by := auth.uid();
+    new.created_by_name := left(coalesce(
+      (select s.name from public.sellers s
+        where s.user_id = auth.uid() and s.company_id = new.company_id and s.deleted_at is null limit 1),
+      (select u.email from auth.users u where u.id = auth.uid()),
+      ''), 160);
+  else
+    new.company_id := old.company_id;
+    new.created_by := old.created_by;
+    new.created_by_name := old.created_by_name;
+    new.created_at := old.created_at;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists car_drafts_set_author on public.car_drafts;
+create trigger car_drafts_set_author before insert or update on public.car_drafts
+for each row execute function public.car_drafts_set_author();
+
+drop trigger if exists car_drafts_set_updated_at on public.car_drafts;
+create trigger car_drafts_set_updated_at before update on public.car_drafts
+for each row execute function public.set_updated_at();
+
+alter table public.car_drafts enable row level security;
+revoke all on public.car_drafts from anon, public;
+grant select, insert, update, delete on public.car_drafts to authenticated;
+
+drop policy if exists "Equipe lê os rascunhos da loja" on public.car_drafts;
+create policy "Equipe lê os rascunhos da loja"
+on public.car_drafts for select
+to authenticated
+using (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Equipe cria rascunhos na loja" on public.car_drafts;
+create policy "Equipe cria rascunhos na loja"
+on public.car_drafts for insert
+to authenticated
+with check (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Equipe muda os rascunhos da loja" on public.car_drafts;
+create policy "Equipe muda os rascunhos da loja"
+on public.car_drafts for update
+to authenticated
+using (company_id = public.current_company_id() and public.can_edit_stock())
+with check (company_id = public.current_company_id() and public.can_edit_stock());
+
+drop policy if exists "Equipe apaga os rascunhos da loja" on public.car_drafts;
+create policy "Equipe apaga os rascunhos da loja"
+on public.car_drafts for delete
+to authenticated
+using (company_id = public.current_company_id() and public.can_edit_stock());
+
+-- 73) Valores privados do carro (pedido do Wesley em 09/10/2026) -------------------
+-- Para lojas com dois ou três sócios. Quem ativa os "Valores privados" num carro
+-- vira o dono do cadeado: só ele (e quem ele liberar) vê o custo de aquisição, os
+-- gastos e o que sai deles (custo total, margem, lucro). Os outros administradores
+-- veem e editam o carro como o gerente (pela staff_cars, sem o custo), lançam
+-- gastos sem ver os valores, e o painel deixa o carro fora das contas de dinheiro
+-- deles, com o aviso "N carros com valores privados". Decisões do Wesley: nome
+-- "Valores privados"; fora dos totais de quem não vê; o dono libera para todos,
+-- libera para pessoas escolhidas e passa o cadeado para outro administrador.
+-- * cars.created_by: quem cadastrou. Ativa o cadeado quem cadastrou, se for
+--   administrador; carro cadastrado por vendedor ou gerente (ou antes desta seção)
+--   pode ser trancado por qualquer administrador que veja os valores.
+-- * car_private_values: um registro por carro com cadeado (dono e liberados). Só
+--   as funções gravam e ninguém lê direto. Dono que deixou de ser administrador da
+--   loja (ou saiu dela) não tranca mais nada: os valores voltam a ser de todos.
+-- * can_see_car_values(carro) entra nas regras de cars (o admin só lê e grava
+--   direto o carro cujos valores vê), car_expenses (ler, editar e excluir), anexos
+--   dos gastos e set_car_purchase. Lançar gasto continua livre para a equipe.
+-- * Registro de atividades: gasto de carro com cadeado entra sem o valor, e ao
+--   ativar o cadeado os gastos já registrados daquele carro perdem o valor.
+
+alter table public.cars add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.cars alter column created_by set default auth.uid();
+
+-- Quem cadastrou vem do login e não muda depois (sem login = SQL Editor ou função)
+create or replace function public.cars_keep_created_by()
+returns trigger
+language plpgsql set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if auth.uid() is not null then
+      new.created_by := auth.uid();
+    end if;
+  else
+    new.created_by := old.created_by;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists cars_keep_created_by on public.cars;
+create trigger cars_keep_created_by
+before insert or update on public.cars
+for each row execute function public.cars_keep_created_by();
+
+create table if not exists public.car_private_values (
+  car_id uuid primary key references public.cars(id) on delete cascade,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  viewers uuid[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists car_private_values_company_idx on public.car_private_values (company_id);
+
+drop trigger if exists car_private_values_set_updated_at on public.car_private_values;
+create trigger car_private_values_set_updated_at
+before update on public.car_private_values
+for each row execute function public.set_updated_at();
+
+-- Só as funções abaixo leem e gravam (RLS ligada, sem regras)
+alter table public.car_private_values enable row level security;
+revoke all on public.car_private_values from anon, authenticated, public;
+
+-- O dono do cadeado ainda é administrador da loja? (senão o cadeado não vale)
+create or replace function public.car_values_owner_active(p_user uuid, p_company uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.user_company uc
+    where uc.user_id = p_user and uc.company_id = p_company and uc.role = 'admin')
+$$;
+revoke execute on function public.car_values_owner_active(uuid, uuid) from anon, authenticated, public;
+
+-- Quem chama vê os valores do carro? Sem cadeado (ou cadeado de quem saiu), sim;
+-- com cadeado, só o dono e os liberados.
+create or replace function public.can_see_car_values(p_car uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select not exists (
+    select 1 from public.car_private_values v
+    where v.car_id = p_car
+      and v.owner_id is distinct from auth.uid()
+      and not coalesce(auth.uid() = any (v.viewers), false)
+      and public.car_values_owner_active(v.owner_id, v.company_id))
+$$;
+revoke execute on function public.can_see_car_values(uuid) from anon, public;
+grant execute on function public.can_see_car_values(uuid) to authenticated;
+
+-- Anexos dos gastos ficam em <loja>/<carro>/...; a pasta "empresa" (despesas da
+-- empresa, seção 63) não é de carro
+create or replace function public.can_see_car_values_folder(p_folder text)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select case
+    when p_folder ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      then public.can_see_car_values(p_folder::uuid)
+    else true
+  end
+$$;
+revoke execute on function public.can_see_car_values_folder(text) from anon, public;
+grant execute on function public.can_see_car_values_folder(text) to authenticated;
+
+-- Nome da pessoa na loja: o da Equipe ou, sem cadastro, o e-mail do login
+create or replace function public.company_person_name(p_user uuid, p_company uuid)
+returns text
+language sql stable security definer set search_path = public
+as $$
+  select coalesce(
+    (select nullif(btrim(s.name), '') from public.sellers s
+     where s.user_id = p_user and s.company_id = p_company and s.deleted_at is null
+     order by s.created_at limit 1),
+    (select u.email from auth.users u where u.id = p_user),
+    'Administrador')
+$$;
+revoke execute on function public.company_person_name(uuid, uuid) from anon, authenticated, public;
+
+-- Carros: o admin lê, grava e exclui direto só o carro cujos valores vê; o resto
+-- ele lê e grava pela staff_cars (sem o custo), como o gerente
+drop policy if exists "Authenticated can read own company cars" on public.cars;
+create policy "Authenticated can read own company cars"
+on public.cars for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin() and public.can_see_car_values(id));
+
+drop policy if exists "Authenticated can update cars" on public.cars;
+create policy "Authenticated can update cars"
+on public.cars for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin() and public.can_see_car_values(id))
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop policy if exists "Authenticated can delete cars" on public.cars;
+create policy "Authenticated can delete cars"
+on public.cars for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin() and public.can_see_car_values(id));
+
+-- Gastos: ler, editar e excluir só com os valores à vista (lançar continua livre)
+drop policy if exists "Authenticated can read expenses" on public.car_expenses;
+create policy "Authenticated can read expenses"
+on public.car_expenses for select
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin() and public.can_see_car_values(car_id));
+
+drop policy if exists "Authenticated can update expenses" on public.car_expenses;
+create policy "Authenticated can update expenses"
+on public.car_expenses for update
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin() and public.can_see_car_values(car_id))
+with check (company_id = public.current_company_id() and public.is_company_admin() and public.can_see_car_values(car_id));
+
+drop policy if exists "Authenticated can delete expenses" on public.car_expenses;
+create policy "Authenticated can delete expenses"
+on public.car_expenses for delete
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin() and public.can_see_car_values(car_id));
+
+drop policy if exists "Authenticated can view expense attachments" on storage.objects;
+create policy "Authenticated can view expense attachments"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text
+       and public.is_company_admin() and public.can_see_car_values_folder((storage.foldername(name))[2]));
+
+drop policy if exists "Authenticated can delete expense attachments" on storage.objects;
+create policy "Authenticated can delete expense attachments"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text
+       and public.is_company_admin() and public.can_see_car_values_folder((storage.foldername(name))[2]));
+
+-- Custo de aquisição: carro com cadeado, só o dono e os liberados (o resto como antes)
+create or replace function public.set_car_purchase(p_car_id uuid, p_price integer, p_date date)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_already boolean;
+begin
+  if v_company is null or not public.is_company_staff() then
+    raise exception 'Sem permissão';
+  end if;
+  select (purchase_price is not null or purchase_date is not null) into v_already
+  from public.cars
+  where id = p_car_id and company_id = v_company;
+  if not found then
+    raise exception 'Carro não encontrado';
+  end if;
+  if not public.can_see_car_values(p_car_id) then
+    raise exception 'Os valores deste carro são privados.' using errcode = '42501';
+  end if;
+  if v_already and not public.is_company_admin() then
+    raise exception 'O custo de aquisição deste carro já foi informado. Só o administrador pode alterar.';
+  end if;
+  update public.cars
+  set purchase_price = p_price, purchase_date = p_date
+  where id = p_car_id and company_id = v_company;
+end;
+$$;
+revoke execute on function public.set_car_purchase(uuid, integer, date) from anon, public;
+grant execute on function public.set_car_purchase(uuid, integer, date) to authenticated;
+
+-- Linha do histórico das ações do cadeado
+create or replace function public.car_values_log(p_car uuid, p_details text)
+returns void
+language sql security definer set search_path = public
+as $$
+  insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label, details)
+  select c.company_id, auth.uid(), (select u.email from auth.users u where u.id = auth.uid()), 'update', 'cars', c.id,
+         concat_ws(' ', c.brand, c.model, c.version), p_details
+  from public.cars c where c.id = p_car
+$$;
+revoke execute on function public.car_values_log(uuid, text) from anon, authenticated, public;
+
+-- Situação do cadeado de um carro (tela do carro; só administrador)
+create or replace function public.car_values_state(p_car uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_me uuid := auth.uid();
+  v_creator uuid;
+  v_lock public.car_private_values%rowtype;
+  v_active boolean := false;
+  v_creator_admin boolean;
+begin
+  if v_company is null or not public.is_company_admin() then
+    raise exception 'Acesso restrito ao administrador da loja' using errcode = '42501';
+  end if;
+  select created_by into v_creator from public.cars where id = p_car and company_id = v_company;
+  if not found then
+    raise exception 'Carro não encontrado';
+  end if;
+  select * into v_lock from public.car_private_values where car_id = p_car;
+  if found then
+    v_active := public.car_values_owner_active(v_lock.owner_id, v_company);
+  end if;
+  -- Carro cadastrado por outro administrador: só ele ativa
+  v_creator_admin := v_creator is not null and v_creator is distinct from v_me
+    and public.car_values_owner_active(v_creator, v_company);
+  return jsonb_build_object(
+    'locked', v_active,
+    'owner_name', case when v_active then public.company_person_name(v_lock.owner_id, v_company) end,
+    'is_owner', coalesce(v_active and v_lock.owner_id = v_me, false),
+    'can_see', public.can_see_car_values(p_car),
+    'since', case when v_active then v_lock.created_at end,
+    'viewers', case when v_active and v_lock.owner_id = v_me then (
+      select coalesce(jsonb_agg(jsonb_build_object('id', u, 'name', public.company_person_name(u, v_company))
+                                order by public.company_person_name(u, v_company)), '[]'::jsonb)
+      from unnest(v_lock.viewers) u
+      where public.car_values_owner_active(u, v_company)) else '[]'::jsonb end,
+    'can_lock', not v_active and not v_creator_admin,
+    'creator_name', case when v_creator_admin then public.company_person_name(v_creator, v_company) end);
+end $$;
+revoke execute on function public.car_values_state(uuid) from anon, public;
+grant execute on function public.car_values_state(uuid) to authenticated;
+
+-- Carros com cadeado da loja (listas do painel; só administrador, senão vazio)
+create or replace function public.car_private_values_list()
+returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'car_id', v.car_id,
+           'owner_name', public.company_person_name(v.owner_id, v.company_id),
+           'is_owner', v.owner_id = auth.uid(),
+           'can_see', public.can_see_car_values(v.car_id))), '[]'::jsonb)
+  from public.car_private_values v
+  where v.company_id = public.current_company_id() and public.is_company_admin()
+    and public.car_values_owner_active(v.owner_id, v.company_id)
+$$;
+revoke execute on function public.car_private_values_list() from anon, public;
+grant execute on function public.car_private_values_list() to authenticated;
+
+-- Pessoa que pode receber o cadeado ou ver os valores: administrador da loja, fora
+-- a equipe WB.Dev e o dono da plataforma
+create or replace function public.car_values_valid_person(p_user uuid, p_company uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select p_user is not null
+    and public.car_values_owner_active(p_user, p_company)
+    and not exists (select 1 from public.platform_team t where t.user_id = p_user)
+    and not exists (select 1 from public.platform_admins p where p.user_id = p_user)
+$$;
+revoke execute on function public.car_values_valid_person(uuid, uuid) from anon, authenticated, public;
+
+-- Administradores da loja para liberar ou passar o cadeado (fora quem chama)
+create or replace function public.car_values_people()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+begin
+  if v_company is null or not public.is_company_admin() then
+    raise exception 'Acesso restrito ao administrador da loja' using errcode = '42501';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object('id', uc.user_id, 'name', public.company_person_name(uc.user_id, v_company))
+                              order by public.company_person_name(uc.user_id, v_company)), '[]'::jsonb)
+    from public.user_company uc
+    where uc.company_id = v_company and uc.role = 'admin' and uc.user_id is distinct from auth.uid()
+      and public.car_values_valid_person(uc.user_id, v_company));
+end $$;
+revoke execute on function public.car_values_people() from anon, public;
+grant execute on function public.car_values_people() to authenticated;
+
+-- Ativar o cadeado
+create or replace function public.car_values_lock(p_car uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_state jsonb := public.car_values_state(p_car);
+begin
+  if (v_state->>'locked')::boolean then
+    raise exception 'Os valores deste carro já são privados (de %).', v_state->>'owner_name' using errcode = '42501';
+  end if;
+  if not (v_state->>'can_lock')::boolean then
+    raise exception 'Só quem cadastrou este carro (%) pode ativar os valores privados.', v_state->>'creator_name' using errcode = '42501';
+  end if;
+  -- Cadeado de quem deixou de ser administrador sai antes
+  delete from public.car_private_values where car_id = p_car;
+  insert into public.car_private_values (car_id, company_id, owner_id) values (p_car, v_company, auth.uid());
+  -- No histórico, os gastos já registrados deste carro perdem o valor
+  update public.activity_log a
+  set label = regexp_replace(a.label, ' — R\$ \S+$', ' — valor privado')
+  where a.company_id = v_company and a.entity = 'car_expenses'
+    and a.entity_id in (select e.id from public.car_expenses e where e.car_id = p_car);
+  perform public.car_values_log(p_car, 'valores privados: ativados');
+end $$;
+revoke execute on function public.car_values_lock(uuid) from anon, public;
+grant execute on function public.car_values_lock(uuid) to authenticated;
+
+-- Liberar para todos (tira o cadeado)
+create or replace function public.car_values_unlock(p_car uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not (public.car_values_state(p_car)->>'is_owner')::boolean then
+    raise exception 'Só quem ativou os valores privados pode liberar.' using errcode = '42501';
+  end if;
+  delete from public.car_private_values where car_id = p_car;
+  perform public.car_values_log(p_car, 'valores privados: liberados para todos');
+end $$;
+revoke execute on function public.car_values_unlock(uuid) from anon, public;
+grant execute on function public.car_values_unlock(uuid) to authenticated;
+
+-- Escolher quem mais vê (lista completa; vazia = só o dono)
+create or replace function public.car_values_share(p_car uuid, p_viewers uuid[])
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_list uuid[];
+begin
+  if not (public.car_values_state(p_car)->>'is_owner')::boolean then
+    raise exception 'Só quem ativou os valores privados escolhe quem vê.' using errcode = '42501';
+  end if;
+  select coalesce(array_agg(distinct u), '{}') into v_list
+  from unnest(coalesce(p_viewers, '{}'::uuid[])) u
+  where u is distinct from auth.uid();
+  if exists (select 1 from unnest(v_list) u where not public.car_values_valid_person(u, v_company)) then
+    raise exception 'Só dá para liberar para administradores da loja.' using errcode = '42501';
+  end if;
+  update public.car_private_values set viewers = v_list where car_id = p_car;
+  perform public.car_values_log(p_car, case
+    when cardinality(v_list) = 0 then 'valores privados: só o dono vê'
+    else 'valores privados: liberados para ' || (select string_agg(public.company_person_name(u, v_company), ', ') from unnest(v_list) u)
+  end);
+end $$;
+revoke execute on function public.car_values_share(uuid, uuid[]) from anon, public;
+grant execute on function public.car_values_share(uuid, uuid[]) to authenticated;
+
+-- Passar o cadeado para outro administrador (quem passa continua vendo, se quiser)
+create or replace function public.car_values_transfer(p_car uuid, p_new_owner uuid, p_keep_access boolean default true)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_viewers uuid[];
+begin
+  if not (public.car_values_state(p_car)->>'is_owner')::boolean then
+    raise exception 'Só quem ativou os valores privados pode passar o cadeado.' using errcode = '42501';
+  end if;
+  if p_new_owner is not distinct from auth.uid() or not public.car_values_valid_person(p_new_owner, v_company) then
+    raise exception 'Escolha outro administrador da loja.' using errcode = '42501';
+  end if;
+  select viewers into v_viewers from public.car_private_values where car_id = p_car for update;
+  update public.car_private_values
+  set owner_id = p_new_owner,
+      viewers = (select coalesce(array_agg(distinct u), '{}')
+                 from unnest(array_remove(v_viewers, p_new_owner)
+                             || case when coalesce(p_keep_access, true) then array[auth.uid()] else '{}'::uuid[] end) u)
+  where car_id = p_car;
+  perform public.car_values_log(p_car, 'valores privados: cadeado passado para ' || public.company_person_name(p_new_owner, v_company)
+    || case when coalesce(p_keep_access, true) then ' (quem passou continua vendo)' else '' end);
+end $$;
+revoke execute on function public.car_values_transfer(uuid, uuid, boolean) from anon, public;
+grant execute on function public.car_values_transfer(uuid, uuid, boolean) to authenticated;
+
+-- Registro de atividades: gasto de carro com cadeado (ou de carro excluído) entra
+-- sem o valor (mesma função da seção 69, só com essa troca)
+create or replace function public.log_activity()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  rec jsonb;
+  old_rec jsonb;
+  v_company uuid;
+  v_label text;
+  v_details text;
+  v_email text;
+  v_changed text[];
+begin
+  begin
+    if current_setting('app.skip_activity_log', true) = '1' then return null; end if;
+    if tg_op = 'DELETE' then rec := to_jsonb(old); else rec := to_jsonb(new); end if;
+    v_company := (rec->>'company_id')::uuid;
+    -- Sem usuário = SQL Editor ou Edge Function (que grava o próprio log).
+    if v_company is null or auth.uid() is null then return null; end if;
+
+    if tg_op = 'UPDATE' then
+      old_rec := to_jsonb(old);
+      select array_agg(n.key order by n.key) into v_changed
+      from jsonb_each(rec) n
+      where n.key not in ('updated_at') and n.value is distinct from old_rec->n.key;
+      if v_changed is null then return null; end if;
+      v_details := array_to_string(v_changed, ', ');
+      if 'status' = any(v_changed) then
+        v_details := format('status: %s → %s', old_rec->>'status', rec->>'status');
+      end if;
+      -- Troca de cargo na Equipe: "cargo: Vendedor → Gerente"
+      if tg_table_name = 'sellers' and ('role' = any(v_changed) or 'custom_role_id' = any(v_changed)) then
+        v_details := format('cargo: %s → %s',
+          coalesce((select r.name from public.custom_roles r where r.id = (old_rec->>'custom_role_id')::uuid),
+                   case old_rec->>'role' when 'manager' then 'Gerente' when 'admin' then 'Administrador' else 'Vendedor' end),
+          coalesce((select r.name from public.custom_roles r where r.id = (rec->>'custom_role_id')::uuid),
+                   case rec->>'role' when 'manager' then 'Gerente' when 'admin' then 'Administrador' else 'Vendedor' end));
+      end if;
+    end if;
+
+    v_label := case tg_table_name
+      when 'cars' then concat_ws(' ', rec->>'brand', rec->>'model', rec->>'version')
+      when 'customers' then rec->>'name'
+      when 'suppliers' then rec->>'name'
+      when 'sellers' then rec->>'name'
+      when 'contract_templates' then rec->>'name'
+      when 'custom_roles' then rec->>'name'
+      when 'contracts' then concat(case rec->>'document_type' when 'recibo' then 'Recibo' else 'Contrato' end, ' — ', rec->>'buyer_name')
+      when 'car_expenses' then concat(coalesce(nullif(rec->>'description', ''), rec->>'category'),
+        case
+          when exists (select 1 from public.car_private_values v where v.car_id = (rec->>'car_id')::uuid)
+            or not exists (select 1 from public.cars c where c.id = (rec->>'car_id')::uuid)
+            then ' — valor privado'
+          else concat(' — R$ ', rec->>'amount')
+        end)
+      when 'company_expenses' then concat('Despesa da empresa: ', coalesce(nullif(rec->>'description', ''), rec->>'category'), ' — R$ ', rec->>'amount')
+      when 'sales' then (select concat(c.brand, ' ', c.model, ' — R$ ', rec->>'sale_price') from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'customer_documents' then concat(
+        coalesce(nullif(rec->>'title', ''), nullif(rec->>'file_name', ''), 'Documento'), ' — ',
+        (select cu.name from public.customers cu where cu.id = (rec->>'customer_id')::uuid))
+      when 'customer_financings' then concat('Financiamento — ', rec->>'customer_name')
+      when 'financing_installments' then (
+        select concat('Parcela ', rec->>'number', '/', f.installments_count, ' — ', f.customer_name)
+        from public.customer_financings f where f.id = (rec->>'financing_id')::uuid)
+      when 'car_reservations' then (
+        select concat('Reserva — ', c.brand, ' ', c.model, coalesce(' — ' || nullif(rec->>'customer_name', ''), ''))
+        from public.cars c where c.id = (rec->>'car_id')::uuid)
+      when 'external_financings' then concat('Financiamento externo — ', rec->>'customer_name')
+      else null
+    end;
+
+    select email into v_email from auth.users where id = auth.uid();
+
+    insert into public.activity_log (company_id, user_id, user_email, action, entity, entity_id, label, details)
+    values (v_company, auth.uid(), v_email, lower(tg_op), tg_table_name, (rec->>'id')::uuid, v_label, v_details);
+  exception when others then
+    -- O log nunca pode impedir a operação principal
+    null;
+  end;
+  return null;
+end;
+$$;
+
+
+-- 74) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

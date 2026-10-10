@@ -10,6 +10,7 @@ import { pixPayload, pixTxid } from '../utils/pix.js'
 import { exportTermsReceiptPdf } from '../utils/termsPdf.js'
 import PixQr from './PixQr.jsx'
 import PaymentClaimDialog from './PaymentClaimDialog.jsx'
+import PlateCredits from './PlateCredits.jsx'
 import './admin.css'
 
 const CLAIM_STATUS = {
@@ -216,6 +217,8 @@ export default function AdminBilling() {
           ))}
         </div>
       )}
+
+      <PlateCredits payment={payment} storeName={storeName} />
 
       {account.terms?.acceptance && (
         <>

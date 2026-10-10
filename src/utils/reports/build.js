@@ -10,6 +10,7 @@ import { describePayment } from '../payment.js'
 import { summarizeFinancing, lateCharges, isInstallmentPaid } from '../financing.js'
 import { externalStatusLabel } from '../externalFinancing.js'
 import { storeResult } from '../storeResult.js'
+import { privateNote } from '../privateValues.js'
 
 const carName = (car) => (car ? `${car.brand} ${car.model} ${car.version || ''}`.trim() : 'Carro removido')
 
@@ -542,7 +543,8 @@ export function buildResultReport({ soldEntries = [], carExpenses = [], companyE
   }))
   return {
     title: 'Resultado (lucro líquido)',
-    subtitle: periodSubtitle(range),
+    // Venda de carro com o cadeado de outro sócio fica fora (valores privados, seção 73)
+    subtitle: [periodSubtitle(range), privateNote(r.privateCount)].filter(Boolean).join(' · '),
     sections: [
       {
         title: 'Resultado',

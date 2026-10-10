@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw, Download, Receipt, Search } from 'lucide-react'
+import { RefreshCcw, Download, Receipt, Search, Lock } from 'lucide-react'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchAllSuppliers } from '../lib/suppliersApi.js'
@@ -9,6 +9,7 @@ import { expenseCategoryLabel, formatCurrency, carStatusLabel, daysInStock, isSt
 import { fetchStockAlertDefault, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import { downloadCsv } from '../utils/exportCsv.js'
 import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExpensesApi.js'
+import { withoutPrivate, privateNote } from '../utils/privateValues.js'
 import StoreResultCard from './StoreResultCard.jsx'
 import FinanceTabs from './FinanceTabs.jsx'
 import './admin.css'
@@ -68,9 +69,13 @@ export default function AdminFinance() {
     return map
   }, [sales])
 
+  // Valores privados (seção 73): carro com o cadeado de outro sócio fica fora do
+  // Financeiro (tabela, totais e resultado), com o aviso
+  const privateCount = useMemo(() => withoutPrivate(cars).hidden, [cars])
+
   const rows = useMemo(
     () =>
-      cars.map((car) => {
+      withoutPrivate(cars).cars.map((car) => {
         const totalExpenses = expensesByCar[car.id] || 0
         const totalCost = (car.purchasePrice || 0) + totalExpenses
         const sale = salesByCar[car.id] || null
@@ -208,6 +213,11 @@ export default function AdminFinance() {
           <strong>{availableRows.length ? `${avgDaysInStock} ${avgDaysInStock === 1 ? 'dia' : 'dias'}` : '—'}</strong>
         </div>
       </div>
+      {privateCount > 0 && (
+        <p className="private-values-note">
+          <Lock size={14} aria-hidden="true" /> {privateNote(privateCount)}
+        </p>
+      )}
 
       <StoreResultCard data={{ cars, sales, carExpenses: expenses, companyExpenses }} />
 

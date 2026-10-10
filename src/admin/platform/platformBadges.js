@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { countPendingClaims } from '../../lib/clientsApi.js'
 import { countWbdevUnread } from '../../lib/supportApi.js'
+import { countPendingPlateOrders } from '../../lib/plateCreditsApi.js'
 
 // Números do menu do painel WB.Dev (pagamentos a conferir e chamados com mensagem
 // nova), também somados na troca de painel da loja. Quem muda um deles avisa o
@@ -24,9 +25,11 @@ export function usePlatformBadges(enabled = true, pathname = '') {
     if (!enabled) return undefined
     let active = true
     function load() {
-      Promise.all([countPendingClaims().catch(() => 0), countWbdevUnread().catch(() => 0)]).then(([claims, unread]) => {
-        if (active) setBadges({ claims, unread })
-      })
+      // "claims": mensalidades informadas + compras de créditos da placa a conferir
+      Promise.all([countPendingClaims().catch(() => 0), countPendingPlateOrders().catch(() => 0), countWbdevUnread().catch(() => 0)])
+        .then(([claims, plateOrders, unread]) => {
+          if (active) setBadges({ claims: claims + plateOrders, unread })
+        })
     }
     load()
     const stop = onPlatformBadgesChange(load)

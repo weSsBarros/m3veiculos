@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { downloadStorageFile } from '../lib/storageDownload.js'
 import { Link, useParams } from 'react-router-dom'
-import { ChevronLeft, Pencil, Trash2, Paperclip, Download } from 'lucide-react'
+import { ChevronLeft, Pencil, Trash2, Paperclip, Download, Lock } from 'lucide-react'
 import { fetchCarById } from '../lib/carsApi.js'
 import {
   fetchExpensesByCar,
@@ -35,9 +35,11 @@ function emptyExpense() {
 export default function AdminCarExpenses() {
   const { confirm, confirmDialog } = useConfirm()
   // Gerente (sem canSeeCosts) só lança gastos: não vê a lista, os valores nem os totais
-  const { isAdmin, canSeeCosts } = useAuth()
+  const { isAdmin, canSeeCosts: roleSeesCosts } = useAuth()
   const { id } = useParams()
   const [car, setCar] = useState(null)
+  // Carro com o cadeado de outro sócio (seção 73): o admin só lança, como o gerente
+  const canSeeCosts = roleSeesCosts && !car?.valuesHidden
   const [expenses, setExpenses] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -194,6 +196,13 @@ export default function AdminCarExpenses() {
         <div>
           <h1>{canSeeCosts ? 'Gastos' : 'Lançar gasto'} — {car.brand} {car.model}</h1>
           <p>{car.version} · {car.modelYear}</p>
+          {car.valuesHidden && (
+            <p className="private-values-note">
+              <Lock size={14} aria-hidden="true" /> Os valores deste carro são privados
+              {car.privateValues?.ownerName ? ` (cadeado de ${car.privateValues.ownerName})` : ''}: você lança o gasto, mas só quem
+              ativou o cadeado vê os valores.
+            </p>
+          )}
         </div>
         <div className="admin-row-actions">
           {canSeeCosts && (

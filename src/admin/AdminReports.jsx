@@ -15,6 +15,7 @@ import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExp
 import { companyExpenseCategoryLabel } from '../utils/companyExpenses.js'
 import { expenseCategoryLabel } from '../utils/carFormat.js'
 import { periodRange } from '../utils/period.js'
+import { withoutPrivate, itemsWithoutPrivate, privateNote } from '../utils/privateValues.js'
 import {
   buildSalesReport,
   buildStockReport,
@@ -28,6 +29,12 @@ import {
 import { exportReportPdf, exportReportExcel } from '../utils/reports/export.js'
 import PeriodFilter from './PeriodFilter.jsx'
 import './admin.css'
+
+// Valores privados (seção 73): carros com o cadeado de outro sócio ficam fora das
+// contas de dinheiro; o subtítulo do relatório avisa quantos
+function notePrivate(report, count) {
+  return count ? { ...report, subtitle: [report.subtitle, privateNote(count)].filter(Boolean).join(' · ') } : report
+}
 
 // Relatórios para baixar em PDF (imprimir, enviar) ou Excel (mexer nos
 // números). Cada papel só tira o que pode ver: o vendedor tira o das vendas e
@@ -57,7 +64,11 @@ export default function AdminReports() {
           fetchAllCustomers().catch(() => []),
           fetchExternalFinancings().catch(() => []),
         ])
-        return buildSalesReport({ sales, cars, sellers, customers, externals, range, showValues: canSeeSaleValues || isSeller })
+        const money = itemsWithoutPrivate(sales, cars)
+        return notePrivate(
+          buildSalesReport({ sales: money.items, cars, sellers, customers, externals, range, showValues: canSeeSaleValues || isSeller }),
+          money.hidden
+        )
       },
     },
     {
@@ -86,7 +97,7 @@ export default function AdminReports() {
       show: true,
       build: async () => {
         const [cars, expenses] = await Promise.all([fetchAllCarsAdmin(), canSeeCosts ? fetchAllExpensesAdmin() : Promise.resolve([])])
-        return buildStockReport({ cars, expenses, showCosts: canSeeCosts })
+        return notePrivate(buildStockReport({ cars, expenses, showCosts: canSeeCosts }), canSeeCosts ? withoutPrivate(cars).hidden : 0)
       },
     },
     {
@@ -97,7 +108,11 @@ export default function AdminReports() {
       show: canSeeCosts,
       build: async () => {
         const [sales, cars, expenses] = await Promise.all([fetchSales(), fetchAllCarsAdmin(), fetchAllExpensesAdmin()])
-        return buildEntryTypeReport({ sales, cars, expenses, range })
+        const visible = withoutPrivate(cars)
+        return notePrivate(
+          buildEntryTypeReport({ sales: itemsWithoutPrivate(sales, cars).items, cars: visible.cars, expenses, range }),
+          visible.hidden
+        )
       },
     },
     {
@@ -132,7 +147,8 @@ export default function AdminReports() {
       show: isAdmin,
       build: async () => {
         const [expenses, cars, suppliers] = await Promise.all([fetchAllExpensesAdmin(), fetchAllCarsAdmin(), fetchAllSuppliers().catch(() => [])])
-        return buildExpensesReport({ expenses, cars, suppliers, range, categoryLabel: expenseCategoryLabel })
+        // Os gastos dos carros trancados nem chegam (o banco não manda)
+        return notePrivate(buildExpensesReport({ expenses, cars, suppliers, range, categoryLabel: expenseCategoryLabel }), withoutPrivate(cars).hidden)
       },
     },
     {

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw } from 'lucide-react'
+import { RefreshCcw, Lock } from 'lucide-react'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchContractsAdmin } from '../lib/contractsApi.js'
 import { fetchSales } from '../lib/salesApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
 import { formatCurrency } from '../utils/carFormat.js'
+import { privateNote } from '../utils/privateValues.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import './admin.css'
@@ -173,7 +174,10 @@ export default function AdminHistory() {
   const totalMaintenance = periodExpenses.reduce((sum, e) => sum + e.amount, 0)
   const totalProfit = soldCars.reduce((sum, r) => sum + (r.margin ?? 0), 0)
   const soldWithMargin = soldCars.filter((r) => r.margin !== null)
-  const soldWithPrice = soldCars.filter((r) => r.revenue != null)
+  // Valores privados (seção 73): carro com o cadeado de outro sócio fica fora do
+  // lucro e do ticket médio (a quantidade de vendidos conta todos)
+  const privateSold = soldCars.filter((r) => r.car.valuesHidden).length
+  const soldWithPrice = soldCars.filter((r) => r.revenue != null && !r.car.valuesHidden)
   const avgTicket = soldWithPrice.length ? soldWithPrice.reduce((sum, r) => sum + r.revenue, 0) / soldWithPrice.length : 0
 
   if (loading) return <p className="admin-muted">Carregando…</p>
@@ -241,9 +245,14 @@ export default function AdminHistory() {
         )}
       </div>
 
-      {canSeeCosts && soldCars.length !== soldWithMargin.length && (
+      {privateSold > 0 && (canSeeCosts || canSeeSaleValues) && (
+        <p className="private-values-note">
+          <Lock size={14} aria-hidden="true" /> {privateNote(privateSold)} A quantidade de vendidos conta todos.
+        </p>
+      )}
+      {canSeeCosts && soldCars.length - privateSold !== soldWithMargin.length && (
         <p className="admin-form-hint">
-          O lucro considera só os {soldWithMargin.length} de {soldCars.length} carros vendidos com "Preço de compra" preenchido. A margem de cada carro usa o custo total dele (não só os gastos do período selecionado).
+          O lucro considera só os {soldWithMargin.length} de {soldCars.length - privateSold} carros vendidos com "Preço de compra" preenchido. A margem de cada carro usa o custo total dele (não só os gastos do período selecionado).
         </p>
       )}
 
@@ -277,11 +286,11 @@ export default function AdminHistory() {
                     </td>
                     <td>{formatDate(soldDate && soldDate.length <= 10 ? `${soldDate}T00:00:00` : soldDate)}</td>
                     <td>{sellerName}</td>
-                    {canSeeCosts && <td>{car.purchasePrice ? formatCurrency(totalCost) : '—'}</td>}
+                    {canSeeCosts && <td>{car.valuesHidden ? 'Privado' : car.purchasePrice ? formatCurrency(totalCost) : '—'}</td>}
                     {canSeeSaleValues && <td>{revenue != null ? formatCurrency(revenue) : '—'}</td>}
                     {canSeeCosts && (
                       <td className={margin === null ? '' : margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
-                        {margin === null ? '—' : formatCurrency(margin)}
+                        {car.valuesHidden ? 'Privado' : margin === null ? '—' : formatCurrency(margin)}
                       </td>
                     )}
                   </tr>
@@ -307,7 +316,7 @@ export default function AdminHistory() {
                     {canSeeCosts && (
                       <div>
                         <span>Custo total</span>
-                        <strong>{car.purchasePrice ? formatCurrency(totalCost) : '—'}</strong>
+                        <strong>{car.valuesHidden ? 'Privado' : car.purchasePrice ? formatCurrency(totalCost) : '—'}</strong>
                       </div>
                     )}
                     <div>
@@ -317,7 +326,7 @@ export default function AdminHistory() {
                     {canSeeCosts && (
                       <div className={margin === null ? '' : margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
                         <span>Margem</span>
-                        <strong>{margin === null ? '—' : formatCurrency(margin)}</strong>
+                        <strong>{car.valuesHidden ? 'Privado' : margin === null ? '—' : formatCurrency(margin)}</strong>
                       </div>
                     )}
                   </div>

@@ -32,3 +32,6 @@ backup-projeto-antigo/
 
 # Logs dos testes do banco (supabase/tests/run.sh)
 supabase/tests/.schema-*.log
+
+# CRLV-e reais para ajustar o leitor (nunca vão para o git: têm nome e CPF do dono)
+design/crlv-reais/

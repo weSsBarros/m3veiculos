@@ -9,6 +9,8 @@ import '../admin.css'
 
 const EMPTY = { id: null, name: '', monthlyPrice: '', features: PANEL_TABS.map((t) => t.key), active: true }
 const priceInput = (n) => (n === null || n === undefined ? '' : String(n).replace('.', ','))
+// Abas do plano (features pode ter chaves que não são abas)
+const tabCount = (features) => features.filter((k) => PANEL_TABS.some((t) => t.key === k)).length
 
 // Painel WB.Dev → Planos: nome, valor e as abas que o plano libera no painel
 // da loja (as que ficam de fora somem do menu de todos, inclusive do admin)
@@ -138,9 +140,8 @@ export default function PlatformPlans() {
                 <strong>{p.name}</strong>
                 <span className="admin-table-sub">
                   {p.monthlyPrice ? money(p.monthlyPrice) : 'sem valor'} · {users.length === 1 ? '1 loja' : `${users.length} lojas`} ·{' '}
-                  {p.features.length === PANEL_TABS.length ? 'todas as abas' : `${p.features.length} de ${PANEL_TABS.length} abas`}
-                </span>
-                {p.features.length < PANEL_TABS.length && (
+                  {tabCount(p.features) === PANEL_TABS.length ? 'todas as abas' : `${tabCount(p.features)} de ${PANEL_TABS.length} abas`}                </span>
+                {tabCount(p.features) < PANEL_TABS.length && (
                   <p>Fora do plano: {PANEL_TABS.filter((t) => !p.features.includes(t.key)).map((t) => t.label).join(', ')}</p>
                 )}
               </div>

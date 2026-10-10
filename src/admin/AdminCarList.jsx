@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Pencil, Trash2, RefreshCcw, Receipt, Star, Eye, EyeOff, Search, Handshake, LayoutGrid, List, ExternalLink, BellRing, Bookmark, ListChecks } from 'lucide-react'
+import { Pencil, Trash2, RefreshCcw, Receipt, Star, Eye, EyeOff, Search, Handshake, LayoutGrid, List, ExternalLink, BellRing, Bookmark, ListChecks, Camera, Lock } from 'lucide-react'
 import { fetchAllCarsAdmin, updateCarStatus, updateCarFeatured, updateCarHidden, deleteCar } from '../lib/carsApi.js'
 import { registerSaleFromDialog } from '../lib/saleFlow.js'
 import { fetchReservations, reserveCar, closeReservation } from '../lib/reservationsApi.js'
@@ -18,6 +18,9 @@ import { olxCarState, olxSellerPhones } from '../utils/olxStatus.js'
 import { fetchWebmotorsAccount, fetchWebmotorsAds } from '../lib/webmotorsApi.js'
 import { webmotorsCarState } from '../utils/webmotorsStatus.js'
 import { portalBadge } from '../utils/portalStatus.js'
+import { fetchCarDrafts } from '../lib/carDraftsApi.js'
+import { CarDraftCard } from './AdminQuickPhotos.jsx'
+import { privateLabel } from '../utils/privateValues.js'
 import { applyStockAlertToAll, fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import { DEFAULT_SALE_CHECKLIST } from '../utils/saleChecklist.js'
 import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
@@ -38,8 +41,30 @@ function PortalBadge({ state, name, card = false }) {
   return <span className={`${card ? 'stock-card-badge' : 'admin-hidden-badge'} is-portal ${badge.tone}`} title={state.detail || undefined}>{badge.label}</span>
 }
 
+// Valores privados (seção 73): no lugar do custo e da margem do carro com o
+// cadeado de outro sócio, e etiqueta do cadeado em todos os carros trancados
+function PrivateValue({ car }) {
+  return (
+    <span className="private-values-cell" title={privateLabel(car)}>
+      <Lock size={13} aria-hidden="true" /> Privado
+    </span>
+  )
+}
+
+function PrivateBadge({ car, card }) {
+  if (!car.privateValues) return null
+  return (
+    <span className={`${card ? 'stock-card-badge' : 'admin-hidden-badge'} is-private`} title={privateLabel(car)}>
+      <Lock size={11} aria-hidden="true" /> Privado
+    </span>
+  )
+}
+
 // Botões de ação com ícone + nome, iguais na tabela (desktop) e nos cards (celular)
-function RowActions({ car, busy, canDelete, canSeeCosts, canEditSales, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
+function RowActions({ car, busy, canDelete: roleCanDelete, canSeeCosts: roleSeesCosts, canEditSales, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
+  // Carro com o cadeado de outro sócio: só lança gasto e não exclui
+  const canSeeCosts = roleSeesCosts && !car.valuesHidden
+  const canDelete = roleCanDelete && !car.valuesHidden
   return (
     <div className="admin-action-group">
       {car.status === 'vendido' && canEditSales && (
@@ -155,6 +180,7 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
         <div className="stock-card-badges">
           {car.featured && <span className="stock-card-badge is-featured"><Star size={12} fill="currentColor" /> Destaque</span>}
           {car.hidden && <span className="stock-card-badge is-hidden"><EyeOff size={12} /> Oculto no site</span>}
+          <PrivateBadge car={car} card />
           {car.entryType && car.entryType !== 'showroom' && <span className="stock-card-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
           {renavePendingLabel(car) && <span className="stock-card-badge is-renave">{renavePendingLabel(car)}</span>}
           <PortalBadge state={row.olx} name="OLX" card />
@@ -188,11 +214,11 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
           <div className="stock-card-stats">
             <div>
               <span>Custo total</span>
-              <strong>{hasCost ? formatCurrency(totalCost) : '—'}</strong>
+              <strong>{car.valuesHidden ? <PrivateValue car={car} /> : hasCost ? formatCurrency(totalCost) : '—'}</strong>
             </div>
-            <div className={marginClass}>
+            <div className={car.valuesHidden ? '' : marginClass}>
               <span>Margem</span>
-              <strong>{hasCost && margin != null ? formatCurrency(margin) : '—'}</strong>
+              <strong>{car.valuesHidden ? <PrivateValue car={car} /> : hasCost && margin != null ? formatCurrency(margin) : '—'}</strong>
             </div>
           </div>
         )}
@@ -303,6 +329,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   </span>
                   {car.plate && <span className="car-plate">{car.plate.toUpperCase()}</span>}
                   {car.hidden && <span className="admin-hidden-badge">Oculto</span>}
+                  <PrivateBadge car={car} />
                   {car.entryType && car.entryType !== 'showroom' && <span className="admin-hidden-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
                   {renavePendingLabel(car) && <span className="admin-hidden-badge is-renave">{renavePendingLabel(car)}</span>}
                   <PortalBadge state={olx} name="OLX" />
@@ -321,10 +348,10 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   {sale && canSeeSaleValues ? formatCurrency(sale.salePrice) : car.price != null ? formatCurrency(car.price) : 'Consulte o valor'}
                   {sale && canSeeSaleValues && <span className="admin-table-sub">valor da venda</span>}
                 </td>
-                {canSeeCosts && <td>{car.purchasePrice ? formatCurrency(totalCost) : '—'}</td>}
+                {canSeeCosts && <td>{car.valuesHidden ? <PrivateValue car={car} /> : car.purchasePrice ? formatCurrency(totalCost) : '—'}</td>}
                 {canSeeCosts && (
-                  <td className={car.purchasePrice && margin != null ? (margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive') : ''}>
-                    {car.purchasePrice && margin != null ? formatCurrency(margin) : '—'}
+                  <td className={!car.valuesHidden && car.purchasePrice && margin != null ? (margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive') : ''}>
+                    {car.valuesHidden ? <PrivateValue car={car} /> : car.purchasePrice && margin != null ? formatCurrency(margin) : '—'}
                   </td>
                 )}
                 <td>
@@ -375,6 +402,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   · {formatViews(views)}
                 </span>
                 {car.hidden && <span className="admin-hidden-badge">Oculto</span>}
+                <PrivateBadge car={car} />
                 {car.entryType && car.entryType !== 'showroom' && <span className="admin-hidden-badge is-entry">{entryTypeLabel(car.entryType)}</span>}
                 {renavePendingLabel(car) && <span className="admin-hidden-badge is-renave">{renavePendingLabel(car)}</span>}
                 <PortalBadge state={olx} name="OLX" />
@@ -400,13 +428,13 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
               {canSeeCosts && (
                 <div>
                   <span>Custo total</span>
-                  <strong>{car.purchasePrice ? formatCurrency(totalCost) : '—'}</strong>
+                  <strong>{car.valuesHidden ? <PrivateValue car={car} /> : car.purchasePrice ? formatCurrency(totalCost) : '—'}</strong>
                 </div>
               )}
               {canSeeCosts && (
-                <div className={car.purchasePrice && margin != null ? (margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive') : ''}>
+                <div className={!car.valuesHidden && car.purchasePrice && margin != null ? (margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive') : ''}>
                   <span>Margem</span>
-                  <strong>{car.purchasePrice && margin != null ? formatCurrency(margin) : '—'}</strong>
+                  <strong>{car.valuesHidden ? <PrivateValue car={car} /> : car.purchasePrice && margin != null ? formatCurrency(margin) : '—'}</strong>
                 </div>
               )}
             </div>
@@ -440,6 +468,11 @@ export default function AdminCarList() {
   // RENAVE pendente (seção 55): vem marcado pelo aviso do início (?renave=pendente)
   const [searchParams] = useSearchParams()
   const [onlyRenave, setOnlyRenave] = useState(() => searchParams.get('renave') === 'pendente')
+  // Rascunhos do celular (seção 72): fotos tiradas que ainda não viraram carro
+  const [drafts, setDrafts] = useState([])
+  useEffect(() => {
+    fetchCarDrafts().then(setDrafts).catch(() => setDrafts([]))
+  }, [])
   // OLX (seção 59): situação de cada carro, com a conta conectada
   const [onlyOlx, setOnlyOlx] = useState(false)
   const [olxAccount, setOlxAccount] = useState(null)
@@ -835,6 +868,9 @@ export default function AdminCarList() {
           <p>{cars.length} {cars.length === 1 ? 'carro cadastrado' : 'carros cadastrados'}</p>
         </div>
         <div className="admin-row-actions">
+          <Link to="/admin/carros/novo/fotos" className="btn btn-outline">
+            <Camera size={15} /> Fotos pelo celular
+          </Link>
           {isStaff && (
             <button type="button" className="btn btn-outline" onClick={openAlertDialog}>
               <BellRing size={15} /> Aviso de estoque
@@ -872,6 +908,23 @@ export default function AdminCarList() {
       </div>
 
       {error && <p className="admin-error">{error}</p>}
+
+      {drafts.length > 0 && (
+        <section className="admin-form-section car-drafts-stock" aria-labelledby="car-drafts-stock">
+          <div className="car-drafts-stock-head">
+            <h2 id="car-drafts-stock">
+              Rascunhos do celular <span className="admin-table-sub">({drafts.length})</span>
+            </h2>
+            <Link to="/admin/carros/novo/fotos" className="admin-link-btn">Ver todos</Link>
+          </div>
+          <p className="admin-form-note">Carros fotografados pelo celular que ainda não estão no estoque nem no site.</p>
+          <ul className="car-drafts-list">
+            {drafts.slice(0, 3).map((draft) => (
+              <CarDraftCard key={draft.id} draft={draft} />
+            ))}
+          </ul>
+        </section>
+      )}
 
       {!loading && cars.length > 0 && (
         <div className="admin-search-bar">

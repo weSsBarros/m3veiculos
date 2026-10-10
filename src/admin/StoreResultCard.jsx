@@ -6,6 +6,7 @@ import { fetchSales, soldEntriesFrom } from '../lib/salesApi.js'
 import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExpensesApi.js'
 import { storeResult, monthRange } from '../utils/storeResult.js'
 import { formatCurrencyCents } from '../utils/carFormat.js'
+import { privateNote } from '../utils/privateValues.js'
 import MonthSelectBR from '../components/MonthSelectBR.jsx'
 
 function currentMonth() {
@@ -96,6 +97,7 @@ export default function StoreResultCard({ data = null }) {
           <p className="admin-form-note">
             Vendas pela data da venda; comissões pela data do pagamento (o "a pagar" são as das vendas do mês ainda não
             pagas); despesas da empresa pelo vencimento (pagas ou não).
+            {result.privateCount > 0 && ` ${privateNote(result.privateCount)}`}
           </p>
         </>
       )}

@@ -121,7 +121,8 @@ export function isBlockHidden(settings, key) {
 
 // Aba de um endereço do painel (para a tela de "aba escondida")
 export function tabForPath(pathname) {
-  if (pathname === '/admin/carros/novo') return 'novo-carro'
+  // Fotos pelo celular (rascunhos, seção 72) é parte do Novo carro
+  if (pathname === '/admin/carros/novo' || pathname === '/admin/carros/novo/fotos' || pathname === '/admin/fotos-celular') return 'novo-carro'
   if (pathname.startsWith('/admin/carros/')) return 'estoque'
   const tab = PANEL_TABS.find((t) => pathname === t.path || pathname.startsWith(`${t.path}/`))
   return tab ? tab.key : null

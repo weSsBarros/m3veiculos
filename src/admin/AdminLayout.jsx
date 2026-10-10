@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -352,7 +352,10 @@ export default function AdminLayout() {
             </div>
           </div>
         ) : (
-          <Outlet key={viewAs ? `${viewAs.role}-${viewAs.sellerId || 'generico'}` : 'normal'} />
+          // As telas do painel carregam à parte (App.jsx): enquanto chega, só o conteúdo espera
+          <Suspense fallback={<p className="admin-muted">Carregando…</p>}>
+            <Outlet key={viewAs ? `${viewAs.role}-${viewAs.sellerId || 'generico'}` : 'normal'} />
+          </Suspense>
         )}
       </main>
     </div>

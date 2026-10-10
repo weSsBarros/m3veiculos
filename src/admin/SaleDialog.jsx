@@ -12,6 +12,7 @@ import PaymentFields, { paymentFromSale } from './PaymentFields.jsx'
 import TradeInFields, { EMPTY_TRADE_IN } from './TradeInFields.jsx'
 import useConfirm from '../components/useConfirm.jsx'
 import { MoneyInput } from '../components/NumberInputs.jsx'
+import { parseAnoModelo } from '../utils/anoModelo.js'
 import '../components/ConfirmDialog.css'
 
 // Janela aberta ao marcar um carro como "Vendido": vendedor, cliente
@@ -81,17 +82,21 @@ export default function SaleDialog({
     }
     let tradeInData = null
     if (tradeIn.enabled) {
-      const year = Number.parseInt(tradeIn.year, 10)
-      if (!tradeIn.brand.trim() || !tradeIn.model.trim() || !year) {
-        setError('Carro da troca: informe pelo menos marca, modelo e ano.')
+      const anoModelo = parseAnoModelo(tradeIn.modelYear)
+      if (!tradeIn.brand.trim() || !tradeIn.model.trim() || anoModelo.empty) {
+        setError('Carro da troca: informe pelo menos marca, modelo e ano/modelo.')
+        return
+      }
+      if (!anoModelo.ok) {
+        setError(`Carro da troca: ${anoModelo.error}`)
         return
       }
       tradeInData = {
         brand: tradeIn.brand.trim(),
         model: tradeIn.model.trim(),
         version: tradeIn.version.trim(),
-        year,
-        modelYear: tradeIn.modelYear.trim(),
+        year: anoModelo.year,
+        modelYear: anoModelo.modelYear,
         km: parseIntBR(tradeIn.km) ?? 0,
         color: tradeIn.color.trim(),
         plate: tradeIn.plate.trim(),
