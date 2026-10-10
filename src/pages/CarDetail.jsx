@@ -77,7 +77,7 @@ export default function CarDetail() {
     const priceLabel = car.price != null ? formatCurrency(car.price) : 'Consulte o valor'
     document.title = `${car.brand} ${car.model} ${car.version} — ${priceLabel} | M&3 Veículos`
     return () => {
-      document.title = 'M&3 Veículos | Novos e seminovos'
+      document.title = 'M&3 Veículos | Novos e seminovos em São Luís'
     }
   }, [car])
 
