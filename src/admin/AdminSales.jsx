@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { RefreshCcw, Search, ListChecks, Eye, Handshake, XCircle } from 'lucide-react'
+import { RefreshCcw, Search, ListChecks, Eye, Handshake, XCircle, Lock } from 'lucide-react'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
+import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchSales, effectiveSaleDate } from '../lib/salesApi.js'
 import { fetchReservations, closeReservation, reservationAlert } from '../lib/reservationsApi.js'
 import { registerSaleFromDialog } from '../lib/saleFlow.js'
@@ -17,6 +18,8 @@ import { periodRange, inRange } from '../utils/period.js'
 import { DEFAULT_SALE_CHECKLIST, checklistSummary } from '../utils/saleChecklist.js'
 import { isTransferOpen, transferAlert } from '../utils/transfer.js'
 import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
+import { saleCost, salesSummary } from '../utils/salesSummary.js'
+import { privateNote } from '../utils/privateValues.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import PeriodFilter from './PeriodFilter.jsx'
 import SaleDialog from './SaleDialog.jsx'
@@ -46,6 +49,14 @@ function DocsCount({ count }) {
   return <span>{count} {count === 1 ? 'documento' : 'documentos'}</span>
 }
 
+const marginClass = (margin) => (margin == null ? '' : margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive')
+
+// Margem do carro vendido: "Privado" com o cadeado de outro sócio, "—" sem "Preço de compra"
+function MarginValue({ row }) {
+  if (row.car.valuesHidden) return 'Privado'
+  return row.margin == null ? '—' : formatCurrency(row.margin)
+}
+
 function ChecklistCount({ sale }) {
   if (!sale || sale.checklist.length === 0) return null
   const { total, pending } = checklistSummary(sale.checklist)
@@ -59,14 +70,18 @@ function ChecklistCount({ sale }) {
 // Vendas: busca por comprador, carro ou placa para saber quando e por quem
 // cada venda foi feita, com a transferência do veículo, o checklist de
 // entrega, os contratos e documentos de cada venda e as reservas ativas.
+// No topo, os números do período (desde 11/10/2026, quando a aba Histórico
+// entrou aqui): vendidos, faturamento e ticket médio para quem vê os valores e
+// lucro e margem de cada carro só para quem vê os custos (admin).
 // O vendedor vê só as vendas e reservas dele, sem editar.
 export default function AdminSales() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, isStaff, isSeller, canSeeSaleValues } = useAuth()
+  const { isAdmin, isStaff, isSeller, canSeeSaleValues, canSeeCosts } = useAuth()
   // O vendedor vê os valores das vendas dele
   const showValues = canSeeSaleValues || isSeller
   const [searchParams, setSearchParams] = useSearchParams()
   const [cars, setCars] = useState([])
+  const [expenses, setExpenses] = useState([])
   const [sales, setSales] = useState([])
   const [sellers, setSellers] = useState([])
   const [customers, setCustomers] = useState([])
@@ -91,8 +106,10 @@ export default function AdminSales() {
     setLoading(true)
     setError('')
     try {
-      const [carsData, salesData, sellersData, customersData, contractsData, docsData, settings, reservationsData] = await Promise.all([
+      const [carsData, expensesData, salesData, sellersData, customersData, contractsData, docsData, settings, reservationsData] = await Promise.all([
         fetchAllCarsAdmin(),
+        // Gastos dos carros só para quem vê os custos (margem e lucro)
+        canSeeCosts ? fetchAllExpensesAdmin() : Promise.resolve([]),
         fetchSales(),
         fetchSellers(),
         fetchAllCustomers(),
@@ -103,6 +120,7 @@ export default function AdminSales() {
         fetchReservations().catch(() => []),
       ])
       setCars(carsData)
+      setExpenses(expensesData)
       setSales(salesData)
       setSellers(sellersData)
       setCustomers(customersData)
@@ -131,6 +149,8 @@ export default function AdminSales() {
     const docsByCar = {}
     for (const c of contracts) if (c.carId) docsByCar[c.carId] = (docsByCar[c.carId] || 0) + 1
     for (const d of docs) if (d.carId) docsByCar[d.carId] = (docsByCar[d.carId] || 0) + 1
+    const expensesByCar = {}
+    for (const e of expenses) expensesByCar[e.carId] = (expensesByCar[e.carId] || 0) + e.amount
     return cars
       // O vendedor só enxerga a venda quando ela é dele
       .filter((car) => car.status === 'vendido' && (isStaff || salesByCar.has(car.id)))
@@ -141,19 +161,22 @@ export default function AdminSales() {
             ? sellersById.get(sale.sellerId)?.name || 'Vendedor removido'
             : 'Venda direta (loja)'
           : 'Não registrado'
+        const price = sale ? sale.salePrice : car.price
         return {
           car,
           sale,
           customer: car.customerId ? customersById.get(car.customerId) || null : null,
           sellerName,
           date: effectiveSaleDate(car, sale),
-          price: sale ? sale.salePrice : car.price,
+          price,
+          // Custo total e margem (só usados por quem vê os custos)
+          ...saleCost(car, expensesByCar[car.id], price),
           alert: transferAlert(sale),
           docsCount: docsByCar[car.id] || 0,
         }
       })
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-  }, [cars, sales, sellers, customers, contracts, docs, isStaff])
+  }, [cars, expenses, sales, sellers, customers, contracts, docs, isStaff])
 
   const reservationRows = useMemo(() => {
     const carsById = new Map(cars.map((c) => [c.id, c]))
@@ -172,6 +195,7 @@ export default function AdminSales() {
   const range = useMemo(() => periodRange(period, customStart, customEnd), [period, customStart, customEnd])
 
   const periodRows = useMemo(() => rows.filter((r) => inRange(r.date, range)), [rows, range])
+  const summary = useMemo(() => salesSummary(periodRows), [periodRows])
 
   const counts = useMemo(() => {
     const result = {}
@@ -300,6 +324,42 @@ export default function AdminSales() {
 
       {error && <p className="admin-error">{error}</p>}
 
+      <div className="expense-summary">
+        <div className="expense-summary-card">
+          <span>{isSeller ? 'Suas vendas' : 'Carros vendidos'}</span>
+          <strong>{summary.count}</strong>
+        </div>
+        {showValues && (
+          <div className="expense-summary-card">
+            <span>Faturamento</span>
+            <strong>{formatCurrency(summary.revenue)}</strong>
+          </div>
+        )}
+        {showValues && (
+          <div className="expense-summary-card">
+            <span>Ticket médio</span>
+            <strong>{summary.avgTicket != null ? formatCurrency(summary.avgTicket) : '—'}</strong>
+          </div>
+        )}
+        {canSeeCosts && (
+          <div className={`expense-summary-card ${summary.profit < 0 ? 'is-negative' : 'is-positive'}`}>
+            <span>Lucro (carros vendidos)</span>
+            <strong>{formatCurrency(summary.profit)}</strong>
+          </div>
+        )}
+      </div>
+      {summary.hidden > 0 && showValues && (
+        <p className="private-values-note">
+          <Lock size={14} aria-hidden="true" /> {privateNote(summary.hidden)} A quantidade de vendidos conta todos.
+        </p>
+      )}
+      {canSeeCosts && summary.missingCost > 0 && (
+        <p className="admin-form-hint">
+          O lucro considera só os {summary.marginCount} de {summary.count - summary.hidden} carros vendidos com "Preço de compra"
+          preenchido. A margem de cada carro usa todos os gastos dele, de qualquer data.
+        </p>
+      )}
+
       {reservationRows.length > 0 && (
         <section className="admin-form-section">
           <h2>Reservas ativas ({reservationRows.length})</h2>
@@ -392,6 +452,7 @@ export default function AdminSales() {
                   <th>Comprador</th>
                   <th>Vendido por</th>
                   {showValues && <th>Valor</th>}
+                  {canSeeCosts && <th>Margem</th>}
                   <th>Transferência</th>
                   <th>Documentos</th>
                   <th></th>
@@ -421,6 +482,11 @@ export default function AdminSales() {
                       {row.sale?.paymentMethod && <span className="admin-table-sub">{describePayment(row.sale)}</span>}
                     </td>
                     {showValues && <td className="admin-nowrap">{row.price != null ? formatCurrency(row.price) : '—'}</td>}
+                    {canSeeCosts && (
+                      <td className={`admin-nowrap ${marginClass(row.margin)}`}>
+                        <MarginValue row={row} />
+                      </td>
+                    )}
                     <td>
                       <TransferPill sale={row.sale} />
                       <ChecklistCount sale={row.sale} />
@@ -452,6 +518,11 @@ export default function AdminSales() {
                       {showValues && row.price != null ? ` · ${formatCurrency(row.price)}` : ''}
                     </span>
                     <span className="admin-card-meta">Comprador: {row.customer?.name || 'não vinculado'}</span>
+                    {canSeeCosts && (
+                      <span className="admin-card-meta">
+                        Margem: <span className={marginClass(row.margin)}><MarginValue row={row} /></span>
+                      </span>
+                    )}
                   </div>
                 </div>
                 <TransferPill sale={row.sale} />
@@ -475,6 +546,7 @@ export default function AdminSales() {
           companyName={companyName}
           isAdmin={isAdmin}
           canSeeSaleValues={showValues}
+          canSeeCosts={canSeeCosts}
           canEdit={isStaff}
           onSaleUpdated={applySale}
           onEditSale={(car) => setSaleDialogCar(car)}

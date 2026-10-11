@@ -38,7 +38,6 @@ const AdminExternalFinance = lazy(() => import('./admin/AdminExternalFinance.jsx
 const AdminReports = lazy(() => import('./admin/AdminReports.jsx'))
 const AdminContracts = lazy(() => import('./admin/AdminContracts.jsx'))
 const AdminContractTemplates = lazy(() => import('./admin/AdminContractTemplates.jsx'))
-const AdminHistory = lazy(() => import('./admin/AdminHistory.jsx'))
 const AdminSuppliers = lazy(() => import('./admin/AdminSuppliers.jsx'))
 const AdminCustomers = lazy(() => import('./admin/AdminCustomers.jsx'))
 const AdminSellers = lazy(() => import('./admin/AdminSellers.jsx'))
@@ -206,11 +205,12 @@ export default function App() {
           <Route path="carros/novo" element={<AdminCarForm />} />
           <Route path="carros/novo/fotos" element={<AdminQuickPhotos />} />
           <Route path="fotos-celular" element={<Navigate to="/admin/carros/novo/fotos" replace />} />
+          {/* A aba Histórico entrou na Vendas em 11/10/2026 */}
+          <Route path="historico" element={<Navigate to="/admin/vendas" replace />} />
           <Route path="carros/:id" element={<AdminCarForm />} />
           <Route path="carros/:id/gastos" element={<AdminCarExpenses />} />
           <Route path="suporte" element={<AdminSupport />} />
           <Route element={<StaffOnly><Outlet /></StaffOnly>}>
-            <Route path="historico" element={<AdminHistory />} />
             <Route path="fornecedores" element={<AdminSuppliers />} />
             <Route path="equipe" element={<AdminSellers />} />
             <Route path="atividades" element={<AdminActivity />} />

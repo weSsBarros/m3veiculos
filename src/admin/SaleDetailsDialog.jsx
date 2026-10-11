@@ -38,13 +38,15 @@ export default function SaleDetailsDialog({
   companyName,
   isAdmin,
   canSeeSaleValues,
+  // Custo total e margem do carro (só o admin)
+  canSeeCosts = false,
   // O vendedor vê as vendas dele, mas só admin e gerente editam
   canEdit = true,
   onSaleUpdated,
   onEditSale,
   onClose,
 }) {
-  const { car, sale, customer, sellerName, date, price } = row
+  const { car, sale, customer, sellerName, date, price, totalCost, margin } = row
   const [transfer, setTransfer] = useState(() => transferForm(sale))
   const [savingTransfer, setSavingTransfer] = useState(false)
   const [transferMessage, setTransferMessage] = useState('')
@@ -138,6 +140,20 @@ export default function SaleDetailsDialog({
             <div>
               <span>Valor da venda</span>
               <strong>{price != null ? formatCurrency(price) : '—'}</strong>
+            </div>
+          )}
+          {canSeeCosts && (
+            <div>
+              <span>Custo total (compra + gastos)</span>
+              <strong>{car.valuesHidden ? 'Privado' : car.purchasePrice ? formatCurrency(totalCost) : '—'}</strong>
+            </div>
+          )}
+          {canSeeCosts && (
+            <div>
+              <span>Margem</span>
+              <strong className={margin == null ? '' : margin < 0 ? 'expense-margin-negative' : 'expense-margin-positive'}>
+                {car.valuesHidden ? 'Privado' : margin == null ? '—' : formatCurrency(margin)}
+              </strong>
             </div>
           )}
           <div>

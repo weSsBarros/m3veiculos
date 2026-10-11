@@ -12,7 +12,6 @@ export const PANEL_TABS = [
   { key: 'financeiro', label: 'Financeiro', path: '/admin/financeiro', roles: ['admin', 'manager'] },
   { key: 'financiamentos-externos', label: 'Financ. externos', path: '/admin/financiamentos-externos', roles: ['admin', 'manager', 'seller'] },
   { key: 'relatorios', label: 'Relatórios', path: '/admin/relatorios', roles: ['admin', 'manager', 'seller'] },
-  { key: 'historico', label: 'Histórico', path: '/admin/historico', roles: ['admin', 'manager'] },
   { key: 'contratos', label: 'Contratos', path: '/admin/contratos', roles: ['admin', 'manager', 'seller'] },
   { key: 'clientes', label: 'Clientes', path: '/admin/clientes', roles: ['admin', 'manager', 'seller'] },
   { key: 'fornecedores', label: 'Fornecedores', path: '/admin/fornecedores', roles: ['admin', 'manager'] },

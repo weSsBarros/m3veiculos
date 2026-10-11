@@ -10,6 +10,8 @@ import { fetchStockAlertDefault, DEFAULT_STOCK_ALERT_DAYS } from '../lib/company
 import { downloadCsv } from '../utils/exportCsv.js'
 import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExpensesApi.js'
 import { withoutPrivate, privateNote } from '../utils/privateValues.js'
+import { periodRange, inRange } from '../utils/period.js'
+import PeriodFilter from './PeriodFilter.jsx'
 import StoreResultCard from './StoreResultCard.jsx'
 import FinanceTabs from './FinanceTabs.jsx'
 import './admin.css'
@@ -27,6 +29,10 @@ export default function AdminFinance() {
   const [error, setError] = useState('')
   const [exportCarId, setExportCarId] = useState(ALL_CARS_VALUE)
   const [search, setSearch] = useState('')
+  // Período do "Gasto em manutenção" (veio da antiga aba Histórico em 11/10/2026)
+  const [period, setPeriod] = useState('tudo')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
 
   async function load() {
     setLoading(true)
@@ -104,16 +110,22 @@ export default function AdminFinance() {
   const avgMargin = availableRowsWithMargin.length
     ? availableRowsWithMargin.reduce((sum, r) => sum + r.margin, 0) / availableRowsWithMargin.length
     : 0
-  const totalExpensesAll = expenses.reduce((sum, e) => sum + e.amount, 0)
   const avgDaysInStock = availableRows.length
     ? Math.round(availableRows.reduce((sum, r) => sum + daysInStock(r.car), 0) / availableRows.length)
     : 0
 
+  // Gasto em manutenção do período: lançamentos com data dentro do intervalo, em
+  // qualquer carro (vendido ou não). Categorias e fornecedores seguem o mesmo período.
+  const periodActive = period !== 'tudo'
+  const range = useMemo(() => periodRange(period, customStart, customEnd), [period, customStart, customEnd])
+  const periodExpenses = useMemo(() => expenses.filter((e) => inRange(e.expenseDate, range)), [expenses, range])
+  const totalMaintenance = periodExpenses.reduce((sum, e) => sum + e.amount, 0)
+
   const byCategory = useMemo(() => {
     const map = {}
-    for (const e of expenses) map[e.category] = (map[e.category] || 0) + e.amount
+    for (const e of periodExpenses) map[e.category] = (map[e.category] || 0) + e.amount
     return Object.entries(map).sort((a, b) => b[1] - a[1])
-  }, [expenses])
+  }, [periodExpenses])
 
   const suppliersById = useMemo(() => {
     const map = {}
@@ -123,14 +135,14 @@ export default function AdminFinance() {
 
   const bySupplier = useMemo(() => {
     const map = {}
-    for (const e of expenses) {
+    for (const e of periodExpenses) {
       if (!e.supplierId) continue
       map[e.supplierId] = (map[e.supplierId] || 0) + e.amount
     }
     return Object.entries(map)
       .map(([supplierId, amount]) => ({ supplierId, name: suppliersById[supplierId]?.name || 'Fornecedor removido', amount }))
       .sort((a, b) => b.amount - a.amount)
-  }, [expenses, suppliersById])
+  }, [periodExpenses, suppliersById])
 
   const carsById = useMemo(() => {
     const map = {}
@@ -201,10 +213,6 @@ export default function AdminFinance() {
           <strong>{formatCurrency(Math.round(avgMargin))}</strong>
         </div>
         <div className="expense-summary-card">
-          <span>Total gasto (todos os carros)</span>
-          <strong>{formatCurrency(totalExpensesAll)}</strong>
-        </div>
-        <div className="expense-summary-card">
           <span>Carros em estoque</span>
           <strong>{availableRows.length}</strong>
         </div>
@@ -221,9 +229,34 @@ export default function AdminFinance() {
 
       <StoreResultCard data={{ cars, sales, carExpenses: expenses, companyExpenses }} />
 
+      <div className="admin-page-head">
+        <h2 className="admin-section-title">Gasto em manutenção</h2>
+        <PeriodFilter
+          period={period}
+          onPeriodChange={setPeriod}
+          customStart={customStart}
+          customEnd={customEnd}
+          onCustomStartChange={setCustomStart}
+          onCustomEndChange={setCustomEnd}
+        />
+      </div>
+      <div className="expense-summary">
+        <div className="expense-summary-card">
+          <span>Gasto em manutenção {periodActive ? 'no período' : '(todos os carros)'}</span>
+          <strong>{formatCurrency(totalMaintenance)}</strong>
+        </div>
+        <div className="expense-summary-card">
+          <span>Lançamentos</span>
+          <strong>{periodExpenses.length}</strong>
+        </div>
+      </div>
+      <p className="admin-form-hint">
+        Soma dos gastos lançados {periodActive ? 'com data no período' : 'até hoje'}, em qualquer carro (vendido ou não).
+      </p>
+
       {byCategory.length > 0 && (
         <>
-          <h2 className="admin-section-title">Gastos por categoria</h2>
+          <h2 className="admin-section-title">Gastos por categoria{periodActive ? ' no período' : ''}</h2>
           <div className="expense-categories">
             {byCategory.map(([slug, amount]) => (
               <span className="expense-category-chip" key={slug}>
@@ -236,7 +269,7 @@ export default function AdminFinance() {
 
       {bySupplier.length > 0 && (
         <>
-          <h2 className="admin-section-title">Gastos por fornecedor</h2>
+          <h2 className="admin-section-title">Gastos por fornecedor{periodActive ? ' no período' : ''}</h2>
           <div className="expense-categories">
             {bySupplier.map(({ supplierId, name, amount }) => (
               <span className="expense-category-chip" key={supplierId}>

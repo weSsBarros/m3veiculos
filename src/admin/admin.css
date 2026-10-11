@@ -1769,45 +1769,6 @@ tr.is-hidden-row,
   background: #fff;
 }
 
-.history-period-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 14px;
-  background: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: 16px 18px;
-  margin-bottom: 20px;
-}
-
-.history-period-bar label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-}
-
-.history-period-bar select,
-.history-period-bar input {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  font: inherit;
-  font-size: 13.5px;
-  color: var(--color-text);
-  background: #fff;
-}
-
-.history-period-label {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--color-primary);
-  padding-bottom: 9px;
-}
-
 .contract-preview {
   background: var(--color-bg-alt);
   border: 1px solid var(--color-border);
