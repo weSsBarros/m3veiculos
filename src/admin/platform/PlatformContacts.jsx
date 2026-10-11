@@ -7,7 +7,7 @@ import { formatWaPhone } from '../../utils/whatsappRotation.js'
 import { todayISO } from '../../utils/carFormat.js'
 import DateInputBR from '../../components/DateInputBR.jsx'
 import useConfirm from '../../components/useConfirm.jsx'
-import { BillingPill } from './ClientParts.jsx'
+import { BillingPill, WhatsAppLink } from './ClientParts.jsx'
 import '../admin.css'
 
 const CONTACT_CHANNELS = [
@@ -185,9 +185,9 @@ export default function PlatformContacts() {
                 </div>
                 <div className="contact-card-links">
                   {a.responsiblePhone && (phoneLink ? (
-                    <a className="btn btn-outline" href={phoneLink} target="_blank" rel="noreferrer">
+                    <WhatsAppLink phone={a.responsiblePhone} text={hello}>
                       <MessageCircle size={15} /> {formatWaPhone(phoneWithDdd(a.responsiblePhone))}
-                    </a>
+                    </WhatsAppLink>
                   ) : (
                     <span className="admin-muted" title="Corrija o telefone na ficha do cliente (com DDD)">
                       {a.responsiblePhone}: telefone incompleto
@@ -199,9 +199,9 @@ export default function PlatformContacts() {
                     </a>
                   )}
                   {c.whatsapp && (
-                    <a className="btn btn-outline" href={whatsappLink(c.whatsapp, hello)} target="_blank" rel="noreferrer" title="WhatsApp do site da loja">
+                    <WhatsAppLink phone={c.whatsapp} text={hello} title="WhatsApp do site da loja">
                       <MessageCircle size={15} /> Loja
-                    </a>
+                    </WhatsAppLink>
                   )}
                   {c.siteUrl && (
                     <a className="btn btn-outline" href={c.siteUrl} target="_blank" rel="noreferrer">

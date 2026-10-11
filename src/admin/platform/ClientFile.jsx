@@ -38,7 +38,7 @@ import {
 import { exportPaymentReceipt, paymentReceiptBase64 } from '../../utils/clientPdf.js'
 import { todayISO } from '../../utils/carFormat.js'
 import useConfirm from '../../components/useConfirm.jsx'
-import { StatusPill, BillingPill } from './ClientParts.jsx'
+import { StatusPill, BillingPill, WhatsAppLink } from './ClientParts.jsx'
 import { ContactNotes } from './PlatformContacts.jsx'
 import { exportTermsReceiptPdf } from '../../utils/termsPdf.js'
 import DateInputBR from '../../components/DateInputBR.jsx'
@@ -352,7 +352,8 @@ export default function ClientFile() {
   const onboarding = onboardingStatus(client)
   const done = onboarding.filter((i) => i.done).length
   const domain = domainAlert(a)
-  const chargeLink = whatsappLink(a.responsiblePhone, chargeMessage({ storeName: client.name, responsibleName: a.responsibleName, billing, pixKey, siteUrl: client.siteUrl }))
+  const chargeText = chargeMessage({ storeName: client.name, responsibleName: a.responsibleName, billing, pixKey, siteUrl: client.siteUrl })
+  const chargeLink = whatsappLink(a.responsiblePhone, chargeText)
   const planPrice = plans.find((p) => p.id === billingForm?.planId)?.monthlyPrice
   const implantation = implantationDays(a)
   const autoMonth = a.status === 'implantacao' || Boolean(a.activatedOn)
@@ -528,9 +529,9 @@ export default function ClientFile() {
                 <BillingPill billing={billing} />
               </div>
               {chargeLink ? (
-                <a href={chargeLink} target="_blank" rel="noreferrer" className="btn btn-outline">
+                <WhatsAppLink phone={a.responsiblePhone} text={chargeText}>
                   <MessageCircle size={15} /> Cobrar no WhatsApp
-                </a>
+                </WhatsAppLink>
               ) : (
                 <span className="admin-form-note">Cadastre o telefone do responsável em Dados para cobrar pelo WhatsApp.</span>
               )}

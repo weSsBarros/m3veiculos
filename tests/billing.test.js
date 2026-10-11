@@ -6,6 +6,7 @@ import {
   chargeMessage,
   whatsappLink,
   phoneWithDdd,
+  whatsappWebLink,
   billingTotals,
   receivedByMonth,
   domainAlert,
@@ -89,6 +90,9 @@ test('cobrança: mensagem do WhatsApp e link', () => {
   assert.equal(whatsappLink('12345', 'oi'), '')
   assert.equal(phoneWithDdd('99083493'), '98999083493')
   assert.equal(phoneWithDdd('(98) 98129-5577'), '98981295577')
+  // Painel WB.Dev no computador: a mesma conversa no WhatsApp Web
+  assert.equal(whatsappWebLink('991143627', 'Olá!'), 'https://web.whatsapp.com/send?phone=5598991143627&text=Ol%C3%A1!')
+  assert.equal(whatsappWebLink('12345', 'oi'), '')
 })
 
 test('cobrança: totais, recebido por mês, domínio e implantação', () => {

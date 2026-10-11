@@ -117,7 +117,7 @@ const CRLV_MESSAGES: Record<string, string> = {
   foto_sem_arquivo: 'Tire ou escolha a foto do documento.',
   foto_grande: 'A foto passa de 4 MB. Tire de novo ou escolha uma menor.',
   nao_imagem: 'O arquivo não é uma foto (JPG, PNG ou WebP).',
-  foto_nao_crlv: 'Essa foto não parece um documento de veículo (CRLV). Tire de novo com o documento inteiro na foto.',
+  foto_nao_crlv: 'Essa foto não parece um documento de veículo (CRLV) nem um carro com a placa. Tire de novo com o documento inteiro ou com a placa na foto.',
   ilegivel: 'Não deu para ler o documento nessa foto. Tire de novo com o documento inteiro, reto e com boa luz, ou preencha à mão.',
   ia_desligada: 'A leitura da foto ainda não está ligada. Fale com a WB.Dev.',
 }
@@ -191,16 +191,22 @@ const DOC_FIELDS = ['placa', 'renavam', 'chassi', 'marca_modelo_versao', 'ano_fa
 const DOC_SCHEMA = {
   type: 'object',
   properties: {
+    tipo_imagem: { type: 'string', enum: ['documento', 'veiculo', 'outro'] },
     e_documento_veiculo: { type: 'boolean' },
     ...Object.fromEntries(DOC_FIELDS.map((k) => [k, { type: 'string' }])),
   },
-  required: ['e_documento_veiculo', ...DOC_FIELDS],
+  required: ['tipo_imagem', 'e_documento_veiculo', ...DOC_FIELDS],
   additionalProperties: false,
 }
 
 const DOC_SYSTEM = [
-  'Você lê fotos de documentos de veículos brasileiros (CRLV-e, CRLV ou CRV) para preencher o cadastro do carro numa loja.',
-  'Devolva só os dados do VEÍCULO, copiados como estão impressos:',
+  'Você lê fotos para preencher o cadastro do carro numa loja. A foto pode ser de um documento de veículo brasileiro',
+  '(CRLV-e, CRLV ou CRV) ou do próprio carro.',
+  'tipo_imagem: "documento" para o documento; "veiculo" para a foto de um carro ou moto; "outro" para qualquer outra coisa.',
+  'Foto do carro: leia só a placa do carro principal da foto (nunca a de outro carro ao fundo) e escreva em placa,',
+  'com 7 letras e números, sem traço (ex.: ABC1D23 ou ABC1234). Placa que não dá para ler inteira com certeza fica vazia.',
+  'Na foto do carro, e_documento_veiculo é false e todos os outros campos ficam vazios.',
+  'Documento: devolva só os dados do VEÍCULO, copiados como estão impressos:',
   '- placa (ex.: ABC1D23 ou ABC1234);',
   '- renavam (os dígitos do código RENAVAM);',
   '- chassi (17 letras e números);',
@@ -254,7 +260,7 @@ async function readCrlvPhoto(form: FormData, service: SupabaseClient, caller: Su
           role: 'user',
           content: [
             { type: 'image', source: { type: 'base64', media_type: mediaType, data: encodeBase64(new Uint8Array(await file.arrayBuffer())) } },
-            { type: 'text', text: 'Leia os dados do veículo neste documento.' },
+            { type: 'text', text: 'Leia os dados do veículo nesta foto (documento do veículo ou foto do carro).' },
           ],
         }],
       } as never)
@@ -271,9 +277,18 @@ async function readCrlvPhoto(form: FormData, service: SupabaseClient, caller: Su
     } catch {
       throw new CrlvError('ilegivel')
     }
+    // Foto do carro (pedido do Wesley em 10/10/2026, opção A): a leitura não é cobrada;
+    // só a placa volta, e a tela mostra para conferir antes de consultar (R$ da placa)
+    // (só para a tela que manda aceita_veiculo=1; a tela antiga recebe "não é documento")
+    if (ai.tipo_imagem === 'veiculo' && ai.e_documento_veiculo !== true) {
+      if (form.get('aceita_veiculo') !== '1') throw new CrlvError('foto_nao_crlv')
+      if (hold?.ledger_id) await service.rpc('plate_credit_release', { p_id: hold.ledger_id })
+      const plate = normalizePlate(ai.placa)
+      return { kind: 'veiculo', plate: isValidPlate(plate) ? plate : '', charged: false, credits: await creditsFor(caller) }
+    }
     const parsed = parseCrlvAiFields(ai)
     if (!parsed.ok) throw new CrlvError(parsed.error === 'nao_e_crlv' ? 'foto_nao_crlv' : 'ilegivel')
-    return { ...(await crlvReply(parsed, query)), charged: true, credits: await creditsFor(caller) }
+    return { kind: 'documento', ...(await crlvReply(parsed, query)), charged: true, credits: await creditsFor(caller) }
   } catch (err) {
     // Foto sem leitura ou erro: a loja não paga
     if (hold?.ledger_id) await service.rpc('plate_credit_release', { p_id: hold.ledger_id })

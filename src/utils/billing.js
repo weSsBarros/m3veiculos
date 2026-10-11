@@ -138,6 +138,14 @@ export function whatsappLink(phone, text) {
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
 }
 
+// A mesma conversa direto no WhatsApp Web (o wa.me abre o aplicativo instalado no
+// computador). Usado no painel WB.Dev quando não é celular (WhatsAppLink).
+export function whatsappWebLink(phone, text) {
+  const digits = waDigits(phoneWithDdd(phone))
+  if (!digits) return ''
+  return `https://web.whatsapp.com/send?phone=${digits}&text=${encodeURIComponent(text)}`
+}
+
 // Mês 'AAAA-MM-01' de uma data 'AAAA-MM-DD'
 export const monthOf = (isoDate) => (isoDate ? `${isoDate.slice(0, 7)}-01` : '')
 

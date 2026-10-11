@@ -59,10 +59,13 @@ export function readCrlv(file) {
 }
 
 // Foto do documento (já reduzida por documentPhotoForReading) -> os mesmos dados
-// do PDF, lidos pela IA e cobrados dos créditos: { ..., charged, credits }
+// do PDF, lidos pela IA e cobrados dos créditos: { kind: 'documento', ..., charged, credits }.
+// Foto do carro -> { kind: 'veiculo', plate, charged: false } (aceita_veiculo avisa a
+// função que esta tela sabe tratar; tela antiga continua recebendo "não é documento")
 export function readCrlvPhoto(file) {
   const form = new FormData()
   form.append('acao', 'crlv_foto')
+  form.append('aceita_veiculo', '1')
   form.append('arquivo', file)
   return call(form)
 }

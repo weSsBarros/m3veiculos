@@ -84,6 +84,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
   const [plate, setPlate] = useState('')
   const fileRef = useRef(null)
   const photoRef = useRef(null)
+  const plateRef = useRef(null)
 
   useEffect(() => {
     let active = true
@@ -138,7 +139,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
     e.target.value = ''
     if (!file) return
     if (!isPdf(file)) {
-      setError('Escolha o PDF do CRLV-e, baixado no app Carteira Digital de Trânsito. Para uma foto, use "Foto do documento".')
+      setError('Escolha o PDF do CRLV-e, baixado no app Carteira Digital de Trânsito. Para uma foto, use "Foto (documento ou placa)".')
       return
     }
     readPdf(file)
@@ -152,7 +153,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
     // PDF escolhido aqui vai pelo caminho de graça
     if (isPdf(file)) return readPdf(file)
     if (file.type && !file.type.startsWith('image/')) {
-      setError('Escolha uma foto do documento (JPG ou PNG).')
+      setError('Escolha uma foto do documento ou do carro (JPG ou PNG).')
       return
     }
     setBusy('foto')
@@ -163,6 +164,19 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
       const photo = await documentPhotoForReading(file)
       const res = await readCrlvPhoto(photo)
       if (res.credits) setFeatures((f) => ({ ...f, credits: res.credits }))
+      // Foto do carro: a IA só lê a placa (sem cobrar); a pessoa confere antes de consultar
+      if (res.kind === 'veiculo') {
+        if (!res.plate) {
+          setError('A foto é de um carro, mas não deu para ler a placa inteira. Tire de novo de frente para a placa, mais perto e com boa luz, ou digite a placa.')
+          return
+        }
+        setPlate(res.plate)
+        setInfo(features.placa
+          ? `Placa lida da foto: ${res.plate} (leitura sem custo). Confira e clique em "Consultar placa" (${moneyBR(res.credits?.price ?? 0)}).`
+          : `Placa lida da foto: ${res.plate}. A consulta por placa não está ligada: preencha o resto à mão ou importe o CRLV-e.`)
+        setTimeout(() => plateRef.current?.focus(), 0)
+        return
+      }
       const next = documentReview(res, {
         source: 'foto',
         title: 'Dados da foto do documento',
@@ -306,7 +320,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
       <h2>Preencher automaticamente</h2>
       <p className="admin-form-hint">
         {features.fotoDocumento
-          ? 'Importe o CRLV-e em PDF, tire uma foto do documento ou escolha o carro na tabela FIPE.'
+          ? 'Importe o CRLV-e em PDF, tire uma foto do documento ou da placa do carro, ou escolha o carro na tabela FIPE.'
           : 'Importe o CRLV-e ou escolha o carro na tabela FIPE.'}{' '}
         Você confere tudo antes de aplicar, e o cadastro só muda de verdade ao salvar.
       </p>
@@ -337,7 +351,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
         {features.fotoDocumento && (
           <>
             <button type="button" className="btn btn-outline" onClick={() => photoRef.current?.click()} disabled={working || !hasDocCredit}>
-              <Camera size={16} aria-hidden="true" /> {busy === 'foto' ? 'Lendo a foto…' : 'Foto do documento'}
+              <Camera size={16} aria-hidden="true" /> {busy === 'foto' ? 'Lendo a foto…' : 'Foto (documento ou placa)'}
             </button>
             <input ref={photoRef} type="file" accept="image/*" hidden onChange={handlePhoto} />
           </>
@@ -392,6 +406,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
           {features.placa && (
             <div className="autofill-plate">
               <input
+                ref={plateRef}
                 value={plate}
                 onChange={(e) => setPlate(e.target.value.toUpperCase())}
                 onKeyDown={(e) => {
