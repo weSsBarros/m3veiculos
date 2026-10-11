@@ -13,7 +13,8 @@
 //    créditos pré-pagos (seção 71): plate_credit_hold reserva o preço antes e
 //    plate_credit_release devolve se não achar o carro ou der erro; a mesma placa
 //    de novo na mesma loja em 30 dias sai de graça. A loja de demonstração
-//    (companies.is_demo) usa o modo de teste da APIBrasil. Cache de 30 dias por
+//    (companies.is_demo) consulta de verdade e tem recarga automática (R$ 150 → R$ 300);
+//    o modo de teste da APIBrasil só com PLACA_DEMO_TESTE=1 (fora do cache). Cache de 30 dias por
 //    placa (placa_cache, só dados do veículo) e registro das consultas
 //    (placa_consultas). Nunca consulta proprietário.
 //  - crlv_foto (multipart, campos "acao" = crlv_foto e "arquivo" = foto JPG/PNG/WebP):
@@ -231,6 +232,7 @@ async function readCrlvPhoto(form: FormData, service: SupabaseClient, caller: Su
     if ((count || 0) >= limit) throw new PlacaError(`A loja chegou a ${limit} leituras de documento nas últimas 24 horas. Tente mais tarde ou preencha à mão.`, 'recusado')
   }
 
+  await topUpDemoCredits(service, companyId)
   const { data: hold, error: holdError } = await service.rpc('doc_photo_credit_hold', { p_company: companyId, p_user: userId })
   if (holdError) {
     if (String(holdError.message || '').includes('SALDO_INSUFICIENTE')) {
@@ -281,12 +283,36 @@ async function readCrlvPhoto(form: FormData, service: SupabaseClient, caller: Su
 
 // -- Placa (paga com os créditos da loja) --------------------------------------------
 
+// A loja de demonstração (WB.AUTO) consulta a placa de verdade, como as outras
+// (decisão do Wesley em 10/10/2026: mostrar o carro real nas apresentações). O modo de
+// teste da APIBrasil (grátis, carro fictício) só volta com o segredo PLACA_DEMO_TESTE=1.
 async function placaSetup(service: SupabaseClient, companyId: string) {
   const provider = Deno.env.get('PLACA_PROVEDOR') || ''
   const token = Deno.env.get('APIBRASIL_TOKEN') || ''
-  if (provider !== 'apibrasil' || !token) return { on: false, demo: false, token: '' }
+  if (provider !== 'apibrasil' || !token) return { on: false, demo: false, testMode: false, token: '' }
   const { data: company } = await service.from('companies').select('is_demo').eq('id', companyId).single()
-  return { on: true, demo: company?.is_demo === true, token }
+  const demo = company?.is_demo === true
+  return { on: true, demo, testMode: demo && Deno.env.get('PLACA_DEMO_TESTE') === '1', token }
+}
+
+// Créditos "sem fim" da loja de demonstração (decisão do Wesley em 10/10/2026): quando o
+// saldo chega a R$ 150, volta para R$ 300 com um ajuste no extrato. Os valores mudam
+// pelos segredos DEMO_CREDITO_MINIMO e DEMO_CREDITO_RECARGA (os testes usam isso).
+async function topUpDemoCredits(service: SupabaseClient, companyId: string) {
+  const { data: company } = await service.from('companies').select('is_demo').eq('id', companyId).single()
+  if (company?.is_demo !== true) return
+  const floor = Number(Deno.env.get('DEMO_CREDITO_MINIMO') ?? 150)
+  const top = Number(Deno.env.get('DEMO_CREDITO_RECARGA') ?? 300)
+  const { data: balance, error } = await service.rpc('plate_credit_balance', { p_company: companyId })
+  if (error) return
+  const value = Number(balance) || 0
+  if (value > floor || top <= value) return
+  await service.from('plate_credit_ledger').insert({
+    company_id: companyId,
+    kind: 'ajuste',
+    amount: Math.round((top - value) * 100) / 100,
+    note: `Recarga automática da loja de demonstração (volta para R$ ${top})`,
+  })
 }
 
 // Saldo da loja (o banco confere quem chama): { balance, price, queries, packages, admin }
@@ -314,6 +340,7 @@ async function lookupPlate(service: SupabaseClient, caller: SupabaseClient, comp
   if (!isValidPlate(plate)) throw new PlacaError('Placa fora do padrão (ex.: ABC1234 ou ABC1D23).', 'placa')
 
   // Reserva o valor antes de consultar (a mesma placa desta loja em 30 dias sai de graça)
+  await topUpDemoCredits(service, companyId)
   const { data: hold, error: holdError } = await service.rpc('plate_credit_hold', { p_company: companyId, p_plate: plate, p_user: userId })
   if (holdError) {
     if (String(holdError.message || '').includes('SALDO_INSUFICIENTE')) {
@@ -328,7 +355,12 @@ async function lookupPlate(service: SupabaseClient, caller: SupabaseClient, comp
   try {
     let result
     let fromCache = false
-    const { data: cached } = await service.from('placa_cache').select('data, fetched_at').eq('plate', plate).maybeSingle()
+    // No modo de teste a APIBrasil devolve um carro fictício para qualquer placa: aí não
+    // lê nem grava o cache, que é das lojas reais (em 10/10/2026 o Gol fictício de uma
+    // consulta da WB.AUTO foi parar numa loja real)
+    const { data: cached } = setup.testMode
+      ? { data: null }
+      : await service.from('placa_cache').select('data, fetched_at').eq('plate', plate).maybeSingle()
     if (cached && Date.now() - new Date(cached.fetched_at).getTime() < PLATE_TTL_MS) {
       result = sanitizePlateResult(cached.data)
       fromCache = true
@@ -341,9 +373,9 @@ async function lookupPlate(service: SupabaseClient, caller: SupabaseClient, comp
           .eq('company_id', companyId).eq('from_cache', false).gte('created_at', since)
         if ((count || 0) >= limit) throw new PlacaError(`A loja chegou a ${limit} consultas por placa nas últimas 24 horas. Tente mais tarde ou preencha à mão.`, 'recusado')
       }
-      const provider = makeApiBrasilProvider({ token: setup.token, homolog: setup.demo })
+      const provider = makeApiBrasilProvider({ token: setup.token, homolog: setup.testMode })
       result = sanitizePlateResult(await provider.lookupByPlate(plate))
-      await service.from('placa_cache').upsert({ plate, data: result, fetched_at: new Date().toISOString() })
+      if (!setup.testMode) await service.from('placa_cache').upsert({ plate, data: result, fetched_at: new Date().toISOString() })
     }
     await log(fromCache)
     return { ...result, fromCache, charged: hold?.charged === true, credits: await creditsFor(caller) }
@@ -403,6 +435,7 @@ Deno.serve(async (req) => {
       case 'recursos': {
         const setup = await placaSetup(service, companyId as string)
         const fotoDocumento = Boolean(Deno.env.get('ANTHROPIC_API_KEY'))
+        if (setup.on || fotoDocumento) await topUpDemoCredits(service, companyId as string)
         return reply({ placa: setup.on, fotoDocumento, credits: setup.on || fotoDocumento ? await creditsFor(caller) : null })
       }
       default:

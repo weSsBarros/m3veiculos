@@ -116,19 +116,48 @@ ${payButton}
   return { text, html }
 }
 
+// Papel ("role") do token do cabeçalho Authorization, lido sem conferir a
+// assinatura: só escolhe o caminho; quem confere o token é o banco
+function tokenRole(header: string) {
+  const part = header.replace(/^Bearer\s+/i, '').trim().split('.')[1]
+  if (!part) return ''
+  try {
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/')
+    return String(JSON.parse(atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, '='))).role || '')
+  } catch {
+    return ''
+  }
+}
+
+// Número como o WhatsApp registra a conta: no Brasil, fora dos DDDs 11 a 19, 21, 22,
+// 24, 27 e 28, o celular fica sem o 9 da frente (55 98 8129-5577), e o CallMeBot só
+// entrega para o número exatamente como foi ativado
+function whatsappAccountNumber(phone: string) {
+  const digits = String(phone || '').replace(/\D/g, '')
+  const m = digits.match(/^55(\d{2})9(\d{8})$/)
+  if (!m) return digits
+  const ddd = Number(m[1])
+  const keepsNine = (ddd >= 11 && ddd <= 19) || [21, 22, 24, 27, 28].includes(ddd)
+  return keepsNine ? digits : `55${m[1]}${m[2]}`
+}
+
 // Aviso no WhatsApp do dono da plataforma (CallMeBot). false = não mandou.
+// O CallMeBot responde 200 até quando recusa (chave inválida, número diferente do
+// ativado): a resposta vai para o log e só conta como enviado se não for de erro.
 async function whatsappToOwner(service, text) {
-  const apikey = Deno.env.get('CALLMEBOT_APIKEY')
+  const apikey = (Deno.env.get('CALLMEBOT_APIKEY') || '').trim()
   if (!apikey) return false
   const { data: settings } = await service.from('platform_settings').select('notify_phone').eq('id', 1).maybeSingle()
-  const phone = String(settings?.notify_phone || '').replace(/\D/g, '')
+  const phone = whatsappAccountNumber(String(settings?.notify_phone || ''))
   if (!phone) return false
   try {
     const res = await fetch(
       `https://api.callmebot.com/whatsapp.php?phone=%2B${phone}&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(apikey)}`
     )
-    if (!res.ok) console.error('callmebot', res.status, (await res.text()).slice(0, 200))
-    return res.ok
+    const answer = (await res.text()).split(apikey).join('***').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)
+    const refused = /invalid|error|erro|not\s+activ|wrong|denied|blocked|limit/i.test(answer)
+    console.log('callmebot', res.status, `+${phone.slice(0, 4)}…${phone.slice(-2)}`, answer)
+    return res.ok && !refused
   } catch (err) {
     console.error('callmebot', String(err).slice(0, 200))
     return false
@@ -144,14 +173,17 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const password = Deno.env.get('GMAIL_APP_PASSWORD')
 
-  // Quem chama: o agendamento manda a chave de serviço no "apikey"; o painel manda
-  // o login no "Authorization". O banco decide se pode.
+  // Quem chama: o painel manda o login no "Authorization"; o agendamento manda a
+  // chave de serviço no "apikey". Escolhe pelo papel do token do login, e não
+  // comparando o "apikey" com o SUPABASE_ANON_KEY: a chave pública do site e a das
+  // funções podem ser textos diferentes, e aí o login era ignorado ("Acesso
+  // restrito à plataforma"). O banco decide se pode.
   const apikey = req.headers.get('apikey') ?? ''
   const authHeader = req.headers.get('Authorization') ?? ''
   const caller =
-    apikey && apikey !== anonKey
-      ? createClient(url, apikey, { auth: { persistSession: false } })
-      : createClient(url, anonKey, { global: { headers: { Authorization: authHeader } }, auth: { persistSession: false } })
+    tokenRole(authHeader) === 'authenticated' || !apikey
+      ? createClient(url, anonKey, { global: { headers: { Authorization: authHeader } }, auth: { persistSession: false } })
+      : createClient(url, apikey, { auth: { persistSession: false } })
   const service = createClient(url, serviceKey, { auth: { persistSession: false } })
 
   let body = {}
