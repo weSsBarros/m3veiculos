@@ -98,6 +98,12 @@ html[data-admin-theme='escuro'] .admin-login-error {
   color: var(--admin-danger-text);
 }
 
+html[data-admin-theme='escuro'] .admin-login-notice {
+  border: 1px solid #745e2f;
+  background: #41351b;
+  color: #f1c57e;
+}
+
 html[data-admin-theme='escuro'] .suspended-pay {
   border-top: 1px solid var(--color-border);
 }

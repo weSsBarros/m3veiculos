@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { assertCanWrite } from './viewScope.js'
+import { checkFunctionResult, isDeadSessionError } from './sessionEnded.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -65,9 +66,14 @@ function blockWritesWhileSimulating(client) {
       get() {
         const functions = functionsGetter.call(client)
         const invoke = functions.invoke.bind(functions)
-        functions.invoke = (...args) => {
+        functions.invoke = async (...args) => {
           assertCanWrite()
-          return invoke(...args)
+          // 401 com a sessão encerrada em outro lugar: sai só aqui e a tela de
+          // login avisa (lib/sessionEnded.js), em vez de "Não autenticado"
+          return checkFunctionResult(await invoke(...args), {
+            sessionIsDead: async () => isDeadSessionError((await client.auth.getUser()).error),
+            onDead: () => client.auth.signOut({ scope: 'local' }),
+          })
         }
         return functions
       },

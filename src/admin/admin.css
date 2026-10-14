@@ -97,6 +97,17 @@
   font-weight: 600;
 }
 
+/* Sessão encerrada em outro aparelho ou aba (lib/sessionEnded.js) */
+.admin-login-notice {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid #f0d9a8;
+  background: #fdf6e7;
+  color: #6b4508;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* Login com a loja bloqueada: o que está em aberto, o PIX e o WhatsApp */
 .admin-login-card.is-suspended {
   max-width: 460px;

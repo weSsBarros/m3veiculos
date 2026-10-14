@@ -37,6 +37,19 @@ async function belongsToThisCompany() {
   return data === COMPANY_ID
 }
 
+// "Sair" encerra só este aparelho (scope local). O padrão do Supabase ("global")
+// derrubava o mesmo login em todos os aparelhos, e o outro aparelho recebia
+// "Não autenticado" ao mexer na Equipe (14/10/2026).
+let leavingOnPurpose = false
+async function signOutHere() {
+  leavingOnPurpose = true
+  try {
+    await supabase.auth.signOut({ scope: 'local' })
+  } finally {
+    leavingOnPurpose = false
+  }
+}
+
 async function loadRole(userId) {
   const { data, error } = await supabase
     .from('user_company')
@@ -68,6 +81,8 @@ export function AuthProvider({ children }) {
   // admin, mostra o que está em aberto e o PIX)
   const [suspended, setSuspended] = useState(false)
   const [suspendedInfo, setSuspendedInfo] = useState(null)
+  // A sessão acabou sem "Sair" neste aparelho (lib/sessionEnded.js): o login avisa
+  const [sessionEnded, setSessionEnded] = useState(false)
 
   useEffect(() => {
     if (!isSupabaseConfigured) return
@@ -91,7 +106,7 @@ export function AuthProvider({ children }) {
       if (cancelled) return
       if (!ok) {
         const blocked = await blockedInfo()
-        await supabase.auth.signOut()
+        await signOutHere()
         if (!cancelled) {
           setUser(null)
           setRole(null)
@@ -126,6 +141,9 @@ export function AuthProvider({ children }) {
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       // TOKEN_REFRESHED não muda nada de acesso; evita recarregar o papel à toa
       if (event === 'TOKEN_REFRESHED') return
+      // Saiu sem "Sair" neste aparelho: a sessão acabou no servidor (outro
+      // aparelho ou aba saiu, senha trocada, login excluído)
+      if (event === 'SIGNED_OUT' && !leavingOnPurpose && !cancelled) setSessionEnded(true)
       applySession(session)
     })
 
@@ -141,11 +159,12 @@ export function AuthProvider({ children }) {
     const ok = await belongsToThisCompany()
     if (!ok) {
       const blocked = await blockedInfo()
-      await supabase.auth.signOut()
+      await signOutHere()
       setSuspended(Boolean(blocked))
       setSuspendedInfo(blocked)
       throw new Error(blocked ? SUSPENDED_MESSAGE : WRONG_COMPANY_MESSAGE)
     }
+    setSessionEnded(false)
     logLogin().catch(() => {})
     return data.user
   }
@@ -153,7 +172,7 @@ export function AuthProvider({ children }) {
   async function signOut() {
     setViewAs(null)
     setViewScope(null)
-    await supabase.auth.signOut()
+    await signOutHere()
   }
 
   // "Ver como": o admin vê o painel exatamente como uma pessoa da equipe (ou
@@ -245,6 +264,7 @@ export function AuthProvider({ children }) {
         planTabs: account?.features ?? null,
         suspended,
         suspendedInfo,
+        sessionEnded,
         // Some no "ver como": a aba é do dono do sistema, não da equipe da loja
         isPlatformAdmin: platformAdmin && !simulating,
         viewAs: simulating ? viewAs : null,

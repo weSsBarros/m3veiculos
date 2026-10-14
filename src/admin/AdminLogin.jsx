@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth, WRONG_COMPANY_MESSAGE, SUSPENDED_MESSAGE } from '../context/AuthContext.jsx'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
+import { SESSION_ENDED_MESSAGE } from '../lib/sessionEnded.js'
 import SetupNotice from '../components/SetupNotice.jsx'
 import SuspendedPayment from './SuspendedPayment.jsx'
 import './admin.css'
@@ -16,7 +17,7 @@ function returnPath(from) {
 export default function AdminLogin() {
   // O login do painel segue o tema escolhido no painel
   useAdminTheme()
-  const { user, loading, signIn, suspended, suspendedInfo } = useAuth()
+  const { user, loading, signIn, suspended, suspendedInfo, sessionEnded } = useAuth()
   const navigate = useNavigate()
   const target = returnPath(useLocation().state?.from)
   const [email, setEmail] = useState('')
@@ -73,6 +74,7 @@ export default function AdminLogin() {
           />
         </label>
 
+        {sessionEnded && !error && !suspended && <p className="admin-login-notice">{SESSION_ENDED_MESSAGE}</p>}
         {(error || suspended) && <p className="admin-login-error">{error || SUSPENDED_MESSAGE}</p>}
         {suspended && (!error || error === SUSPENDED_MESSAGE) && <SuspendedPayment info={suspendedInfo} />}
 
