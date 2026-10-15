@@ -17,6 +17,7 @@ import PeriodFilter from './PeriodFilter.jsx'
 import '../components/ConfirmDialog.css'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
+import CommissionTiers from './CommissionTiers.jsx'
 
 const EMPTY_FORM = {
   // Nível de acesso ('seller', 'manager' ou 'admin') e cargo personalizado (null = Vendedor/Gerente)
@@ -261,7 +262,7 @@ export default function AdminSellers() {
       setFormError('Valor de comissão inválido.')
       return
     }
-    if (form.hasCommission && commissionValue === 0) {
+    if (form.hasCommission && commissionType !== 'tier' && commissionValue === 0) {
       setFormError('Informe o valor da comissão (ou desmarque "Recebe comissão").')
       return
     }
@@ -540,10 +541,22 @@ export default function AdminSellers() {
               >
                 Valor fixo (R$)
               </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={form.commissionType === 'tier'}
+                className={form.commissionType === 'tier' ? 'is-active' : ''}
+                onClick={() => update('commissionType', 'tier')}
+              >
+                Pela faixa do carro
+              </button>
             </div>
+            {form.commissionType === 'tier' && (
+              <span className="admin-form-note">O valor vem da faixa do carro vendido (veja "Faixas de comissão por veículo" nesta página).</span>
+            )}
           </div>
           )}
-          {form.hasCommission && (
+          {form.hasCommission && form.commissionType !== 'tier' && (
           <label>
             {form.commissionType === 'percent' ? 'Comissão (%)' : 'Comissão por carro'}
             {form.commissionType === 'percent' ? (
@@ -687,6 +700,8 @@ export default function AdminSellers() {
       </form>
       )}
       {!isAdmin && formSuccess && <p className="admin-success">{formSuccess}</p>}
+
+      {isAdmin && <CommissionTiers />}
 
       <h2 className="admin-section-title">Desempenho no período</h2>
       {listed.length === 0 ? (
@@ -869,7 +884,11 @@ export default function AdminSellers() {
                             {formatCurrencyCents(sale.commissionAmount)}
                             {sale.commissionType && (
                               <span className="admin-table-sub">
-                                {sale.commissionType === 'percent' ? `${String(sale.commissionValue).replace('.', ',')}%` : 'valor fixo'}
+                                {sale.commissionType === 'percent'
+                                  ? `${String(sale.commissionValue).replace('.', ',')}%`
+                                  : sale.commissionType === 'tier'
+                                    ? 'faixa do carro'
+                                    : 'valor fixo'}
                               </span>
                             )}
                           </td>

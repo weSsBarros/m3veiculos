@@ -27,9 +27,11 @@ function baseName(contract) {
 
 function standardDocument(contract, parts, logo) {
   const isReceipt = contract.documentType === 'recibo'
+  // Texto editado na tela Contratos antes de emitir: sai igual de novo
+  const edited = Array.isArray(contract.customText) && contract.customText.length ? contract.customText : null
   return {
     title: isReceipt ? buildReceiptTitle() : buildContractTitle(),
-    paragraphs: isReceipt ? buildReceiptParagraphs(parts) : buildContractParagraphs(parts, { createdAt: contract.createdAt }),
+    paragraphs: edited || (isReceipt ? buildReceiptParagraphs(parts) : buildContractParagraphs(parts, { createdAt: contract.createdAt })),
     signatures: isReceipt ? buildReceiptSignatures(parts) : buildContractSignatures(parts),
     logo,
   }

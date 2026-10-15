@@ -60,6 +60,18 @@ export async function uploadContractTemplate(name, file, kind = 'venda') {
   return fromRow(data)
 }
 
+// Contrato de modelo próprio editado só para ele (tela Contratos, seção 79): o
+// Word editado vai para <loja>/contratos-editados/ e o contrato guarda o caminho
+// (o "Baixar" e a assinatura usam ele). A equipe que gera contratos pode enviar.
+export async function uploadEditedContractFile(arrayBuffer) {
+  requireSupabase()
+  const path = `${COMPANY_ID}/contratos-editados/${crypto.randomUUID()}.docx`
+  const body = new Blob([arrayBuffer], { type: DOCX_MIME })
+  const { error } = await supabase.storage.from('contract-templates').upload(path, body, { cacheControl: '3600', upsert: false })
+  if (error) throw error
+  return path
+}
+
 // Salva o modelo editado: o arquivo novo vai para o Storage com outro nome e o
 // anterior fica nas versões (save_contract_template_file, seção 47).
 export async function saveContractTemplateFile(template, arrayBuffer) {

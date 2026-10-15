@@ -32,6 +32,8 @@ function fromRow(row) {
     // Modelo próprio usado (seção 47): o "Baixar" gera de novo com o mesmo arquivo
     templateId: row.template_id || null,
     templateFilePath: row.template_file_path || null,
+    // Texto do contrato padrão editado antes de emitir (seção 79): lista de parágrafos
+    customText: Array.isArray(row.custom_text) ? row.custom_text : null,
     createdBy: row.created_by || null,
     createdAt: row.created_at,
   }
@@ -63,6 +65,7 @@ function toRow(contract) {
     document_type: contract.documentType || 'contrato',
     template_id: contract.templateId || null,
     template_file_path: contract.templateFilePath || null,
+    custom_text: Array.isArray(contract.customText) && contract.customText.length ? contract.customText : null,
   }
 }
 

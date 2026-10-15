@@ -37,7 +37,7 @@ function orderFromRow(o) {
 }
 
 export async function fetchPlateCreditOrders() {
-  const data = await run(supabase.from('plate_credit_orders').select('*').order('created_at', { ascending: false }).limit(100))
+  const data = await run(supabase.from('plate_credit_orders').select('*').order('created_at', { ascending: false }).limit(300))
   return (data || []).map(orderFromRow)
 }
 
@@ -56,7 +56,7 @@ export async function adjustPlateCredit(companyId, amount, note) {
   return Number(await run(supabase.rpc('platform_adjust_plate_credit', { p_company: companyId, p_amount: amount, p_note: note }))) || 0
 }
 
-// Saldo de cada loja, consultas pagas e fotos lidas nos últimos 30 dias
+// Saldo de cada loja, o uso nos últimos 30 dias e desde o início, e o último uso
 export async function fetchPlatformPlateCredits() {
   const data = await run(supabase.rpc('platform_plate_credits'))
   return (data || []).map((r) => ({
@@ -70,5 +70,13 @@ export async function fetchPlatformPlateCredits() {
     spent30d: Number(r.spent_30d) || 0,
     boughtTotal: Number(r.bought_total) || 0,
     lastRechargeAt: r.last_recharge_at || null,
+    // Aba Créditos (seção 80)
+    isDemo: r.is_demo === true,
+    spentTotal: Number(r.spent_total) || 0,
+    usesTotal: Number(r.uses_total) || 0,
+    lastUseAt: r.last_use_at || null,
+    bonusTotal: Number(r.bonus_total) || 0,
+    ordersConfirmed: Number(r.orders_confirmed) || 0,
+    ordersPending: Number(r.orders_pending) || 0,
   }))
 }

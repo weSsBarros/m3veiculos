@@ -13,6 +13,7 @@ import useConfirm from '../components/useConfirm.jsx'
 import OlxCatalogPicker from './OlxCatalogPicker.jsx'
 import OlxPreviewDialog from './OlxPreviewDialog.jsx'
 import PortalCarList from './PortalCarList.jsx'
+import { isCarCategory } from '../utils/vehicleTypes.js'
 
 const CONNECT_ERRORS = {
   negado: 'A conexão foi cancelada na OLX (o acesso não foi autorizado).',
@@ -93,6 +94,8 @@ export default function OlxPortalPanel({ cars, setCars, sellers, reloadKey }) {
   const rows = useMemo(() => {
     if (!account?.connected) return []
     return cars
+      // A OLX recebe carros e motos (caminhão, jet ski, quadriciclo e UTV ficam de fora)
+      .filter((car) => isCarCategory(car.category) || car.category === 'moto')
       .filter((car) => car.status !== 'vendido' || liveAd(adsByCar.get(car.id)) || adsByCar.get(car.id)?.status === 'removendo')
       .map((car) => {
         const ad = adsByCar.get(car.id) || null

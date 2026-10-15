@@ -10,6 +10,7 @@ import { formatCurrency, todayISO } from '../utils/carFormat.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import FipeCascade from './FipeCascade.jsx'
 import AutofillReview from './AutofillReview.jsx'
+import { fipeTipoForCategory } from '../utils/vehicleTypes.js'
 
 const LABELS = Object.fromEntries(AUTOFILL_FIELDS.map((f) => [f.key, f.label.toLowerCase()]))
 
@@ -223,7 +224,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
           : 'Placa já consultada pela loja nos últimos 30 dias: sem cobrança.',
         base: res.vehicle || {},
         warnings: [],
-        tipo: res.vehicle?.category === 'moto' ? 'motos' : 'carros',
+        tipo: fipeTipoForCategory(res.vehicle?.category),
         options,
         required: options.length > 1 && !winner,
         choice: '',
@@ -434,7 +435,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
 
       {cascadeOpen && (
         <FipeCascade
-          initialTipo={car.category === 'moto' ? 'motos' : 'carros'}
+          initialTipo={fipeTipoForCategory(car.category)}
           onUse={handleFipe}
           onClose={() => setCascadeOpen(false)}
         />

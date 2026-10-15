@@ -708,6 +708,38 @@ html[data-admin-theme='escuro'] .contract-preview p {
   color: var(--color-text);
 }
 
+html[data-admin-theme='escuro'] .contract-edited-badge {
+  border: 1px solid #745e2f;
+  background: #41351b;
+  color: #f1c57e;
+}
+
+html[data-admin-theme='escuro'] .contract-stale-note {
+  border: 1px solid #745e2f;
+  background: #41351b;
+  color: #f1c57e;
+}
+
+html[data-admin-theme='escuro'] .link-button {
+  border: 0;
+  background: none;
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .contract-text-editor {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .contract-text-editor textarea {
+  border: 1px solid var(--color-border);
+  background: var(--admin-surface);
+}
+
+html[data-admin-theme='escuro'] .contract-editor-overlay {
+  background: var(--color-bg);
+}
+
 html[data-admin-theme='escuro'] .admin-card .admin-action-group {
   border-top: 1px solid var(--color-border);
 }
@@ -1105,6 +1137,16 @@ html[data-admin-theme='escuro'] .sale-checklist-options button.is-missing {
   color: var(--color-text);
 }
 
+html[data-admin-theme='escuro'] .sale-checklist.is-delivery .sale-checklist-col-label {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .sale-checklist-retained {
+  background: #41351b;
+  border: 1px solid #745e2f;
+  color: #f1c57e;
+}
+
 html[data-admin-theme='escuro'] .admin-pill {
   background: var(--color-bg-alt);
   color: var(--color-text-muted);
@@ -1348,6 +1390,30 @@ html[data-admin-theme='escuro'] .viewas-banner {
   background: #41371b;
   border: 1px solid #745c2f;
   color: #f1c87e;
+}
+
+html[data-admin-theme='escuro'] .payment-part {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .payment-part-remove {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .payment-part-remove:hover {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .payment-gap.is-ok {
+  color: var(--admin-success-text);
+}
+
+html[data-admin-theme='escuro'] .payment-gap.is-warn {
+  color: #f1c57e;
 }
 
 html[data-admin-theme='escuro'] .car-checklist-details {
@@ -2740,6 +2806,11 @@ html[data-admin-theme='escuro'] .camera-capture-icon {
 
 html[data-admin-theme='escuro'] .camera-capture-view video {
   background: #000000;
+}
+
+html[data-admin-theme='escuro'] .camera-capture-hint {
+  background: rgba(0, 0, 0, 0.62);
+  color: #ffffff;
 }
 
 html[data-admin-theme='escuro'] .camera-capture-flash {

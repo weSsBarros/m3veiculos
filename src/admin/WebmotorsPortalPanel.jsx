@@ -16,6 +16,7 @@ import useConfirm from '../components/useConfirm.jsx'
 import WebmotorsCatalogPicker from './WebmotorsCatalogPicker.jsx'
 import WebmotorsPreviewDialog from './WebmotorsPreviewDialog.jsx'
 import PortalCarList from './PortalCarList.jsx'
+import { isCarCategory } from '../utils/vehicleTypes.js'
 
 const ACCOUNT_STATUS = {
   conectada: { label: 'Conectada', tone: 'is-success' },
@@ -79,7 +80,7 @@ export default function WebmotorsPortalPanel({ cars, setCars, reloadKey }) {
   const rows = useMemo(() => {
     if (!account?.connected) return []
     return cars
-      .filter((car) => car.category !== 'moto')
+      .filter((car) => isCarCategory(car.category))
       .filter((car) => car.status !== 'vendido' || webmotorsLive(adsByCar.get(car.id)))
       .map((car) => {
         const ad = adsByCar.get(car.id) || null

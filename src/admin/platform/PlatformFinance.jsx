@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw, FileDown, FileSpreadsheet, Pencil, Trash2 } from 'lucide-react'
-import { fetchClients, fetchPayments, fetchExpenses, saveExpense, deleteExpense } from '../../lib/clientsApi.js'
+import { RefreshCcw, FileDown, FileSpreadsheet, Pencil, Trash2, Repeat, Pause, Play } from 'lucide-react'
+import {
+  fetchClients,
+  fetchPayments,
+  fetchExpenses,
+  saveExpense,
+  deleteExpense,
+  fetchExpenseRecurrences,
+  saveExpenseRecurrence,
+  generatePlatformExpenses,
+} from '../../lib/clientsApi.js'
 import { money, dateBR } from '../../utils/billing.js'
 import { monthLabel } from '../../utils/platform.js'
 import {
@@ -15,6 +24,7 @@ import {
   clientRanking,
   forecast,
   averageMonthlyCost,
+  recurringMonthlyCost,
 } from '../../utils/finance.js'
 import { parseMoneyBR, formatMoneyInput } from '../../utils/financing.js'
 import { todayISO } from '../../utils/carFormat.js'
@@ -47,6 +57,10 @@ export default function PlatformFinance() {
   const [clients, setClients] = useState([])
   const [payments, setPayments] = useState([])
   const [expenses, setExpenses] = useState([])
+  // Despesas que se repetem todo mês (seção 77) e a que está sendo editada
+  const [recurrences, setRecurrences] = useState([])
+  const [repeat, setRepeat] = useState(false)
+  const [recForm, setRecForm] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [periodValue, setPeriodValue] = useState('ano')
@@ -61,10 +75,13 @@ export default function PlatformFinance() {
     setLoading(true)
     setError('')
     try {
-      const [c, p, e] = await Promise.all([fetchClients(), fetchPayments(), fetchExpenses()])
+      // Antes de ler: lança os meses que chegaram das despesas que se repetem
+      await generatePlatformExpenses().catch(() => 0)
+      const [c, p, e, r] = await Promise.all([fetchClients(), fetchPayments(), fetchExpenses(), fetchExpenseRecurrences().catch(() => [])])
       setClients(c)
       setPayments(p)
       setExpenses(e)
+      setRecurrences(r)
     } catch (err) {
       setError(err.message || 'Não foi possível carregar o financeiro.')
     } finally {
@@ -83,7 +100,8 @@ export default function PlatformFinance() {
   const periodLabel = options.find((o) => o.value === periodValue)?.label || ''
   const summary = useMemo(() => financeSummary({ clients, payments, expenses, period }), [clients, payments, expenses, period])
   const ranking = useMemo(() => clientRanking({ clients, payments, expenses }), [clients, payments, expenses])
-  const forecastRows = useMemo(() => forecast({ clients, expenses }), [clients, expenses])
+  const forecastRows = useMemo(() => forecast({ clients, expenses, recurrences }), [clients, expenses, recurrences])
+  const fixedCost = recurringMonthlyCost(recurrences)
   const monthlyCost = useMemo(() => averageMonthlyCost(expenses), [expenses])
   const inPeriod = (iso) => iso && iso.slice(0, 7) >= period.start && iso.slice(0, 7) <= period.end
   const periodExpenses = expenses.filter((e) => inPeriod(e.spentOn))
@@ -151,10 +169,16 @@ export default function PlatformFinance() {
     setSaving(true)
     setFormError('')
     try {
-      await saveExpense({ ...form, amount })
-      setMsg(form.id ? 'Despesa atualizada.' : 'Despesa lançada.')
+      const repeating = !form.id && repeat
+      await saveExpense({ ...form, amount }, { repeat: repeating })
+      // Data no passado com "Repetir todo mês": lança os meses que já passaram
+      if (repeating) await generatePlatformExpenses().catch(() => 0)
+      setMsg(form.id ? 'Despesa atualizada.' : repeating ? 'Despesa lançada. Ela se repete todo mês nesse dia.' : 'Despesa lançada.')
       setForm({ ...EMPTY_EXPENSE, spentOn: todayISO() })
-      setExpenses(await fetchExpenses())
+      setRepeat(false)
+      const [list, recs] = await Promise.all([fetchExpenses(), fetchExpenseRecurrences().catch(() => recurrences)])
+      setExpenses(list)
+      setRecurrences(recs)
     } catch (err) {
       setFormError(err.message || 'Não foi possível salvar a despesa.')
     } finally {
@@ -167,6 +191,42 @@ export default function PlatformFinance() {
     setFormError('')
     setForm({ ...x, companyId: x.companyId || '', amount: formatMoneyInput(x.amount) })
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  async function submitRecurrence(e) {
+    e.preventDefault()
+    const amount = parseMoneyBR(recForm.amount)
+    const day = Number(recForm.day)
+    if (!recForm.description.trim()) return setFormError('Descreva a despesa que se repete.')
+    if (!amount || amount <= 0) return setFormError('Informe o valor.')
+    if (!(day >= 1 && day <= 31)) return setFormError('O dia vai de 1 a 31.')
+    setSaving(true)
+    setFormError('')
+    try {
+      const saved = await saveExpenseRecurrence({ ...recForm, amount, day })
+      setRecurrences((list) => list.map((r) => (r.id === saved.id ? saved : r)))
+      setRecForm(null)
+      setMsg('Despesa fixa atualizada. Vale a partir do próximo mês lançado; as já lançadas ficam como estão.')
+    } catch (err) {
+      setFormError(err.message || 'Não foi possível salvar.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function toggleRecurrence(r) {
+    const stopping = r.active
+    if (stopping && !(await confirm(`Parar de repetir "${r.description}"? As despesas já lançadas ficam.`, { title: 'Parar de repetir', confirmLabel: 'Parar' }))) return
+    try {
+      const saved = await saveExpenseRecurrence({ ...r, active: !stopping })
+      setRecurrences((list) => list.map((x) => (x.id === saved.id ? saved : x)))
+      if (!stopping) {
+        await generatePlatformExpenses().catch(() => 0)
+        setExpenses(await fetchExpenses())
+      }
+    } catch (err) {
+      setError(err.message || 'Não foi possível mudar a despesa fixa.')
+    }
   }
 
   async function removeExpense(x) {
@@ -375,8 +435,10 @@ export default function PlatformFinance() {
                 </table>
               </div>
               <p className="admin-form-note">
-                Com os clientes e as mensalidades de hoje, a partir do mês que vem. Despesa média de {money(monthlyCost)} por mês (últimos 12 meses com
-                despesas lançadas).
+                Com os clientes e as mensalidades de hoje, a partir do mês que vem.{' '}
+                {fixedCost > 0
+                  ? `Despesas fixas de ${money(fixedCost)} por mês (as que se repetem) mais a média das avulsas.`
+                  : `Despesa média de ${money(monthlyCost)} por mês (últimos 12 meses com despesas lançadas).`}
               </p>
             </>
           )}
@@ -479,6 +541,17 @@ export default function PlatformFinance() {
                     <input value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
                   </label>
                 </div>
+                {!form.id && (
+                  <label className="admin-checkbox">
+                    <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
+                    Repetir todo mês, neste dia (ex.: assinatura do Claude, hospedagem mensal)
+                  </label>
+                )}
+                {form.id && form.recurrenceId && (
+                  <p className="admin-form-note">
+                    Esta despesa se repete todo mês: aqui muda só este mês. Para mudar os próximos, edite em "Despesas que se repetem todo mês".
+                  </p>
+                )}
                 {formError && <p className="admin-error">{formError}</p>}
                 {msg && <p className="admin-success">{msg}</p>}
                 <div className="admin-form-actions">
@@ -492,6 +565,112 @@ export default function PlatformFinance() {
                   </button>
                 </div>
               </form>
+
+              {recurrences.length > 0 && (
+                <section className="admin-form-section">
+                  <h2>
+                    <Repeat size={17} /> Despesas que se repetem todo mês
+                  </h2>
+                  <div className="admin-table-wrap">
+                    <table className="admin-table finance-table">
+                      <thead>
+                        <tr>
+                          <th>Descrição</th>
+                          <th>Categoria</th>
+                          <th>Cliente</th>
+                          <th>Todo dia</th>
+                          <th>Valor</th>
+                          <th>Situação</th>
+                          <th aria-label="Ações" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recurrences.map((r) => (
+                          <tr key={r.id} className={r.active ? '' : 'is-hidden-row'}>
+                            <td>{r.description}</td>
+                            <td>{categoryLabel(r.category)}</td>
+                            <td>{nameOf(r.companyId) || '—'}</td>
+                            <td>{r.day}</td>
+                            <td>{money(r.amount)}</td>
+                            <td>{r.active ? 'Repetindo' : 'Parada'}</td>
+                            <td>
+                              <div className="admin-row-actions">
+                                <button
+                                  type="button"
+                                  className="admin-action-btn"
+                                  onClick={() => setRecForm({ ...r, companyId: r.companyId || '', amount: formatMoneyInput(r.amount), day: String(r.day) })}
+                                >
+                                  <Pencil size={14} /> Editar
+                                </button>
+                                <button type="button" className="admin-action-btn" onClick={() => toggleRecurrence(r)}>
+                                  {r.active ? <Pause size={14} /> : <Play size={14} />} {r.active ? 'Parar' : 'Voltar a repetir'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colSpan={4}>Despesas fixas por mês</td>
+                          <td>{money(fixedCost)}</td>
+                          <td colSpan={2} />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  {recForm && (
+                    <form className="admin-form" onSubmit={submitRecurrence}>
+                      <div className="admin-form-grid admin-form-grid-3">
+                        <label>
+                          Descrição
+                          <input value={recForm.description} maxLength={120} onChange={(e) => setRecForm((f) => ({ ...f, description: e.target.value }))} required />
+                        </label>
+                        <label>
+                          Valor por mês
+                          <MoneyInput cents value={recForm.amount} onChange={(v) => setRecForm((f) => ({ ...f, amount: v }))} required />
+                        </label>
+                        <label>
+                          Todo dia
+                          <input type="number" min="1" max="31" value={recForm.day} onChange={(e) => setRecForm((f) => ({ ...f, day: e.target.value }))} required />
+                        </label>
+                        <label>
+                          Categoria
+                          <select value={recForm.category} onChange={(e) => setRecForm((f) => ({ ...f, category: e.target.value }))}>
+                            {EXPENSE_CATEGORIES.map((c) => (
+                              <option key={c.key} value={c.key}>
+                                {c.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Cliente (opcional)
+                          <select value={recForm.companyId} onChange={(e) => setRecForm((f) => ({ ...f, companyId: e.target.value }))}>
+                            <option value="">Geral (não é de um cliente)</option>
+                            {clients.map((c) => (
+                              <option key={c.companyId} value={c.companyId}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <p className="admin-form-note">
+                        Vale a partir do próximo mês lançado. As despesas já lançadas ficam como estão (edite cada uma na lista abaixo).
+                      </p>
+                      <div className="admin-form-actions">
+                        <button type="button" className="btn btn-outline" onClick={() => setRecForm(null)}>
+                          Cancelar
+                        </button>
+                        <button type="submit" className="btn btn-primary" disabled={saving}>
+                          {saving ? 'Salvando…' : 'Salvar despesa fixa'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </section>
+              )}
 
               <h2 className="admin-section-title">Despesas · {periodLabel.toLowerCase()}</h2>
               {periodExpenses.length === 0 ? (
@@ -515,6 +694,11 @@ export default function PlatformFinance() {
                           <td>{dateBR(x.spentOn)}</td>
                           <td>
                             {x.description}
+                            {x.recurrenceId && (
+                              <span className="admin-hidden-badge" title="Repete todo mês">
+                                <Repeat size={11} /> todo mês
+                              </span>
+                            )}
                             {x.notes && <small className="admin-muted"> · {x.notes}</small>}
                           </td>
                           <td>{categoryLabel(x.category)}</td>

@@ -56,6 +56,8 @@ function fromRow(row) {
     entryType: row.entry_type || 'showroom',
     ownerCustomerId: row.owner_customer_id || null,
     whatsappSellerId: row.whatsapp_seller_id || null,
+    // Seção 78: faixa de comissão do carro (só admin e gerente trocam)
+    commissionTierId: row.commission_tier_id || null,
     // Seção 55: entrada e saída no RENAVE (pendente, registrado ou dispensado)
     renaveEntryStatus: row.renave_entry_status || 'pendente',
     renaveEntryOn: row.renave_entry_on || null,
@@ -180,6 +182,7 @@ function toRow(car, table = staffTable) {
     entry_type: car.entryType || 'showroom',
     owner_customer_id: car.ownerCustomerId || null,
     whatsapp_seller_id: car.whatsappSellerId || null,
+    commission_tier_id: car.commissionTierId || null,
     // Data e protocolo só ficam guardados com a situação "registrado"
     renave_entry_status: car.renaveEntryStatus || 'pendente',
     renave_entry_on: car.renaveEntryStatus === 'registrado' ? car.renaveEntryOn || null : null,

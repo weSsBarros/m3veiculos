@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { transferAlert, transferDueDate, transferDueText, isTransferOpen, transferStatusLabel } from '../src/utils/transfer.js'
-import { buildChecklist, checklistSummary, parseChecklistText } from '../src/utils/saleChecklist.js'
+import { buildChecklist, checklistSummary, parseChecklistText, nextChecklistStatus, checklistHas, checklistDelivered, retainedItems } from '../src/utils/saleChecklist.js'
 import { addDaysISO, daysBetweenISO, matchesCarSearch, normalizePlate, parseIntBR, slugify } from '../src/utils/carFormat.js'
 import { whatsappLinkToPhone } from '../src/utils/whatsapp.js'
 
@@ -37,7 +37,7 @@ test('checklist: junta a lista da loja com o que a venda marcou', () => {
     { item: 'Chave reserva', status: 'ok' },
     { item: 'Antigo', status: 'nao_possui' },
   ])
-  assert.deepEqual(checklistSummary(cl), { total: 3, delivered: 1, missing: 1, pending: 1 })
+  assert.deepEqual(checklistSummary(cl), { total: 3, delivered: 1, retained: 0, missing: 1, pending: 1 })
   assert.deepEqual(buildChecklist([], []), [])
   assert.deepEqual(parseChecklistText(' Manual \n\nmanual\nChave reserva\n'), ['Manual', 'Chave reserva'])
 })
@@ -82,4 +82,29 @@ test('nome de arquivo sem acento (senão o navegador pode salvar como "download"
   assert.equal(slugify('João da Silva'), 'joao-da-silva')
   assert.equal(slugify('Antônio Conceição'), 'antonio-conceicao')
   assert.equal(slugify(''), '')
+})
+
+test('checklist da venda: colunas Possui e Entregue (chave reserva fica com a loja)', () => {
+  // Possui: Sim → "possui" (falta marcar a entrega); clicar de novo desmarca
+  assert.equal(nextChecklistStatus(null, 'possui', true), 'possui')
+  assert.equal(nextChecklistStatus('possui', 'possui', true), null)
+  assert.equal(nextChecklistStatus('ok', 'possui', false), 'nao_possui')
+  // Entregue: Não → fica com a loja; Sim → entregue (já conta como possui)
+  assert.equal(nextChecklistStatus('possui', 'entregue', false), 'retido')
+  assert.equal(nextChecklistStatus(null, 'entregue', true), 'ok')
+  assert.equal(nextChecklistStatus('retido', 'entregue', false), 'possui')
+  assert.equal(nextChecklistStatus('retido', 'entregue', true), 'ok')
+  assert.deepEqual([checklistHas('retido'), checklistDelivered('retido')], [true, false])
+  assert.deepEqual([checklistHas('nao_possui'), checklistDelivered('nao_possui')], [false, null])
+  assert.deepEqual([checklistHas(null), checklistDelivered(null)], [null, null])
+
+  const cl = [
+    { item: 'Manual', status: 'ok' },
+    { item: 'Chave reserva', status: 'retido' },
+    { item: 'Estepe', status: 'possui' },
+    { item: 'Tapetes', status: 'nao_possui' },
+  ]
+  // "Possui" sem marcar a entrega ainda é pendente; "fica com a loja" está conferido
+  assert.deepEqual(checklistSummary(cl), { total: 4, delivered: 1, retained: 1, missing: 1, pending: 1 })
+  assert.deepEqual(retainedItems(cl), ['Chave reserva'])
 })

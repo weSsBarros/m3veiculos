@@ -76,6 +76,7 @@ export function MoneyInput(props) {
 }
 
 // Quilometragem (até 9.999.999 km)
-export function KmInput(props) {
-  return <AffixNumberInput maxDigits={7} {...props} cents={false} affix="km" side="suffix" />
+// affix: "km" ou "h" (horas de uso do jet ski)
+export function KmInput({ affix = 'km', ...props }) {
+  return <AffixNumberInput maxDigits={7} {...props} cents={false} affix={affix} side="suffix" />
 }

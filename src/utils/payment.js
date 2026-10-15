@@ -1,5 +1,7 @@
 // Forma de pagamento da venda e lista de bancos (cada loja edita a sua em
-// companies.bank_list).
+// companies.bank_list). Desde 14/10/2026 a venda pode ter várias formas
+// (utils/salePayments.js); estas são as formas antigas, de uma só.
+import { describeSalePayment } from './salePayments.js'
 
 export const SALE_PAYMENT_METHODS = [
   { value: 'a_vista', label: 'À vista' },
@@ -31,8 +33,11 @@ export function paymentMethodLabel(value) {
   return SALE_PAYMENT_METHODS.find((m) => m.value === value)?.label || ''
 }
 
-// "Financiado — Banco do Brasil", "À vista"... ('' quando não informada)
-export function describePayment({ paymentMethod, bank } = {}) {
+// "Financiado — Banco do Brasil", "À vista", "PIX + Financiado (BV)"... ('' quando não informada)
+export function describePayment(sale = {}) {
+  const parts = describeSalePayment(sale)
+  if (parts) return parts
+  const { paymentMethod, bank } = sale
   if (!paymentMethod) return ''
   if (paymentMethod === 'financiado') return bank ? `Financiado — ${bank}` : 'Financiado'
   return paymentMethodLabel(paymentMethod)

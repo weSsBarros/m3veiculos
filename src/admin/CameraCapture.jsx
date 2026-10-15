@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Check, ImagePlus } from 'lucide-react'
+import { X, Check, ImagePlus, Smartphone } from 'lucide-react'
+import { resetPageZoom } from '../utils/pageZoom.js'
 
 // Câmera dentro do painel (Fotos pelo celular): abre a câmera traseira em tela
 // cheia e tira várias fotos seguidas. Cada foto vira um JPG e vai para onPhoto,
@@ -13,6 +14,21 @@ export default function CameraCapture({ onPhoto, onClose, count = 0, lastPreview
   const [status, setStatus] = useState('abrindo') // abrindo | pronta | erro
   const [error, setError] = useState('')
   const [flash, setFlash] = useState(false)
+  const [portrait, setPortrait] = useState(() => window.matchMedia?.('(orientation: portrait)').matches ?? false)
+
+  // Página com zoom (iPhone, depois de tocar num campo) deixava o obturador fora da tela
+  useEffect(() => {
+    resetPageZoom()
+  }, [])
+
+  // Foto em pé sai pequena no site: a câmera sugere deitar o celular
+  useEffect(() => {
+    const query = window.matchMedia?.('(orientation: portrait)')
+    if (!query) return
+    const update = () => setPortrait(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -98,6 +114,11 @@ export default function CameraCapture({ onPhoto, onClose, count = 0, lastPreview
               <ImagePlus size={17} /> Tirar ou escolher fotos
             </button>
           </div>
+        )}
+        {status === 'pronta' && portrait && (
+          <p className="camera-capture-hint">
+            <Smartphone size={16} className="camera-capture-hint-icon" /> Deite o celular: a foto aparece maior no site
+          </p>
         )}
         {flash && <div className="camera-capture-flash" aria-hidden="true" />}
       </div>

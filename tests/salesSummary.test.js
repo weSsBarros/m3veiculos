@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { saleCost, salesSummary } from '../src/utils/salesSummary.js'
+import { saleCost, salesSummary, saleAgeLabel } from '../src/utils/salesSummary.js'
 
 test('vendas: custo total e margem de cada carro vendido', () => {
   assert.deepEqual(saleCost({ purchasePrice: 50000 }, 3000, 60000), { totalCost: 53000, margin: 7000 })
@@ -46,4 +46,17 @@ test('vendas: período sem venda não quebra', () => {
     marginCount: 0,
     missingCost: 0,
   })
+})
+
+test('vendas: há quantos dias o carro foi vendido', () => {
+  const hoje = new Date(2026, 9, 14, 21, 30)
+  assert.equal(saleAgeLabel('2026-10-14', hoje), 'Hoje')
+  assert.equal(saleAgeLabel('2026-10-13', hoje), '1 dia')
+  assert.equal(saleAgeLabel('2026-09-29', hoje), '15 dias')
+  // Virada de ano e horário de verão não mudam a conta
+  assert.equal(saleAgeLabel('2025-10-14', hoje), '365 dias')
+  assert.equal(saleAgeLabel('2023-01-01', hoje), '1.382 dias')
+  // Data no futuro ou vazia: nada
+  assert.equal(saleAgeLabel('2026-10-20', hoje), '')
+  assert.equal(saleAgeLabel(null, hoje), '')
 })

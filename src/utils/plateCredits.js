@@ -125,3 +125,19 @@ export function parsePackages(text) {
 export function packagesText(packages) {
   return (packages || []).map((v) => String(Math.round(toNumber(v)))).join(', ')
 }
+
+// Painel WB.Dev → Créditos: situação de cada loja. Sem saldo vem primeiro (é o
+// que pede ação); com saldo: usando (usou nos últimos 30 dias), parada (usou
+// antes) ou nunca usou.
+export const CREDIT_USAGE = {
+  usando: { label: 'Usando', className: 'is-green' },
+  parado: { label: 'Parada', className: 'is-yellow' },
+  nunca: { label: 'Nunca usou', className: 'is-gray' },
+  sem_saldo: { label: 'Sem saldo', className: 'is-red' },
+}
+
+export function creditUsage(store, now = new Date()) {
+  if (!(Number(store?.balance) > 0)) return 'sem_saldo'
+  if (!store.lastUseAt) return 'nunca'
+  return now.getTime() - new Date(store.lastUseAt).getTime() <= 30 * 24 * 60 * 60 * 1000 ? 'usando' : 'parado'
+}

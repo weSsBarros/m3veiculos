@@ -7,6 +7,7 @@ import { parseIntBR } from '../utils/carFormat.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import OlxCatalogPicker from './OlxCatalogPicker.jsx'
 import OlxPreviewDialog from './OlxPreviewDialog.jsx'
+import { isCarCategory } from '../utils/vehicleTypes.js'
 
 // Seção "OLX" do cadastro do carro (seção 59): "Publicar na OLX", a marca, o
 // modelo e a versão do catálogo da OLX e a situação do anúncio. Só aparece com
@@ -40,6 +41,14 @@ export default function OlxCarSection({ car, carId, sellerPhones, noPrice, onCha
   }, [carId])
 
   if (isStoreTabHidden('portais') || !account) return null
+  if (!isCarCategory(car.category) && car.category !== 'moto') {
+    return (
+      <section className="admin-form-section">
+        <h2>OLX</h2>
+        <p className="admin-form-note">A integração com a OLX é de carros e motos: este cadastro não vai para a OLX.</p>
+      </section>
+    )
+  }
   if (!account.connected) {
     return (
       <section className="admin-form-section">

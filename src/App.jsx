@@ -54,6 +54,7 @@ const AdminPerformance = lazy(() => import('./admin/platform/AdminPerformance.js
 const PlatformClients = lazy(() => import('./admin/platform/PlatformClients.jsx'))
 const ClientFile = lazy(() => import('./admin/platform/ClientFile.jsx'))
 const PlatformBilling = lazy(() => import('./admin/platform/PlatformBilling.jsx'))
+const PlatformCredits = lazy(() => import('./admin/platform/PlatformCredits.jsx'))
 const PlatformFinance = lazy(() => import('./admin/platform/PlatformFinance.jsx'))
 const PlatformNotices = lazy(() => import('./admin/platform/PlatformNotices.jsx'))
 const PlatformPlans = lazy(() => import('./admin/platform/PlatformPlans.jsx'))
@@ -270,6 +271,7 @@ export default function App() {
           <Route path="clientes" element={<PlatformClients />} />
           <Route path="clientes/:slug" element={<ClientFile />} />
           <Route path="cobranca" element={<PlatformBilling />} />
+          <Route path="creditos" element={<PlatformCredits />} />
           <Route path="financeiro" element={<PlatformFinance />} />
           <Route path="avisos" element={<PlatformNotices />} />
           <Route path="suporte" element={<PlatformSupport />} />

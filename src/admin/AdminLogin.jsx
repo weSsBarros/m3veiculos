@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth, WRONG_COMPANY_MESSAGE, SUSPENDED_MESSAGE } from '../context/AuthContext.jsx'
 import { isSupabaseConfigured } from '../lib/supabaseClient.js'
 import { SESSION_ENDED_MESSAGE } from '../lib/sessionEnded.js'
+import { resetPageZoom } from '../utils/pageZoom.js'
 import SetupNotice from '../components/SetupNotice.jsx'
 import SuspendedPayment from './SuspendedPayment.jsx'
 import './admin.css'
@@ -34,6 +35,8 @@ export default function AdminLogin() {
     setSubmitting(true)
     try {
       await signIn(email, password)
+      // iPhone: o zoom de quando tocou no e-mail/senha não fica no painel
+      resetPageZoom()
       navigate(target)
     } catch (err) {
       setError([WRONG_COMPANY_MESSAGE, SUSPENDED_MESSAGE].includes(err.message) ? err.message : 'E-mail ou senha inválidos.')

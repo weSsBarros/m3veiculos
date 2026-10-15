@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { formatMileage } from './vehicleTypes.js'
 
 // Página do carro no Google: título com a cidade ("à venda em São Luís"),
 // resumo na <meta name="description"> e dados estruturados (schema.org Car +
@@ -27,7 +28,7 @@ export function carTitle(car) {
 }
 
 export function carSummary(car, storeName, city = STORE_CITY) {
-  const km = car.km != null && car.km !== '' ? `${Number(car.km).toLocaleString('pt-BR')} km` : ''
+  const km = formatMileage(car)
   const price = car.price ? `R$ ${Number(car.price).toLocaleString('pt-BR')}` : 'consulte o valor'
   const facts = [km, car.transmission, car.fuel, car.color].filter(Boolean).join(', ')
   return `${carTitle(car)}${facts ? ` — ${facts}` : ''}, por ${price}${storeName ? ` na ${storeName}` : ''}${city ? `, em ${city}` : ''}.`

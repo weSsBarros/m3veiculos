@@ -18,7 +18,7 @@ import { periodRange, inRange } from '../utils/period.js'
 import { DEFAULT_SALE_CHECKLIST, checklistSummary } from '../utils/saleChecklist.js'
 import { isTransferOpen, transferAlert } from '../utils/transfer.js'
 import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
-import { saleCost, salesSummary } from '../utils/salesSummary.js'
+import { saleCost, salesSummary, saleAgeLabel } from '../utils/salesSummary.js'
 import { privateNote } from '../utils/privateValues.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import PeriodFilter from './PeriodFilter.jsx'
@@ -59,10 +59,11 @@ function MarginValue({ row }) {
 
 function ChecklistCount({ sale }) {
   if (!sale || sale.checklist.length === 0) return null
-  const { total, pending } = checklistSummary(sale.checklist)
+  const { total, pending, retained } = checklistSummary(sale.checklist)
   return (
     <span className={`admin-table-sub ${pending ? 'stock-days-stale' : ''}`}>
       Checklist {total - pending}/{total}
+      {retained > 0 ? ` · ${retained} com a loja` : ''}
     </span>
   )
 }
@@ -461,7 +462,10 @@ export default function AdminSales() {
               <tbody>
                 {visibleRows.map((row) => (
                   <tr key={row.car.id}>
-                    <td className="admin-nowrap">{row.date ? formatDateBR(row.date) : '—'}</td>
+                    <td className="admin-nowrap">
+                      {row.date ? formatDateBR(row.date) : '—'}
+                      {row.date && saleAgeLabel(row.date) && <span className="admin-table-sub">{saleAgeLabel(row.date)}</span>}
+                    </td>
                     <td>
                       <strong>{row.car.brand} {row.car.model}</strong>
                       <span className="admin-table-sub">{row.car.version} · {row.car.modelYear}</span>
@@ -514,7 +518,8 @@ export default function AdminSales() {
                       {row.car.plate && <> · <span className="car-plate">{row.car.plate.toUpperCase()}</span></>}
                     </span>
                     <span className="admin-card-meta">
-                      {row.date ? formatDateBR(row.date) : '—'} · {row.sellerName}
+                      {row.date ? formatDateBR(row.date) : '—'}
+                      {row.date && saleAgeLabel(row.date) ? ` (${saleAgeLabel(row.date)})` : ''} · {row.sellerName}
                       {showValues && row.price != null ? ` · ${formatCurrency(row.price)}` : ''}
                     </span>
                     <span className="admin-card-meta">Comprador: {row.customer?.name || 'não vinculado'}</span>

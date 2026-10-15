@@ -1,3 +1,5 @@
+import { EXTRA_VEHICLE_CATEGORIES } from './vehicleTypes.js'
+
 // Fotos reais da M&3 (public/categorias/) — diferente das outras lojas, que
 // usam fotos genéricas. Ao trazer atualizações da Dom, manter estas linhas.
 export const CATEGORIES = [
@@ -7,17 +9,18 @@ export const CATEGORIES = [
   { slug: 'picape', label: 'Picape', image: '/categorias/picape.webp' },
 ]
 
-// Moto: aparece no painel sempre; no site, só nas lojas que têm moto no
-// estoque (siteCategories). Moto não tem portas (doors = 0).
-export const MOTO_CATEGORY = { slug: 'moto', label: 'Moto', image: '' }
-export const VEHICLE_CATEGORIES = [...CATEGORIES, MOTO_CATEGORY]
+// Moto, caminhão, jet ski, quadriciclo e UTV (utils/vehicleTypes.js): aparecem
+// no painel sempre; no site, só os que a loja tem no estoque (siteCategories).
+export const MOTO_CATEGORY = EXTRA_VEHICLE_CATEGORIES[0]
+export const VEHICLE_CATEGORIES = [...CATEGORIES, ...EXTRA_VEHICLE_CATEGORIES]
 
 export function vehicleCategoryLabel(slug) {
   return VEHICLE_CATEGORIES.find((c) => c.slug === slug)?.label || slug
 }
 
 export function siteCategories(cars) {
-  return (cars || []).some((c) => c.category === 'moto') ? VEHICLE_CATEGORIES : CATEGORIES
+  const extra = EXTRA_VEHICLE_CATEGORIES.filter((e) => (cars || []).some((c) => c.category === e.slug))
+  return [...CATEGORIES, ...extra]
 }
 
 // Como o carro entrou na loja (seção 49). Repasse não aparece no site.
@@ -163,10 +166,6 @@ export function daysInStockLabel(car) {
   return car.status === 'vendido' ? `Vendido em ${days} ${suffix}` : `${days} ${suffix} em estoque`
 }
 
-export function estimateInstallment(price, months = 48) {
-  const value = (price * 1.22) / months
-  return formatCurrency(Math.round(value))
-}
 
 export function discountPercent(price, originalPrice) {
   if (!originalPrice || originalPrice <= price) return null

@@ -136,6 +136,7 @@ export function fieldsFromFipe(value, { fabYear = 0, knownBrands = [], tipo = 'c
     modelYear: modelYearText(fabYear, value?.modelYear),
   }
   if (tipo === 'motos') fields.category = 'moto'
+  if (tipo === 'caminhoes') fields.category = 'caminhao'
   return fields
 }
 

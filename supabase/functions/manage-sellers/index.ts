@@ -78,8 +78,9 @@ Deno.serve(async (req) => {
     const email = String(body.email ?? '').trim().toLowerCase()
     const phone = String(body.phone ?? '').trim()
     const role = body.role === 'admin' ? 'admin' : body.role === 'manager' ? 'manager' : 'seller'
-    const commissionType = ['percent', 'fixed', 'none'].includes(String(body.commissionType)) ? String(body.commissionType) : 'percent'
-    const commissionValue = commissionType === 'none' ? 0 : Number(body.commissionValue ?? 0)
+    // 'tier' = pela faixa do carro vendido (seção 78): o valor vem da faixa
+    const commissionType = ['percent', 'fixed', 'none', 'tier'].includes(String(body.commissionType)) ? String(body.commissionType) : 'percent'
+    const commissionValue = commissionType === 'none' || commissionType === 'tier' ? 0 : Number(body.commissionValue ?? 0)
 
     if (!name) return json({ error: 'Informe o nome do vendedor' }, 400)
     if (!/^\S+@\S+\.\S+$/.test(email)) return json({ error: 'E-mail inválido' }, 400)

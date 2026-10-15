@@ -1,4 +1,4 @@
-import { CHECKLIST_STATUS_LABELS } from './saleChecklist.js'
+import { CHECKLIST_STATUS_LABELS, retainedItems } from './saleChecklist.js'
 import { generateContractPdf } from './contractPdf.js'
 import { loadContractLogo } from './contractLogo.js'
 import { companyForDocuments } from './contractCompany.js'
@@ -47,8 +47,17 @@ export function buildDeliveryTermParagraphs({ company, buyer, car, checklist, sa
     paragraphs.push(`ITENS CONFERIDOS NA ENTREGA\n${lines.join('\n')}`)
   }
 
+  // Itens que a loja tem e não entrega agora (ex.: a chave reserva até a quitação)
+  const retained = retainedItems(checklist)
+  if (retained.length > 0) {
+    const one = retained.length === 1
+    paragraphs.push(
+      `ITENS QUE FICAM COM A VENDEDORA\n${retained.join(', ')}: ${one ? 'permanece' : 'permanecem'} com a VENDEDORA e ${one ? 'será entregue' : 'serão entregues'} ao(à) COMPRADOR(A) posteriormente, conforme combinado entre as partes.`
+    )
+  }
+
   paragraphs.push(
-    'DECLARAÇÃO\nO(A) COMPRADOR(A) declara ter recebido o veículo e os itens acima, tendo vistoriado o veículo e conferido o seu estado de conservação, a quilometragem e o funcionamento.'
+    `DECLARAÇÃO\nO(A) COMPRADOR(A) declara ter recebido o veículo e os itens ${retained.length > 0 ? 'marcados como entregues' : 'acima'}, tendo vistoriado o veículo e conferido o seu estado de conservação, a quilometragem e o funcionamento.`
   )
 
   paragraphs.push(
@@ -78,7 +87,7 @@ export async function generateDeliveryTermPdf(params) {
     ],
     filename: `termo-de-entrega-${buyerSlug}.pdf`,
     logo,
-    headingPrefixes: ['VEÍCULO', 'ITENS CONFERIDOS', 'DECLARAÇÃO'],
+    headingPrefixes: ['VEÍCULO', 'ITENS CONFERIDOS', 'ITENS QUE FICAM', 'DECLARAÇÃO'],
   })
 }
 

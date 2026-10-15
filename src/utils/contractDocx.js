@@ -1,7 +1,8 @@
 // Import dinâmico: docx só é carregado quando o admin gera um Word, pra não
 // engordar o bundle do site público.
 
-export async function generateContractDocx({ title, paragraphs, signatures, filename, logo }) {
+// asBlob: devolve o arquivo em vez de baixar (ex.: contrato editado que vira modelo)
+export async function generateContractDocx({ title, paragraphs, signatures, filename, logo, asBlob = false }) {
   const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, ImageRun } = await import('docx')
 
   const children = []
@@ -55,6 +56,7 @@ export async function generateContractDocx({ title, paragraphs, signatures, file
 
   const doc = new Document({ sections: [{ children }] })
   const blob = await Packer.toBlob(doc)
+  if (asBlob) return blob
 
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

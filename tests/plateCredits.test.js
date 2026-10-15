@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { queriesFor, queriesText, readsText, creditsFromRow, ledgerText, parsePackages, packagesText, moneyBR, signatureCost } from '../src/utils/plateCredits.js'
+import { queriesFor, queriesText, readsText, creditsFromRow, ledgerText, parsePackages, packagesText, moneyBR, signatureCost, creditUsage, CREDIT_USAGE } from '../src/utils/plateCredits.js'
 
 test('créditos: assinatura digital com franquia do mês e depois R$ 1,00 do saldo', () => {
   const base = { balance: 3, price: 0.4, doc_price: 0.2, signature_price: 1, signature_free_monthly: 5 }
@@ -84,4 +84,15 @@ test('créditos: pacotes digitados na Plataforma', () => {
   assert.equal(parsePackages('0, 10'), null)
   assert.equal(parsePackages('1 2 3 4 5 6 7'), null)
   assert.equal(packagesText([20, 40, 100]), '20, 40, 100')
+})
+
+test('créditos: situação de cada loja no painel WB.Dev (usando, parada, nunca usou, sem saldo)', () => {
+  const now = new Date('2026-10-14T12:00:00Z')
+  assert.equal(creditUsage({ balance: 2, lastUseAt: '2026-10-10T10:00:00Z' }, now), 'usando')
+  assert.equal(creditUsage({ balance: 2, lastUseAt: '2026-08-01T10:00:00Z' }, now), 'parado')
+  assert.equal(creditUsage({ balance: 2, lastUseAt: null }, now), 'nunca')
+  // Sem saldo passa na frente, mesmo usando
+  assert.equal(creditUsage({ balance: 0, lastUseAt: '2026-10-13T10:00:00Z' }, now), 'sem_saldo')
+  assert.equal(creditUsage({ balance: -0.4, lastUseAt: null }, now), 'sem_saldo')
+  assert.equal(CREDIT_USAGE.parado.label, 'Parada')
 })

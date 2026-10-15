@@ -7,6 +7,7 @@ import {
   clientRanking,
   forecast,
   averageMonthlyCost,
+  recurringMonthlyCost,
   receivables,
   addMonths,
   categoryLabel,
@@ -118,4 +119,24 @@ test('previsão: mensalidades de hoje menos a despesa média', () => {
   const [tres] = forecast({ clients, expenses, today, horizons: [3] })
   assert.deepEqual(tres, { months: 3, from: '2026-11', to: '2027-01', revenue: 1350, costs: 180, profit: 1170 })
   assert.equal(categoryLabel('xyz'), 'Outros')
+})
+
+test('financeiro WB.Dev: despesas que se repetem entram na previsão pelo valor de hoje', () => {
+  const avulsa = { spentOn: '2026-09-10', amount: 120, category: 'marketing' }
+  const lancadas = [
+    { spentOn: '2026-08-05', amount: 100, recurrenceId: 'r1' },
+    { spentOn: '2026-09-05', amount: 100, recurrenceId: 'r1' },
+  ]
+  const recurrences = [
+    { id: 'r1', amount: 110, active: true },
+    { id: 'r2', amount: 50, active: false },
+  ]
+  assert.equal(recurringMonthlyCost(recurrences), 110)
+  // Avulsas: 120 desde setembro (média 120, só os meses completos desde a
+  // primeira) + fixa de 110 = 230 por mês; as já lançadas da fixa não contam duas vezes
+  const [tres] = forecast({ clients: [], expenses: [avulsa, ...lancadas], recurrences, today, horizons: [3] })
+  assert.equal(tres.costs, 690)
+  // Sem os modelos, continua a média de tudo
+  const [semModelos] = forecast({ clients: [], expenses: [avulsa, ...lancadas], today, horizons: [3] })
+  assert.equal(Math.round(semModelos.costs), Math.round(3 * averageMonthlyCost([avulsa, ...lancadas], today)))
 })

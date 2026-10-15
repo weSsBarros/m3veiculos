@@ -40,7 +40,10 @@ function fallbackMode(tag) {
 // marcadores, parágrafo novo (Enter) e apagar. Ao salvar, o arquivo novo vai
 // para o Storage e o anterior fica nas versões. Logo, tabelas e cabeçalho
 // ficam como estão no Word.
-export default function ContractTemplateEditor() {
+// contract (14/10/2026): o mesmo editor para mudar o texto de UM contrato antes
+// de emitir (tela Contratos): { buffer, title, data, onUse(arrayBuffer), onCancel }.
+// Nada vai para o Storage aqui; a prévia usa os dados do contrato.
+export default function ContractTemplateEditor({ contract = null }) {
   const { id } = useParams()
   const navigate = useNavigate()
   const { confirm, confirmDialog } = useConfirm()
@@ -59,7 +62,7 @@ export default function ContractTemplateEditor() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [blankIfEmpty, setBlankIfEmpty] = useState(true)
   const [view, setView] = useState('editar')
-  const [previewData, setPreviewData] = useState('exemplo')
+  const [previewData, setPreviewData] = useState(contract ? 'contrato' : 'exemplo')
   const [preview, setPreview] = useState({ blob: null, error: '', loading: false })
   const editorRef = useRef(null)
   const rangeRef = useRef(null)
@@ -69,6 +72,19 @@ export default function ContractTemplateEditor() {
     if (!quiet) setLoading(true)
     setError('')
     try {
+      if (contract) {
+        const buf = contract.buffer.slice(0)
+        const parsed = readTemplate(await readDocumentXml(buf))
+        setTemplate({ name: contract.title, filePath: null, updatedAt: null })
+        setBuffer(buf)
+        setModel(parsed)
+        setBlocks(parsed.blocks)
+        setDirty(false)
+        setEditing(null)
+        setChip(null)
+        setVersions([])
+        return
+      }
       const found = await fetchContractTemplate(id)
       if (!found) {
         setError('Modelo não encontrado.')
@@ -309,7 +325,9 @@ export default function ContractTemplateEditor() {
     let cancelled = false
     setPreview((p) => ({ ...p, loading: true, error: '' }))
     buildCurrent(blocks)
-      .then((out) => fillContractTemplateBlob(out, previewData === 'vazio' ? CONTRACT_EMPTY_DATA : CONTRACT_SAMPLE_DATA))
+      .then((out) =>
+        fillContractTemplateBlob(out, previewData === 'contrato' && contract ? contract.data : previewData === 'vazio' ? CONTRACT_EMPTY_DATA : CONTRACT_SAMPLE_DATA)
+      )
       .then((blob) => {
         if (!cancelled) setPreview({ blob, error: '', loading: false })
       })
@@ -346,7 +364,12 @@ export default function ContractTemplateEditor() {
     setNotice('')
     try {
       const out = await buildCurrent(list)
-      await fillContractTemplateBlob(out.slice(0), CONTRACT_SAMPLE_DATA)
+      await fillContractTemplateBlob(out.slice(0), contract ? contract.data : CONTRACT_SAMPLE_DATA)
+      if (contract) {
+        setDirty(false)
+        contract.onUse(out)
+        return
+      }
       await saveContractTemplateFile(template, out)
       await load({ quiet: true })
       setNotice('Modelo salvo. A versão anterior ficou guardada em “Versões anteriores”.')
@@ -392,15 +415,26 @@ export default function ContractTemplateEditor() {
     if (await confirm('Sair sem salvar as alterações?', { confirmLabel: 'Sair sem salvar' })) navigate('/admin/contratos/modelos')
   }
 
-  if (loading) return <div className="admin-page"><p className="admin-muted">Carregando o modelo…</p></div>
+  async function handleCancelContract() {
+    if ((dirty || editing) && !(await confirm('Sair sem usar as alterações neste contrato?', { confirmLabel: 'Sair sem usar' }))) return
+    contract.onCancel()
+  }
+
+  if (loading) return <div className="admin-page"><p className="admin-muted">Carregando o {contract ? 'contrato' : 'modelo'}…</p></div>
   if (!template || !model) {
     return (
       <div className="admin-page">
-        <Link to="/admin/contratos/modelos" className="admin-back-link"><ArrowLeft size={15} /> Voltar para os modelos</Link>
+        {contract ? (
+          <button type="button" className="admin-back-link" onClick={() => contract.onCancel()}><ArrowLeft size={15} /> Voltar para o contrato</button>
+        ) : (
+          <Link to="/admin/contratos/modelos" className="admin-back-link"><ArrowLeft size={15} /> Voltar para os modelos</Link>
+        )}
         {error && <p className="admin-error">{error}</p>}
       </div>
     )
   }
+
+  const saveLabel = contract ? 'Usar neste contrato' : 'Salvar modelo'
 
   const editingBlock = blocks.find((b) => b.key === editing?.key)
   const keep = (e) => e.preventDefault()
@@ -506,23 +540,38 @@ export default function ContractTemplateEditor() {
 
   return (
     <div className="admin-page tpl-editor-page">
-      <div className="admin-page-head">
-        <div>
-          <Link to="/admin/contratos/modelos" className="admin-back-link" onClick={handleBack}>
-            <ArrowLeft size={15} /> Voltar para os modelos
-          </Link>
-          <h1>{template.name}</h1>
-          <p>
-            Clique num parágrafo para editar. Logo, tabelas e cabeçalho ficam como estão no Word.
-            {template.updatedAt && ` Última edição: ${formatDateTime(template.updatedAt)}.`}
-          </p>
+      {contract ? (
+        <div className="admin-page-head">
+          <div>
+            <button type="button" className="admin-back-link" onClick={handleCancelContract}>
+              <ArrowLeft size={15} /> Voltar para o contrato
+            </button>
+            <h1>Editar o texto deste contrato</h1>
+            <p>
+              Modelo “{template.name}”. As mudanças valem só para este contrato (o modelo continua igual). Clique num parágrafo para editar;
+              os dados do cliente e do carro são os marcadores.
+            </p>
+          </div>
         </div>
-        <div className="admin-row-actions">
-          <button type="button" className="btn btn-outline" onClick={() => downloadFile(template.filePath, '')}>
-            <Download size={15} /> Baixar .docx
-          </button>
+      ) : (
+        <div className="admin-page-head">
+          <div>
+            <Link to="/admin/contratos/modelos" className="admin-back-link" onClick={handleBack}>
+              <ArrowLeft size={15} /> Voltar para os modelos
+            </Link>
+            <h1>{template.name}</h1>
+            <p>
+              Clique num parágrafo para editar. Logo, tabelas e cabeçalho ficam como estão no Word.
+              {template.updatedAt && ` Última edição: ${formatDateTime(template.updatedAt)}.`}
+            </p>
+          </div>
+          <div className="admin-row-actions">
+            <button type="button" className="btn btn-outline" onClick={() => downloadFile(template.filePath, '')}>
+              <Download size={15} /> Baixar .docx
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {error && <p className="admin-error">{error}</p>}
       {notice && <p className="admin-success">{notice}</p>}
@@ -540,6 +589,7 @@ export default function ContractTemplateEditor() {
           <label className="tpl-preview-data">
             Prévia com
             <select value={previewData} onChange={(e) => setPreviewData(e.target.value)}>
+              {contract && <option value="contrato">os dados deste contrato</option>}
               <option value="exemplo">dados de exemplo</option>
               <option value="vazio">campos vazios</option>
             </select>
@@ -551,8 +601,8 @@ export default function ContractTemplateEditor() {
               <Undo2 size={15} /> Descartar
             </button>
           )}
-          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving || (!dirty && !editing)}>
-            <Save size={15} /> {saving ? 'Salvando…' : 'Salvar modelo'}
+          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving || (!contract && !dirty && !editing)}>
+            <Save size={15} /> {saving ? 'Salvando…' : saveLabel}
           </button>
         </div>
       </div>
@@ -620,6 +670,7 @@ export default function ContractTemplateEditor() {
         </div>
       )}
 
+      {!contract && (
       <section className="admin-form-section">
         <h2>Versões anteriores</h2>
         {versions.length === 0 ? (
@@ -644,9 +695,10 @@ export default function ContractTemplateEditor() {
           </ul>
         )}
       </section>
+      )}
       {view === 'editar' && (dirty || editing) && (
         <button type="button" className="btn btn-primary tpl-float-save" onClick={handleSave} disabled={saving}>
-          <Save size={15} /> {saving ? 'Salvando…' : 'Salvar modelo'}
+          <Save size={15} /> {saving ? 'Salvando…' : saveLabel}
         </button>
       )}
       {confirmDialog}

@@ -1,4 +1,5 @@
 import { formatCurrency } from './carFormat.js'
+import { paymentTags } from './salePayments.js'
 
 function formatDateExtended(isoDate) {
   if (!isoDate) return ''
@@ -37,6 +38,14 @@ export const CONTRACT_TEMPLATE_TAGS = [
   { tag: 'preco', label: 'Preço de venda' },
   { tag: 'forma_pagamento', label: 'Forma de pagamento' },
   { tag: 'detalhes_pagamento', label: 'Detalhes do pagamento' },
+  // Venda com vários pagamentos (14/10/2026): o valor de cada forma
+  { tag: 'pagamento_a_vista', label: 'Pago à vista (dinheiro, PIX, transferência, débito)' },
+  { tag: 'pagamento_financiado', label: 'Valor financiado pelo banco' },
+  { tag: 'banco_financiamento', label: 'Banco do financiamento' },
+  { tag: 'parcelas_financiamento', label: 'Parcelas do financiamento' },
+  { tag: 'pagamento_cartao', label: 'Pago no cartão de crédito' },
+  { tag: 'veiculo_troca', label: 'Veículo recebido na troca' },
+  { tag: 'valor_troca', label: 'Valor do veículo na troca' },
   { tag: 'data_venda', label: 'Data da venda (por extenso)' },
   { tag: 'cidade', label: 'Cidade/UF do contrato' },
   { tag: 'observacoes', label: 'Observações adicionais' },
@@ -81,8 +90,15 @@ export const CONTRACT_SAMPLE_DATA = {
   carro_chassi: '9BR000000P0000000',
   carro_renavam: '00000000000',
   preco: 'R$ 98.900,00',
-  forma_pagamento: 'À vista',
+  forma_pagamento: 'R$ 20.000,00 via PIX; R$ 63.900,00 financiados pelo Banco Exemplo em 48 parcelas; e veículo usado recebido como parte do pagamento (VW Gol 1.0 2015, placa XYZ9A87), avaliado em R$ 15.000,00',
   detalhes_pagamento: 'Entrada de R$ 20.000,00 + saldo financiado',
+  pagamento_a_vista: 'R$ 20.000,00',
+  pagamento_financiado: 'R$ 63.900,00',
+  banco_financiamento: 'Banco Exemplo',
+  parcelas_financiamento: '48',
+  pagamento_cartao: '',
+  veiculo_troca: 'VW Gol 1.0 2015, placa XYZ9A87',
+  valor_troca: 'R$ 15.000,00',
   data_venda: '5 de outubro de 2026',
   cidade: 'São Luís/MA',
   observacoes: 'Exemplo de observação.',
@@ -128,6 +144,8 @@ export function buildContractTemplateData({ company, buyer, vehicle, sale }) {
     preco: sale.price != null && sale.price !== '' ? formatCurrency(Number(sale.price)) : '',
     forma_pagamento: sale.paymentMethod || '',
     detalhes_pagamento: sale.paymentDetails || '',
+    // Valor de cada forma de pagamento (sale.paymentParts: utils/salePayments.js)
+    ...paymentTags(sale.paymentParts || []),
     data_venda: formatDateExtended(sale.date),
     cidade: sale.city || '',
     observacoes: sale.notes || '',

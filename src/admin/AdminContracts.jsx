@@ -1,21 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchCompanySettings } from '../lib/companyApi.js'
-import { DEFAULT_BANKS, contractPaymentText } from '../utils/payment.js'
-import BankSelect from './BankSelect.jsx'
+import { DEFAULT_BANKS } from '../utils/payment.js'
+import PaymentFields from './PaymentFields.jsx'
+import { EMPTY_PART, partsFromSale, normalizeParts, paymentsText } from '../utils/salePayments.js'
+import { parseMoneyBR } from '../utils/financing.js'
+import { fetchSaleByCar } from '../lib/salesApi.js'
 import { Link, useSearchParams } from 'react-router-dom'
-import { RefreshCcw, FileDown, FileText, Settings, PenLine } from 'lucide-react'
+import { RefreshCcw, FileDown, FileText, Settings, PenLine, PencilLine, RotateCcw, Plus, Check } from 'lucide-react'
 import { fetchAllCarsAdmin, fetchSellerCars } from '../lib/carsApi.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchContractsAdmin, createContract } from '../lib/contractsApi.js'
-import { fetchAllContractTemplates, downloadContractTemplateFile } from '../lib/contractTemplatesApi.js'
+import { fetchAllContractTemplates, downloadContractTemplateFile, uploadContractTemplate, uploadEditedContractFile } from '../lib/contractTemplatesApi.js'
 import { formatCurrency, carStatusLabel, parseIntBR, formatDateBR as formatDate, slugify } from '../utils/carFormat.js'
 import { buildContractTitle, buildContractParagraphs, buildContractSignatures } from '../utils/contractTemplate.js'
 import { buildReceiptTitle, buildReceiptParagraphs, buildReceiptSignatures } from '../utils/receiptTemplate.js'
 import { buildContractTemplateData } from '../utils/contractTemplateTags.js'
 import { generateContractPdf } from '../utils/contractPdf.js'
 import { generateContractDocx } from '../utils/contractDocx.js'
-import { fillContractTemplateBlob, downloadBlob } from '../utils/fillContractTemplate.js'
+import { fillContractTemplateBlob, downloadBlob, DOCX_MIME } from '../utils/fillContractTemplate.js'
+import { contractTextToTemplate } from '../utils/contractTextTemplate.js'
 import DocxPreview from '../components/DocxPreview.jsx'
 import { loadContractLogo } from '../utils/contractLogo.js'
 import { loadStoredCompany, saveStoredCompany } from '../utils/contractCompany.js'
@@ -30,9 +34,13 @@ import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
 import AnoModeloInput from '../components/AnoModeloInput.jsx'
 import './admin.css'
 
+// O editor de modelos só carrega quando alguém edita o texto de um contrato de modelo próprio
+const ContractTemplateEditor = lazy(() => import('./ContractTemplateEditor.jsx'))
+
 const EMPTY_BUYER = { name: '', document: '', rg: '', address: '', phone: '', email: '' }
 const EMPTY_VEHICLE = { brand: '', model: '', version: '', year: '', modelYear: '', color: '', km: '', plate: '', chassis: '', renavam: '' }
-const EMPTY_SALE = { price: '', paymentMethod: 'À vista', bank: '', paymentDetails: '', date: new Date().toISOString().slice(0, 10), city: '', notes: '' }
+const CONTRACT_PAYMENT = [{ ...EMPTY_PART, method: 'a_vista' }]
+const EMPTY_SALE = { price: '', paymentDetails: '', date: new Date().toISOString().slice(0, 10), city: '', notes: '' }
 
 export default function AdminContracts() {
   const { isAdmin, isStaff } = useAuth()
@@ -54,6 +62,22 @@ export default function AdminContracts() {
   const [buyer, setBuyer] = useState(EMPTY_BUYER)
   const [vehicle, setVehicle] = useState(EMPTY_VEHICLE)
   const [sale, setSale] = useState(EMPTY_SALE)
+  // Formas de pagamento (14/10/2026: várias por venda; utils/salePayments.js)
+  // Sem venda registrada, o contrato começa "à vista" (como antes)
+  const [payParts, setPayParts] = useState(CONTRACT_PAYMENT)
+  // Texto editado antes de emitir: parágrafos do modelo do sistema (customText,
+  // com o texto de quando começou, para avisar se os dados mudarem depois) ou o
+  // Word do modelo próprio (editedDocx); pergunta de salvar como modelo novo
+  const [customText, setCustomText] = useState(null)
+  const [textBase, setTextBase] = useState(null)
+  const [editingText, setEditingText] = useState(false)
+  const [textDraft, setTextDraft] = useState([])
+  const [editedDocx, setEditedDocx] = useState(null)
+  const [editorSource, setEditorSource] = useState(null)
+  const [saveAsTemplate, setSaveAsTemplate] = useState(null)
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [savedTemplate, setSavedTemplate] = useState(null)
+  const [notice, setNotice] = useState('')
   const [logo, setLogo] = useState(null)
   const [banks, setBanks] = useState(DEFAULT_BANKS)
   const [templatePreview, setTemplatePreview] = useState({ blob: null, error: '', loading: false })
@@ -74,8 +98,9 @@ export default function AdminContracts() {
       .catch(() => {})
   }, [])
 
-  // Financiado com banco escolhido: "Financiado pelo Banco do Brasil"
-  const paymentText = contractPaymentText(sale.paymentMethod, sale.bank)
+  // Texto da forma de pagamento: "R$ 20.000,00 via PIX; R$ 50.000,00 financiados pelo BV..."
+  const paymentParts = useMemo(() => normalizeParts(payParts, parseMoneyBR), [payParts])
+  const paymentText = paymentsText(paymentParts)
 
   async function load() {
     setLoading(true)
@@ -163,7 +188,23 @@ export default function AdminContracts() {
       renavam: car.renavam || '',
     })
     setSale((prev) => ({ ...prev, price: car.price ?? '' }))
+    setPayParts(CONTRACT_PAYMENT)
     if (car.customerId) handleSelectCustomer(car.customerId)
+    // Carro já vendido: valor, data, formas de pagamento e o carro da troca vêm da venda
+    fetchSaleByCar(car.id)
+      .then((found) => {
+        if (!found) return
+        const fromSale = partsFromSale(found)
+        const parts = fromSale.length === 1 && !fromSale[0].amount && !found.paymentMethod ? [] : fromSale
+        if (found.tradeInCarId || found.tradeInValue) {
+          const t = cars.find((c) => c.id === found.tradeInCarId)
+          const description = t ? [t.brand, t.model, t.version, t.modelYear, t.plate ? `placa ${t.plate.toUpperCase()}` : ''].filter(Boolean).join(' ') : ''
+          parts.push({ ...EMPTY_PART, method: 'troca', amount: found.tradeInValue != null ? String(found.tradeInValue).replace('.', ',') : '', note: description })
+        }
+        setPayParts(parts.length ? parts : CONTRACT_PAYMENT)
+        setSale((prev) => ({ ...prev, price: found.salePrice ?? prev.price, date: found.saleDate || prev.date }))
+      })
+      .catch(() => {})
   }
 
   function handleSelectCustomer(customerId) {
@@ -185,9 +226,9 @@ export default function AdminContracts() {
       company,
       buyer,
       vehicle,
-      sale: { ...sale, paymentMethod: paymentText, price: parseIntBR(sale.price) || 0 },
+      sale: { ...sale, paymentMethod: paymentText, paymentParts, price: parseIntBR(sale.price) || 0 },
     }),
-    [company, buyer, vehicle, sale, paymentText]
+    [company, buyer, vehicle, sale, paymentText, paymentParts]
   )
 
   const isReceipt = documentType === 'recibo'
@@ -202,6 +243,8 @@ export default function AdminContracts() {
   )
 
   const selectedTemplate = !isReceipt ? templates.find((t) => t.id === selectedTemplateId) || null : null
+  const effectiveParagraphs = !selectedTemplate && customText ? customText : paragraphs
+  const textStale = Boolean(!selectedTemplate && customText && textBase && JSON.stringify(textBase) !== JSON.stringify(paragraphs))
 
   // Arquivo do modelo (baixado uma vez por modelo)
   async function templateFile(template) {
@@ -221,7 +264,7 @@ export default function AdminContracts() {
     setTemplatePreview((p) => ({ ...p, loading: true, error: '' }))
     const timer = setTimeout(async () => {
       try {
-        const file = await templateFile(selectedTemplate)
+        const file = editedDocx?.templateId === selectedTemplate.id ? editedDocx.buffer : await templateFile(selectedTemplate)
         const blob = await fillContractTemplateBlob(file, buildContractTemplateData(contractData))
         if (!cancelled) setTemplatePreview({ blob, error: '', loading: false })
       } catch (err) {
@@ -233,7 +276,7 @@ export default function AdminContracts() {
       clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTemplate, contractData])
+  }, [selectedTemplate, contractData, editedDocx])
 
   function validate() {
     if (!company.name || !company.document) return 'Preencha nome e CNPJ/CPF da empresa vendedora.'
@@ -246,9 +289,13 @@ export default function AdminContracts() {
 
   async function saveContractRecord(template = null) {
     saveStoredCompany(company)
+    // Word editado só para este contrato: vai para o Storage e o contrato aponta para ele
+    const edited = template && editedDocx?.templateId === template.id ? editedDocx : null
+    const filePath = edited ? await uploadEditedContractFile(edited.buffer) : template?.filePath || null
     const saved = await createContract({
       templateId: template?.id || null,
-      templateFilePath: template?.filePath || null,
+      templateFilePath: filePath,
+      customText: !template && customText ? customText : null,
       carId: selectedCarId || null,
       // Fica na ficha do cliente (Clientes → Ficha e contratos)
       customerId: selectedCustomerId || null,
@@ -275,7 +322,7 @@ export default function AdminContracts() {
     }
     setGenerating(true)
     try {
-      await fn({ title, paragraphs, signatures, filename, logo })
+      await fn({ title, paragraphs: effectiveParagraphs, signatures, filename, logo })
       await saveContractRecord()
     } catch (err) {
       alert('Não foi possível gerar o contrato: ' + err.message)
@@ -307,7 +354,7 @@ export default function AdminContracts() {
     if (!template) return
     setGenerating(true)
     try {
-      const arrayBuffer = await templateFile(template)
+      const arrayBuffer = editedDocx?.templateId === template.id ? editedDocx.buffer : await templateFile(template)
       const data = buildContractTemplateData(contractData)
       downloadBlob(await fillContractTemplateBlob(arrayBuffer, data), contractFilename('docx'))
       await saveContractRecord(template)
@@ -332,6 +379,70 @@ export default function AdminContracts() {
       alert('Não foi possível gerar o contrato: ' + err.message)
     } finally {
       setGenerating(false)
+    }
+  }
+
+  // Editar o texto antes de emitir (14/10/2026): no modelo do sistema, os
+  // parágrafos viram caixas de texto; no modelo próprio, abre o editor de modelos
+  // só para este contrato. Ao terminar, o admin pode salvar como modelo novo.
+  function editedDocxFor(template) {
+    return template && editedDocx?.templateId === template.id ? editedDocx : null
+  }
+
+  async function startEditText() {
+    setNotice('')
+    setSavedTemplate(null)
+    if (selectedTemplate) {
+      try {
+        const buffer = editedDocxFor(selectedTemplate)?.buffer || (await templateFile(selectedTemplate))
+        setEditorSource({ template: selectedTemplate, buffer: buffer.slice(0) })
+      } catch (err) {
+        alert('Não foi possível abrir o modelo: ' + (err.message || err))
+      }
+      return
+    }
+    setTextDraft([...effectiveParagraphs])
+    if (!customText) setTextBase(paragraphs)
+    setEditingText(true)
+  }
+
+  function finishEditText() {
+    const cleaned = textDraft.map((p) => p.replace(/\s+$/g, '')).filter((p) => p.trim())
+    setCustomText(cleaned.length ? cleaned : null)
+    setEditingText(false)
+    setNotice(`Texto editado: vale só para este ${isReceipt ? 'recibo' : 'contrato'}.`)
+    if (isAdmin && cleaned.length && !isReceipt) setSaveAsTemplate({ source: 'texto', name: 'Contrato de compra e venda (editado)', paragraphs: cleaned })
+  }
+
+  function resetEditedText() {
+    setCustomText(null)
+    setTextBase(null)
+    setEditedDocx(null)
+    setNotice('')
+  }
+
+  async function submitSaveAsTemplate(e) {
+    e.preventDefault()
+    const name = saveAsTemplate.name.trim()
+    if (!name) return
+    setSavingTemplate(true)
+    try {
+      let body
+      if (saveAsTemplate.source === 'docx') {
+        body = saveAsTemplate.buffer
+      } else {
+        const tpl = contractTextToTemplate({ paragraphs: saveAsTemplate.paragraphs, signatures }, buildContractTemplateData(contractData))
+        body = await generateContractDocx({ title, paragraphs: tpl.paragraphs, signatures: tpl.signatures, logo, asBlob: true })
+      }
+      const file = new File([body], `${slugify(name) || 'modelo'}.docx`, { type: DOCX_MIME })
+      const created = await uploadContractTemplate(name, file, 'venda')
+      setTemplates((prev) => [created, ...prev])
+      setSaveAsTemplate(null)
+      setSavedTemplate(created)
+    } catch (err) {
+      alert('Não foi possível salvar o modelo: ' + (err.message || err))
+    } finally {
+      setSavingTemplate(false)
     }
   }
 
@@ -491,19 +602,6 @@ export default function AdminContracts() {
               <MoneyInput value={sale.price} onChange={(v) => updateSale('price', v)} required />
             </label>
             <label>
-              Forma de pagamento
-              <select value={sale.paymentMethod} onChange={(e) => updateSale('paymentMethod', e.target.value)}>
-                <option>À vista</option>
-                <option>Financiado</option>
-                <option>Parcelado direto com a loja</option>
-                <option>Consórcio contemplado</option>
-                <option>Outro</option>
-              </select>
-            </label>
-            {sale.paymentMethod === 'Financiado' && (
-              <BankSelect value={sale.bank} onChange={(bank) => updateSale('bank', bank)} banks={banks} />
-            )}
-            <label>
               Data da venda
               <DateInputBR value={sale.date} onChange={(iso) => updateSale('date', iso)} />
             </label>
@@ -511,6 +609,10 @@ export default function AdminContracts() {
               Cidade/UF (para o contrato)
               <input value={sale.city} onChange={(e) => updateSale('city', e.target.value)} placeholder="Ex: São José de Ribamar/MA" required />
             </label>
+          </div>
+          <div className="sale-dialog-section">
+            <span className="admin-field-label">Pagamento</span>
+            <PaymentFields value={payParts} onChange={setPayParts} banks={banks} salePrice={parseIntBR(sale.price)} allowTradeIn />
           </div>
           <label>
             Detalhes do pagamento (opcional)
@@ -532,6 +634,7 @@ export default function AdminContracts() {
                 onChange={(e) => {
                   setDocumentType(e.target.value)
                   setSelectedTemplateId('')
+                  resetEditedText()
                 }}
               >
                 <option value="contrato">Contrato de compra e venda</option>
@@ -541,7 +644,13 @@ export default function AdminContracts() {
             {!isReceipt && (
               <label>
                 Modelo do contrato
-                <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)}>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => {
+                    setSelectedTemplateId(e.target.value)
+                    resetEditedText()
+                  }}
+                >
                   <option value="">Modelo padrão do sistema</option>
                   {templates.map((t) => (
                     <option key={t.id} value={t.id}>{t.name}</option>
@@ -563,16 +672,74 @@ export default function AdminContracts() {
         </section>
 
         <section className="admin-form-section">
-          <h2>Prévia do {isReceipt ? 'recibo' : 'contrato'}</h2>
+          <div className="contract-preview-head">
+            <h2>Prévia do {isReceipt ? 'recibo' : 'contrato'}</h2>
+            {!editingText && (
+              <div className="admin-row-actions">
+                {(selectedTemplate ? editedDocxFor(selectedTemplate) : customText) && (
+                  <>
+                    <span className="contract-edited-badge">Texto editado só neste {isReceipt ? 'recibo' : 'contrato'}</span>
+                    <button type="button" className="btn btn-outline" onClick={resetEditedText}>
+                      <RotateCcw size={15} /> Voltar ao texto do modelo
+                    </button>
+                  </>
+                )}
+                <button type="button" className="btn btn-outline" onClick={startEditText} disabled={generating}>
+                  <PencilLine size={15} /> Editar o texto deste {isReceipt ? 'recibo' : 'contrato'}
+                </button>
+              </div>
+            )}
+          </div>
+          {textStale && !editingText && (
+            <p className="admin-form-note contract-stale-note">
+              Os dados do formulário mudaram depois que você editou o texto, e o texto editado não acompanha.{' '}
+              <button type="button" className="link-button" onClick={resetEditedText}>Refazer o texto com os dados novos</button>
+            </p>
+          )}
           {selectedTemplate ? (
             <DocxPreview blob={templatePreview.blob} error={templatePreview.error} loading={templatePreview.loading} />
+          ) : editingText ? (
+            <div className="contract-text-editor">
+              <p className="admin-form-note">
+                Mude o que precisar só para este {isReceipt ? 'recibo' : 'contrato'}: cada caixa é um parágrafo (deixe vazia para tirar).
+                Os dados do formulário já estão no texto.
+              </p>
+              <h3>{title}</h3>
+              {textDraft.map((p, i) => (
+                <textarea
+                  key={i}
+                  value={p}
+                  rows={Math.min(14, Math.max(2, Math.ceil(p.length / 90) + (p.match(/\n/g) || []).length))}
+                  onChange={(e) => setTextDraft((list) => list.map((x, j) => (j === i ? e.target.value : x)))}
+                  aria-label={`Parágrafo ${i + 1}`}
+                />
+              ))}
+              <div className="admin-form-actions">
+                <button type="button" className="btn btn-outline" onClick={() => setTextDraft((list) => [...list, ''])}>
+                  <Plus size={15} /> Adicionar parágrafo no fim
+                </button>
+                <button type="button" className="btn btn-outline" onClick={() => setEditingText(false)}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn btn-primary" onClick={finishEditText}>
+                  <Check size={15} /> Usar este texto
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="contract-preview">
               <h3>{title}</h3>
-              {paragraphs.map((p, i) => (
+              {effectiveParagraphs.map((p, i) => (
                 <p key={i}>{p}</p>
               ))}
             </div>
+          )}
+          {notice && <p className="admin-success">{notice}</p>}
+          {savedTemplate && (
+            <p className="admin-success">
+              Modelo “{savedTemplate.name}” salvo.{' '}
+              <Link to={`/admin/contratos/modelos/${savedTemplate.id}`}>Abrir no editor para conferir os campos</Link>
+            </p>
           )}
         </section>
 
@@ -654,6 +821,52 @@ export default function AdminContracts() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {saveAsTemplate && (
+        <div className="confirm-dialog-overlay" onClick={savingTemplate ? undefined : () => setSaveAsTemplate(null)}>
+          <form className="confirm-dialog admin-form" onClick={(e) => e.stopPropagation()} onSubmit={submitSaveAsTemplate}>
+            <h2>Salvar como modelo novo?</h2>
+            <p>
+              O texto editado também pode virar um modelo de contrato da loja, para usar de novo. Os dados deste cliente e deste carro voltam a ser
+              campos (o modelo novo abre no editor para você conferir). Se não quiser, o texto vale só para este {isReceipt ? 'recibo' : 'contrato'}.
+            </p>
+            <label>
+              Nome do modelo
+              <input value={saveAsTemplate.name} maxLength={80} onChange={(e) => setSaveAsTemplate((s) => ({ ...s, name: e.target.value }))} required />
+            </label>
+            <div className="confirm-dialog-actions">
+              <button type="submit" className="btn btn-primary btn-block" disabled={savingTemplate || !saveAsTemplate.name.trim()}>
+                {savingTemplate ? 'Salvando…' : 'Salvar como modelo novo'}
+              </button>
+              <button type="button" className="btn btn-outline btn-block" onClick={() => setSaveAsTemplate(null)} disabled={savingTemplate}>
+                Não, só neste {isReceipt ? 'recibo' : 'contrato'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editorSource && (
+        <div className="contract-editor-overlay">
+          <Suspense fallback={<p className="admin-muted">Abrindo o editor…</p>}>
+            <ContractTemplateEditor
+              contract={{
+                buffer: editorSource.buffer,
+                title: editorSource.template.name,
+                data: buildContractTemplateData(contractData),
+                onUse: (buffer) => {
+                  const template = editorSource.template
+                  setEditedDocx({ templateId: template.id, buffer })
+                  setEditorSource(null)
+                  setNotice('Texto editado: vale só para este contrato.')
+                  if (isAdmin) setSaveAsTemplate({ source: 'docx', name: `${template.name} (editado)`, buffer })
+                },
+                onCancel: () => setEditorSource(null),
+              }}
+            />
+          </Suspense>
         </div>
       )}
 

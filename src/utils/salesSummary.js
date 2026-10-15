@@ -34,3 +34,16 @@ export function salesSummary(rows) {
     missingCost: list.length - hidden - withMargin.length,
   }
 }
+
+// Há quantos dias o carro foi vendido (embaixo da data, na aba Vendas):
+// "Hoje", "1 dia", "15 dias". Data no futuro ou inválida: ''.
+export function saleAgeLabel(dateISO, today = new Date()) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateISO || '')
+  if (!m) return ''
+  const sold = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const now = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+  const days = Math.round((now - sold) / 86400000)
+  if (days < 0) return ''
+  if (days === 0) return 'Hoje'
+  return days === 1 ? '1 dia' : `${days.toLocaleString('pt-BR')} dias`
+}

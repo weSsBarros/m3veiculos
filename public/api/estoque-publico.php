@@ -51,7 +51,7 @@ function public_cars($config, $fields, $statuses, $timeout = 15)
 function public_car_by_slug($config, $slug)
 {
     $rows = supabase_public_get($config, 'cars', [
-        'select' => 'slug,brand,model,version,year,model_year,km,transmission,fuel,color,doors,price,status,description,images',
+        'select' => 'slug,brand,model,version,year,model_year,km,category,transmission,fuel,color,doors,price,status,description,images',
         'company_id' => 'eq.' . $config['company_id'],
         'slug' => 'eq.' . $slug,
         'limit' => '1',

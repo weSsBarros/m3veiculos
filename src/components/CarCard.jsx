@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 import { Gauge, Fuel, Settings2 } from 'lucide-react'
-import { formatCurrency, estimateInstallment, discountPercent } from '../utils/carFormat.js'
+import { formatCurrency, discountPercent } from '../utils/carFormat.js'
 import { responsivePhoto } from '../utils/carPhotos.js'
+import { formatMileage } from '../utils/vehicleTypes.js'
 import './CarCard.css'
 
 export default function CarCard({ car }) {
@@ -26,7 +27,7 @@ export default function CarCard({ car }) {
         <p className="car-card-version">{car.version} · {car.modelYear}</p>
 
         <div className="car-card-specs">
-          <span><Gauge size={14} /> {car.km.toLocaleString('pt-BR')} km</span>
+          <span><Gauge size={14} /> {formatMileage(car)}</span>
           <span><Settings2 size={14} /> {car.transmission.split(' ')[0]}</span>
           <span><Fuel size={14} /> {car.fuel}</span>
         </div>
@@ -36,7 +37,6 @@ export default function CarCard({ car }) {
             <>
               {car.originalPrice && <span className="price-old">{formatCurrency(car.originalPrice)}</span>}
               <span className="price-main">{formatCurrency(car.price)}</span>
-              <span className="price-installment">ou em até 48x de {estimateInstallment(car.price)}</span>
             </>
           ) : (
             <span className="price-main">Consulte o valor</span>

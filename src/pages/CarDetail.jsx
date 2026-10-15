@@ -6,13 +6,14 @@ import { isSupabaseConfigured } from '../lib/supabaseClient.js'
 import { trackCarView } from '../lib/statsApi.js'
 import { thumbUrl } from '../utils/carPhotos.js'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCurrency, estimateInstallment, discountPercent } from '../utils/carFormat.js'
+import { formatCurrency, discountPercent } from '../utils/carFormat.js'
 import { whatsappLinkForCar } from '../utils/whatsapp.js'
 import CarCarousel from '../components/CarCarousel.jsx'
 import SetupNotice from '../components/SetupNotice.jsx'
 import FinancingModal from '../components/FinancingModal.jsx'
 import './CarDetail.css'
 import { useCarSeo } from '../utils/carSeo.js'
+import { formatMileage, mileageLabel, vehicleHasDoors } from '../utils/vehicleTypes.js'
 
 const HIGHLIGHT_ICONS = {
   'Revisado na concessionária': Wrench,
@@ -115,11 +116,11 @@ export default function CarDetail() {
     ['Modelo', car.model],
     ['Versão', car.version],
     ['Ano/Modelo', car.modelYear],
-    ['Quilometragem', `${car.km.toLocaleString('pt-BR')} km`],
+    [mileageLabel(car.category), formatMileage(car)],
     ['Câmbio', car.transmission],
     ['Combustível', car.fuel],
     ['Cor', car.color],
-    ...(car.category === 'moto' ? [] : [['Portas', car.doors]]),
+    ...(vehicleHasDoors(car.category) ? [['Portas', car.doors]] : []),
     ['Condição', car.condition],
   ]
 
@@ -165,7 +166,7 @@ export default function CarDetail() {
             </span>
             <h1>{car.brand} {car.model} <span>{car.version}</span></h1>
             <p className="car-info-quick">
-              {car.modelYear} · {car.km.toLocaleString('pt-BR')} km · {car.transmission} · {car.fuel}
+              {car.modelYear} · {formatMileage(car)} · {car.transmission} · {car.fuel}
             </p>
 
             <div className="car-price-block">
@@ -173,9 +174,6 @@ export default function CarDetail() {
                 <>
                   {car.originalPrice && <span className="price-old">De {formatCurrency(car.originalPrice)}</span>}
                   <span className="price-main">{formatCurrency(car.price)}</span>
-                  {!isSold && (
-                    <span className="price-installment">ou em até 48x de {estimateInstallment(car.price)} no financiamento</span>
-                  )}
                 </>
               ) : (
                 <span className="price-main">Consulte o valor</span>

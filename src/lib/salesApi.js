@@ -18,8 +18,10 @@ function fromRow(row) {
     transferDoneOn: row.transfer_done_on || null,
     transferNotes: row.transfer_notes || '',
     checklist: Array.isArray(row.checklist) ? row.checklist : [],
-    // Forma de pagamento ('' = não informada), banco e valores do financiamento
+    // Forma de pagamento ('' = não informada; 'misto' = mais de uma), banco e
+    // valores do financiamento; as partes do pagamento ficam em payments (seção 79)
     paymentMethod: row.payment_method || '',
+    payments: Array.isArray(row.payments) ? row.payments : [],
     bank: row.bank || '',
     downPayment: row.down_payment != null ? Number(row.down_payment) : null,
     financedAmount: row.financed_amount != null ? Number(row.financed_amount) : null,
@@ -69,9 +71,11 @@ export async function saveSaleForCar(carId, { sellerId, salePrice, saleDate, che
     sale_date: saleDate,
   }
   if (checklist !== undefined) row.checklist = checklist
+  // payment: { parts, method, bank, downPayment, financedAmount } (utils/salePayments.js)
   if (payment !== undefined) {
+    row.payments = payment.parts || []
     row.payment_method = payment.method || ''
-    row.bank = payment.method === 'financiado' ? payment.bank || '' : ''
+    row.bank = payment.bank || ''
     row.down_payment = payment.downPayment ?? null
     row.financed_amount = payment.financedAmount ?? null
   }

@@ -162,6 +162,8 @@ export async function deleteSeller(sellerId) {
 export function describeCommission(seller) {
   if (!seller) return '—'
   if (seller.commissionType === 'none') return 'Sem comissão'
+  // Faixas de comissão da loja (seção 78): o valor vem da faixa do carro vendido
+  if (seller.commissionType === 'tier') return 'Pela faixa do carro'
   if (seller.commissionType === 'fixed') {
     return `${seller.commissionValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} por carro`
   }

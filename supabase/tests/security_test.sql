@@ -2477,6 +2477,101 @@ select test.check('dono da plataforma: preço zero ou franquia fora de 0 a 100 s
   and test.denied($$update public.platform_settings set signature_free_monthly = 101 where id = 1$$));
 update public.platform_settings set signature_price = 1.00, signature_free_monthly = 5 where id = 1;
 
+-- ======================================== 77) despesas que se repetem (WB.Dev)
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: despesa com "Repetir todo mês" cria a despesa e o modelo',
+  test.allowed($$select create_platform_expense(jsonb_build_object(
+    'spent_on', (((now() at time zone 'America/Fortaleza')::date) - interval '2 months')::date,
+    'description', 'Assinatura do Claude', 'category', 'ferramentas', 'amount', 110), true)$$));
+select test.check('dono da plataforma: o modelo guarda o dia e o mês',
+  (select count(*) from platform_expense_recurrences where description = 'Assinatura do Claude' and active) = 1
+  and (select count(*) from platform_expenses where description = 'Assinatura do Claude' and recurrence_id is not null) = 1);
+select test.check('dono da plataforma: lança os meses que faltam até hoje',
+  test.allowed($$select platform_expenses_generate()$$));
+select test.check('dono da plataforma: três meses lançados, um por mês',
+  (select count(*) from platform_expenses where description = 'Assinatura do Claude') = 3
+  and (select count(distinct reference_month) from platform_expenses where description = 'Assinatura do Claude') = 3);
+select platform_expenses_generate();
+select test.check('dono da plataforma: rodar de novo não duplica',
+  (select count(*) from platform_expenses where description = 'Assinatura do Claude') = 3);
+select test.check('dono da plataforma: parar de repetir',
+  test.allowed($$update platform_expense_recurrences set active = false where description = 'Assinatura do Claude'$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin da loja: não vê nem cria despesa da plataforma, nem lança os meses',
+  test.count($$select * from platform_expense_recurrences$$) = 0
+  and test.denied($$select create_platform_expense(jsonb_build_object('spent_on', '2026-10-01', 'description', 'x', 'amount', 1), true)$$)
+  and test.denied($$select platform_expenses_generate()$$));
+reset role;
+set role anon;
+select test.check('anon: não lança despesa da plataforma',
+  test.denied($$select platform_expenses_generate()$$)
+  and test.denied($$select create_platform_expense('{}'::jsonb, false)$$));
+reset role;
+
+-- ======================================== 78) comissão por faixa de veículo
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: cria a faixa "Carro grande" (SUV e picape)',
+  test.allowed($$insert into commission_tiers (name, amount, categories) values ('Carro grande', 1000, '{suv,picape}')$$));
+select test.check('admin A: carro que vira SUV ganha a faixa sozinho',
+  test.allowed($$update cars set category = 'suv' where id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+select test.check('admin A: a faixa do carro é a "Carro grande"',
+  (select t.name from cars c join commission_tiers t on t.id = c.commission_tier_id where c.id = 'ca000000-0000-0000-0000-0000000000a1') = 'Carro grande');
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: vê as faixas, mas não cria faixa',
+  test.count($$select * from commission_tiers$$) = 1
+  and test.denied($$insert into commission_tiers (name, amount) values ('Minha faixa', 5000)$$));
+select test.try($$update staff_cars set commission_tier_id = null where id = 'ca000000-0000-0000-0000-0000000000a1'$$);
+reset role;
+select test.check('vendedor A: não tira a faixa do carro (continua a mesma)',
+  (select commission_tier_id is not null from public.cars where id = 'ca000000-0000-0000-0000-0000000000a1'));
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê as faixas da loja A', test.count($$select * from commission_tiers$$) = 0);
+reset role;
+select test.login(null);
+select test.check('faixa de outra loja é recusada no carro',
+  test.denied($$update public.cars set commission_tier_id = (select id from public.commission_tiers where name = 'Carro grande') where id = 'ca000000-0000-0000-0000-0000000000b2'$$));
+
+update public.sellers set commission_type = 'tier', commission_value = 0 where id = '5e000000-0000-0000-0000-000000000004';
+insert into public.sales (company_id, car_id, seller_id, sale_price, sale_date)
+values (test.company_a(), 'ca000000-0000-0000-0000-0000000000a1', '5e000000-0000-0000-0000-000000000004', 70000, current_date);
+select test.check('venda: vendedor "Pela faixa do carro" recebe o valor da faixa',
+  (select commission_type = 'tier' and commission_amount = 1000 from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+delete from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1';
+update public.sellers set commission_type = 'percent', commission_value = 0 where id = '5e000000-0000-0000-0000-000000000004';
+update public.cars set category = 'hatch', commission_tier_id = null where id = 'ca000000-0000-0000-0000-0000000000a1';
+
+-- ======================================== 79) vários pagamentos e contrato editado
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: venda com vários pagamentos (forma "misto")',
+  test.allowed($$update sales set payments = '[{"method":"pix","amount":20000},{"method":"financiamento","amount":30000,"bank":"BV","installments":48}]'::jsonb, payment_method = 'misto' where id = '5a000000-0000-0000-0000-0000000000a2'$$));
+select test.check('admin A: pagamentos fora de lista são recusados',
+  test.denied($$update sales set payments = '{}'::jsonb where id = '5a000000-0000-0000-0000-0000000000a2'$$));
+select test.check('admin A: contrato gravado com o texto editado (lista de parágrafos)',
+  test.allowed($$insert into contracts (company_id, company_name, company_document, buyer_name, buyer_document, sale_price, custom_text)
+    values (current_company_id(), 'Loja A', '1', 'Cliente', '2', 1000, '["CLÁUSULA 1ª", "texto"]'::jsonb)$$)
+  and test.denied($$insert into contracts (company_id, company_name, company_document, buyer_name, buyer_document, sale_price, custom_text)
+    values (current_company_id(), 'Loja A', '1', 'Cliente', '2', 1000, '"texto solto"'::jsonb)$$));
+reset role;
+
+-- ======================================== 80) aba Créditos do painel WB.Dev
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('dono da plataforma: créditos de cada loja com último uso e total gasto',
+  (select (x ? 'last_use_at') and (x ->> 'uses_total')::int >= 1 and (x ->> 'spent_total')::numeric > 0
+   from jsonb_array_elements(platform_plate_credits()) x where x ->> 'company_id' = test.company_a()::text));
+reset role;
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;

@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import DateInputBR from '../components/DateInputBR.jsx'
 import { formatCurrencyCents, parseIntBR, todayISO } from '../utils/carFormat.js'
 import { describeCommission } from '../lib/sellersApi.js'
+import { fetchCommissionTiers, tierCommission } from '../lib/commissionTiersApi.js'
 import { checklistSummary } from '../utils/saleChecklist.js'
 import { deliveryChecklistFromIntake } from '../utils/carChecklists.js'
-import { parseMoneyBR } from '../utils/financing.js'
 import CustomerPicker from './CustomerPicker.jsx'
 import SaleChecklist from './SaleChecklist.jsx'
 import PaymentFields, { paymentFromSale } from './PaymentFields.jsx'
@@ -13,6 +13,7 @@ import TradeInFields, { EMPTY_TRADE_IN } from './TradeInFields.jsx'
 import useConfirm from '../components/useConfirm.jsx'
 import { MoneyInput } from '../components/NumberInputs.jsx'
 import { parseAnoModelo } from '../utils/anoModelo.js'
+import { salePayment } from '../utils/salePayments.js'
 import '../components/ConfirmDialog.css'
 
 // Janela aberta ao marcar um carro como "Vendido": vendedor, cliente
@@ -60,6 +61,12 @@ export default function SaleDialog({
   const [checklist, setChecklist] = useState(() => deliveryChecklistFromIntake(checklistItems, car.intakeItems, initialSale?.checklist || []))
   const [generateTerm, setGenerateTerm] = useState(false)
   const [error, setError] = useState('')
+  // Faixas de comissão (seção 78): prévia de quem recebe "Pela faixa do carro"
+  const [tiers, setTiers] = useState([])
+
+  useEffect(() => {
+    if (showCommission) fetchCommissionTiers().then(setTiers).catch(() => {})
+  }, [showCommission])
 
   const seller = activeSellers.find((s) => s.id === sellerId)
   const priceValue = parseIntBR(price)
@@ -67,6 +74,7 @@ export default function SaleDialog({
   if (seller && priceValue) {
     if (seller.commissionType === 'percent') commissionPreview = Math.round(priceValue * seller.commissionValue) / 100
     else if (seller.commissionType === 'fixed') commissionPreview = seller.commissionValue
+    else if (seller.commissionType === 'tier') commissionPreview = tierCommission(tiers, car.commissionTierId)
     else commissionPreview = 0
   }
 
@@ -120,12 +128,7 @@ export default function SaleDialog({
       saleDate: date,
       checklist,
       generateTerm,
-      payment: {
-        method: payment.method,
-        bank: payment.bank.trim(),
-        downPayment: payment.method === 'financiado' ? parseMoneyBR(payment.downPayment) : null,
-        financedAmount: payment.method === 'financiado' ? parseMoneyBR(payment.financedAmount) : null,
-      },
+      payment: salePayment(payment),
       tradeIn: tradeInData,
     })
   }
@@ -178,17 +181,40 @@ export default function SaleDialog({
 
           {seller && showCommission && (
             <div className="sale-dialog-commission">
-              <span>Comissão ({describeCommission(seller)})</span>
+              <span>
+                Comissão ({describeCommission(seller)}
+                {seller.commissionType === 'tier' && car.commissionTierId ? `: ${tiers.find((t) => t.id === car.commissionTierId)?.name || ''}` : ''})
+              </span>
               <strong>{commissionPreview != null ? formatCurrencyCents(commissionPreview) : '—'}</strong>
             </div>
+          )}
+          {seller && showCommission && seller.commissionType === 'tier' && !car.commissionTierId && (
+            <span className="sale-dialog-note">Este carro está sem faixa de comissão: escolha a faixa no cadastro do carro antes de salvar a venda.</span>
           )}
 
           <div className="sale-dialog-section">
             <span className="admin-field-label">Pagamento</span>
-            <PaymentFields value={payment} onChange={setPayment} banks={banks} disabled={saving} />
+            <PaymentFields
+              value={payment}
+              onChange={setPayment}
+              banks={banks}
+              disabled={saving}
+              salePrice={priceValue}
+              tradeInValue={tradeIn.enabled ? parseIntBR(tradeIn.value) || 0 : initialSale?.tradeInValue || 0}
+            />
           </div>
 
-          {!initialSale && (
+          {/* Troca: na venda nova e também ao editar uma venda sem troca (o lojista
+              esqueceu de lançar o carro que entrou como parte do pagamento) */}
+          {initialSale?.tradeInCarId ? (
+            <div className="sale-dialog-section">
+              <span className="admin-field-label">Carro da troca</span>
+              <p className="sale-dialog-note">
+                Esta venda já tem um carro recebido na troca
+                {showCommission && initialSale.tradeInValue != null ? `, por ${formatCurrencyCents(initialSale.tradeInValue)}` : ''}. Ele está no estoque.
+              </p>
+            </div>
+          ) : (
             <div className="sale-dialog-section">
               <TradeInFields value={tradeIn} onChange={setTradeIn} disabled={saving} />
             </div>

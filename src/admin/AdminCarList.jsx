@@ -32,6 +32,7 @@ import ChecklistSettingsDialog from './ChecklistSettingsDialog.jsx'
 import StatusMenu from './StatusMenu.jsx'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
+import { formatMileage } from '../utils/vehicleTypes.js'
 
 // Etiqueta de cada portal (OLX, seção 59; Webmotors, seção 61): só com a conta
 // conectada e quando diz algo útil
@@ -198,7 +199,7 @@ function StockCard({ row, busy, alertDefault, canDelete, canSeeCosts, canSeeSale
         <div className="stock-card-title">
           <strong>{car.brand} {car.model}</strong>
           <span>{car.version} · {car.modelYear}</span>
-          <span><span className="admin-table-capitalize">{car.category}</span> · {car.km.toLocaleString('pt-BR')} km</span>
+          <span>{vehicleCategoryLabel(car.category)} · {formatMileage(car)}</span>
           {car.plate && <span className="car-plate">{car.plate.toUpperCase()}</span>}
           <span className="stock-card-views" title="Visualizações da página do carro no site (desde que o contador foi ativado)">
             <Eye size={13} /> {formatViews(views)}
@@ -339,7 +340,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   )}
                   <ReservationLine reservation={reservation} className="admin-table-sub" />
                 </td>
-                <td>{car.km.toLocaleString('pt-BR')} km</td>
+                <td>{formatMileage(car)}</td>
                 <td className={isStockStale(car, alertDefault) ? 'stock-days-stale' : ''}>
                   {daysInStock(car)} {daysInStock(car) === 1 ? 'dia' : 'dias'}
                 </td>
@@ -395,7 +396,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
                   {car.plate && <> · <span className="car-plate">{car.plate.toUpperCase()}</span></>}
                 </span>
                 <span className="admin-card-meta">
-                  {vehicleCategoryLabel(car.category)} · {car.km.toLocaleString('pt-BR')} km ·{' '}
+                  {vehicleCategoryLabel(car.category)} · {formatMileage(car)} ·{' '}
                   <span className={isStockStale(car, alertDefault) ? 'stock-days-stale' : ''}>
                     {daysInStock(car)} {daysInStock(car) === 1 ? 'dia' : 'dias'} em estoque
                   </span>{' '}

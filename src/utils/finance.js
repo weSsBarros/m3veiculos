@@ -229,10 +229,19 @@ export function averageMonthlyCost(expenses = [], today = new Date()) {
   return sumBy(expenses.filter((e) => window.includes(monthOfDate(e.spentOn))), (e) => e.amount) / window.length
 }
 
-// Previsão a partir do mês que vem, com os clientes e as mensalidades de hoje
-export function forecast({ clients = [], expenses = [], today = new Date(), horizons = [3, 6, 12] }) {
+// Despesas fixas do mês: as que se repetem todo mês e estão ativas (seção 77)
+export function recurringMonthlyCost(recurrences = []) {
+  return sumBy(recurrences.filter((r) => r.active !== false), (r) => r.amount)
+}
+
+// Previsão a partir do mês que vem, com os clientes e as mensalidades de hoje.
+// Com as despesas que se repetem: elas entram pelo valor de hoje e as avulsas
+// pela média dos últimos 12 meses.
+export function forecast({ clients = [], expenses = [], recurrences = [], today = new Date(), horizons = [3, 6, 12] }) {
   const cur = currentMonth(today)
-  const monthlyCost = averageMonthlyCost(expenses, today)
+  const monthlyCost = recurrences.length
+    ? averageMonthlyCost(expenses.filter((e) => !e.recurrenceId), today) + recurringMonthlyCost(recurrences)
+    : averageMonthlyCost(expenses, today)
   return horizons.map((n) => {
     const months = monthsBetween(addMonths(cur, 1), addMonths(cur, n))
     const revenue = sumBy(months, (m) => expectedForMonth(clients, m))

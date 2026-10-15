@@ -9713,7 +9713,406 @@ end $$;
 revoke execute on function public.platform_plate_credits() from anon, public;
 grant execute on function public.platform_plate_credits() to authenticated;
 
--- 76) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 76) Conferência: passou para a seção 81, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 77) Despesas que se repetem todo mês no painel WB.Dev (pedido do Wesley em 14/10/2026)
+--
+-- Ex.: a assinatura do Claude, a hospedagem mensal. Na despesa, "Repetir todo
+-- mês" guarda um modelo (platform_expense_recurrences) e o sistema lança a
+-- despesa de cada mês no mesmo dia (29 a 31: último dia nos meses curtos) quando
+-- o dia chega: ao abrir o Financeiro e todo dia pelo pg_cron. Editar uma despesa
+-- lançada muda só aquele mês (ex.: o dólar variou); editar o modelo muda os
+-- próximos meses; "Parar de repetir" desliga o modelo (as já lançadas ficam).
+create table if not exists public.platform_expense_recurrences (
+  id uuid primary key default gen_random_uuid(),
+  description text not null check (char_length(btrim(description)) between 1 and 120),
+  category text not null default 'outros'
+    check (category in ('hospedagem', 'dominios', 'ferramentas', 'marketing', 'impostos', 'pessoal', 'outros')),
+  amount numeric(10,2) not null check (amount > 0),
+  day smallint not null check (day between 1 and 31),
+  company_id uuid references public.companies(id) on delete set null,
+  notes text not null default '',
+  -- último mês já lançado (dia 1 do mês)
+  last_generated_month date not null,
+  active boolean not null default true,
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint platform_expense_recurrences_month_check
+    check (last_generated_month = date_trunc('month', last_generated_month)::date)
+);
+
+alter table public.platform_expenses add column if not exists recurrence_id uuid references public.platform_expense_recurrences(id) on delete set null;
+alter table public.platform_expenses add column if not exists reference_month date;
+alter table public.platform_expenses drop constraint if exists platform_expenses_reference_month_check;
+alter table public.platform_expenses add constraint platform_expenses_reference_month_check
+  check (reference_month is null or reference_month = date_trunc('month', reference_month)::date);
+create unique index if not exists platform_expenses_recurrence_month_idx
+  on public.platform_expenses (recurrence_id, reference_month) where recurrence_id is not null;
+
+drop trigger if exists platform_expense_recurrences_set_updated_at on public.platform_expense_recurrences;
+create trigger platform_expense_recurrences_set_updated_at
+before update on public.platform_expense_recurrences
+for each row execute function public.set_updated_at();
+
+alter table public.platform_expense_recurrences enable row level security;
+revoke all on public.platform_expense_recurrences from anon;
+
+drop policy if exists "Platform admins manage platform expense recurrences" on public.platform_expense_recurrences;
+create policy "Platform admins manage platform expense recurrences"
+on public.platform_expense_recurrences for all
+to authenticated
+using (public.is_platform_admin())
+with check (public.is_platform_admin());
+
+-- Lança as despesas dos meses que faltam de cada modelo ativo, só quando o dia
+-- daquele mês já chegou. Pelo painel (dono da plataforma) ou pelo cron (sem login).
+create or replace function public.platform_expenses_generate()
+returns integer
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_today date := (now() at time zone 'America/Fortaleza')::date;
+  v_month_now date := date_trunc('month', (now() at time zone 'America/Fortaleza')::date)::date;
+  v_count integer := 0;
+  v_month date;
+  v_due date;
+  v_last date;
+  r public.platform_expense_recurrences%rowtype;
+begin
+  if auth.uid() is not null and not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  for r in
+    select * from public.platform_expense_recurrences x
+    where x.active and x.last_generated_month < v_month_now
+    for update skip locked
+  loop
+    v_last := r.last_generated_month;
+    v_month := (r.last_generated_month + interval '1 month')::date;
+    while v_month <= v_month_now loop
+      v_due := v_month + (least(r.day, extract(day from (v_month + interval '1 month - 1 day'))::integer) - 1);
+      exit when v_due > v_today;
+      insert into public.platform_expenses (spent_on, description, category, amount, company_id, notes, recurrence_id, reference_month, created_by)
+      values (v_due, r.description, r.category, r.amount, r.company_id, r.notes, r.id, v_month, r.created_by)
+      on conflict (recurrence_id, reference_month) where recurrence_id is not null do nothing;
+      if found then
+        v_count := v_count + 1;
+      end if;
+      v_last := v_month;
+      v_month := (v_month + interval '1 month')::date;
+    end loop;
+    if v_last <> r.last_generated_month then
+      update public.platform_expense_recurrences set last_generated_month = v_last where id = r.id;
+    end if;
+  end loop;
+  return v_count;
+end $$;
+revoke execute on function public.platform_expenses_generate() from anon, public;
+grant execute on function public.platform_expenses_generate() to authenticated;
+
+-- Nova despesa (e o modelo, com "Repetir todo mês") de uma vez só
+create or replace function public.create_platform_expense(p jsonb, p_repeat boolean default false)
+returns public.platform_expenses
+language plpgsql security invoker set search_path = public
+as $$
+declare
+  v_date date := (p ->> 'spent_on')::date;
+  v_month date := date_trunc('month', (p ->> 'spent_on')::date)::date;
+  v_recurrence uuid;
+  v_row public.platform_expenses;
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  if v_date is null then
+    raise exception 'Informe a data da despesa' using errcode = '22023';
+  end if;
+  if p_repeat then
+    insert into public.platform_expense_recurrences (description, category, amount, day, company_id, notes, last_generated_month)
+    values (p ->> 'description', coalesce(nullif(p ->> 'category', ''), 'outros'), (p ->> 'amount')::numeric,
+            extract(day from v_date)::smallint, nullif(p ->> 'company_id', '')::uuid, coalesce(p ->> 'notes', ''), v_month)
+    returning id into v_recurrence;
+  end if;
+  insert into public.platform_expenses (spent_on, description, category, amount, company_id, notes, recurrence_id, reference_month)
+  values (v_date, p ->> 'description', coalesce(nullif(p ->> 'category', ''), 'outros'), (p ->> 'amount')::numeric,
+          nullif(p ->> 'company_id', '')::uuid, coalesce(p ->> 'notes', ''), v_recurrence, case when v_recurrence is not null then v_month end)
+  returning * into v_row;
+  return v_row;
+end $$;
+revoke execute on function public.create_platform_expense(jsonb, boolean) from anon, public;
+grant execute on function public.create_platform_expense(jsonb, boolean) to authenticated;
+
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
+    create extension if not exists pg_cron with schema pg_catalog;
+    perform cron.schedule('despesas-wbdev', '20 3 * * *', 'select public.platform_expenses_generate()');
+  end if;
+end $$;
+
+-- 78) Comissão por faixa de veículo (pedido do Wesley em 14/10/2026) -------------
+--
+-- Algumas lojas pagam a comissão pelo tamanho do veículo (ex.: carro grande
+-- R$ 1.000, carro pequeno R$ 500). O admin cria as faixas da loja (nome, valor e
+-- as categorias que já entram nela) e cada carro recebe a sua no cadastro: o
+-- carro novo ganha sozinho a faixa da categoria, e só admin e gerente trocam (o
+-- vendedor mexeria na própria comissão). Quem tem a comissão "Pela faixa do
+-- carro" (sellers.commission_type = 'tier') recebe o valor da faixa do carro
+-- vendido; carro sem faixa = sem comissão (a janela da venda avisa).
+create table if not exists public.commission_tiers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null default public.current_company_id() references public.companies(id) on delete cascade,
+  name text not null check (char_length(btrim(name)) between 1 and 60),
+  amount numeric(12, 2) not null check (amount >= 0 and amount < 10000000),
+  categories text[] not null default '{}',
+  position smallint not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists commission_tiers_company_idx on public.commission_tiers (company_id, position);
+
+drop trigger if exists commission_tiers_set_updated_at on public.commission_tiers;
+create trigger commission_tiers_set_updated_at
+before update on public.commission_tiers
+for each row execute function public.set_updated_at();
+
+alter table public.commission_tiers enable row level security;
+revoke all on public.commission_tiers from anon;
+
+drop policy if exists "Staff read commission tiers" on public.commission_tiers;
+create policy "Staff read commission tiers"
+on public.commission_tiers for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Admins manage commission tiers" on public.commission_tiers;
+create policy "Admins manage commission tiers"
+on public.commission_tiers for all
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop trigger if exists commission_tiers_log_activity on public.commission_tiers;
+create trigger commission_tiers_log_activity after insert or update or delete on public.commission_tiers
+for each row execute function public.log_activity();
+
+alter table public.cars add column if not exists commission_tier_id uuid references public.commission_tiers(id) on delete set null;
+
+-- Faixa do carro: só admin e gerente escolhem; carro novo (ou que mudou de
+-- categoria) sem faixa ganha a da categoria; a faixa tem que ser da loja.
+create or replace function public.cars_commission_tier()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is not null and not public.is_company_staff() then
+    if tg_op = 'INSERT' then
+      new.commission_tier_id := null;
+    elsif new.commission_tier_id is distinct from old.commission_tier_id then
+      new.commission_tier_id := old.commission_tier_id;
+    end if;
+  end if;
+  if new.commission_tier_id is null and (tg_op = 'INSERT' or new.category is distinct from old.category) then
+    select t.id into new.commission_tier_id
+    from public.commission_tiers t
+    where t.company_id = new.company_id and t.active and new.category = any (t.categories)
+    order by t.position, t.created_at
+    limit 1;
+  end if;
+  if new.commission_tier_id is not null and not exists (
+    select 1 from public.commission_tiers t where t.id = new.commission_tier_id and t.company_id = new.company_id
+  ) then
+    raise exception 'Faixa de comissão de outra loja' using errcode = '23514';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists cars_commission_tier on public.cars;
+create trigger cars_commission_tier before insert or update of commission_tier_id, category, company_id on public.cars
+for each row execute function public.cars_commission_tier();
+
+-- Carros que já existiam (ou cadastrados antes da faixa): a faixa da categoria
+create or replace function public.commission_tiers_apply()
+returns integer
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_count integer;
+begin
+  if not public.is_company_admin() then
+    raise exception 'Acesso restrito ao administrador da loja' using errcode = '42501';
+  end if;
+  update public.cars c
+  set commission_tier_id = (
+    select t.id from public.commission_tiers t
+    where t.company_id = c.company_id and t.active and c.category = any (t.categories)
+    order by t.position, t.created_at limit 1)
+  where c.company_id = public.current_company_id()
+    and c.commission_tier_id is null
+    and c.status <> 'vendido'
+    and exists (select 1 from public.commission_tiers t where t.company_id = c.company_id and t.active and c.category = any (t.categories));
+  get diagnostics v_count = row_count;
+  return v_count;
+end $$;
+revoke execute on function public.commission_tiers_apply() from anon, public;
+grant execute on function public.commission_tiers_apply() to authenticated;
+
+alter table public.sellers drop constraint if exists sellers_commission_type_check;
+alter table public.sellers add constraint sellers_commission_type_check check (commission_type in ('percent', 'fixed', 'none', 'tier'));
+
+create or replace function public.sales_compute_commission()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  s public.sellers%rowtype;
+  v_tier numeric(12, 2);
+begin
+  if new.seller_id is null then
+    new.commission_type := null;
+    new.commission_value := null;
+    new.commission_amount := 0;
+    return new;
+  end if;
+  -- Numa edição, só recalcula se trocou o vendedor ou o valor da venda.
+  if tg_op = 'UPDATE' and new.seller_id is not distinct from old.seller_id
+     and new.sale_price = old.sale_price then
+    new.commission_type := old.commission_type;
+    new.commission_value := old.commission_value;
+    new.commission_amount := old.commission_amount;
+    return new;
+  end if;
+  select * into s from public.sellers where id = new.seller_id and company_id = new.company_id;
+  if not found then
+    raise exception 'Vendedor inválido para esta empresa';
+  end if;
+  new.commission_type := s.commission_type;
+  new.commission_value := s.commission_value;
+  if s.commission_type = 'tier' then
+    -- Pela faixa do carro vendido (sem faixa: sem comissão)
+    select t.amount into v_tier
+    from public.cars c join public.commission_tiers t on t.id = c.commission_tier_id
+    where c.id = new.car_id;
+    new.commission_value := coalesce(v_tier, 0);
+  end if;
+  new.commission_amount := case
+    when s.commission_type = 'percent' then round(new.sale_price * s.commission_value / 100, 2)
+    when s.commission_type in ('fixed', 'tier') then new.commission_value
+    else 0
+  end;
+  return new;
+end;
+$$;
+
+-- Estoque da equipe: a staff_cars ganha a faixa (o gatilho guarda a regra de quem troca)
+drop view if exists public.staff_cars;
+create view public.staff_cars as
+select
+  id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, doors,
+  category, condition, price, original_price, badge, status, highlights, description, images,
+  featured, hidden, sold_at, plate, chassis, renavam, documents, customer_id, stock_alert_days,
+  company_id, created_at, updated_at, internal_notes, intake_items, inspection,
+  entry_type, owner_customer_id, whatsapp_seller_id,
+  renave_entry_status, renave_entry_on, renave_entry_protocol,
+  renave_exit_status, renave_exit_on, renave_exit_protocol,
+  olx_publish, olx_catalog, webmotors_publish, webmotors_catalog, fipe,
+  commission_tier_id
+from public.cars
+where company_id = public.current_company_id() and public.can_edit_stock()
+with local check option;
+
+revoke all on public.staff_cars from anon, authenticated, public;
+grant select, insert, update on public.staff_cars to authenticated;
+
+-- 79) Venda com vários pagamentos e contrato editado (pedido do Wesley em 14/10/2026)
+--
+-- * sales.payments: as partes do pagamento ([{ method, amount, bank, installments,
+--   note }]): entrada à vista, financiamento, cartão... O carro da troca continua
+--   em trade_in_car_id/trade_in_value. Com mais de uma forma, payment_method fica
+--   'misto'; com uma só, a de sempre (relatórios e listas antigas continuam).
+-- * contracts.custom_text: o texto do contrato padrão editado na tela Contratos
+--   antes de emitir (lista de parágrafos); o "Baixar" do histórico usa ele.
+--   Contrato de modelo próprio editado: o Word editado vai para o Storage
+--   (<loja>/contratos-editados/...) e fica em template_file_path.
+alter table public.sales add column if not exists payments jsonb not null default '[]';
+alter table public.sales drop constraint if exists sales_payments_check;
+alter table public.sales add constraint sales_payments_check
+  check (jsonb_typeof(payments) = 'array' and jsonb_array_length(payments) <= 12);
+alter table public.sales drop constraint if exists sales_payment_method_check;
+alter table public.sales add constraint sales_payment_method_check
+  check (payment_method in ('', 'a_vista', 'financiado', 'financiamento_proprio', 'consorcio', 'outro', 'misto'));
+
+alter table public.contracts add column if not exists custom_text jsonb;
+alter table public.contracts drop constraint if exists contracts_custom_text_check;
+alter table public.contracts add constraint contracts_custom_text_check
+  check (custom_text is null or (jsonb_typeof(custom_text) = 'array' and jsonb_array_length(custom_text) <= 200));
+
+-- A equipe que gera contratos guarda o Word editado de um contrato (só nessa pasta)
+drop policy if exists "Staff upload edited contracts" on storage.objects;
+create policy "Staff upload edited contracts"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'contract-templates'
+  and (storage.foldername(name))[1] = public.current_company_id()::text
+  and (storage.foldername(name))[2] = 'contratos-editados'
+  and public.can_edit_stock()
+);
+
+-- 80) Aba "Créditos" do painel WB.Dev (pedido do Wesley em 14/10/2026) ----------
+--
+-- O saldo de cada loja ganha o último uso, o que foi gasto desde o início e as
+-- compras confirmadas (a aba mostra quem está usando, quem parou e quem está sem
+-- saldo).
+create or replace function public.platform_plate_credits()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'company_id', c.id, 'name', c.name, 'slug', c.slug, 'is_demo', c.is_demo,
+      'balance', coalesce(t.balance, 0), 'queries_30d', coalesce(t.queries_30d, 0), 'docs_30d', coalesce(t.docs_30d, 0),
+      'signatures_30d', coalesce(t.signatures_30d, 0),
+      'spent_30d', coalesce(t.spent_30d, 0), 'bought_total', coalesce(t.bought_total, 0),
+      'last_recharge_at', t.last_recharge_at,
+      'spent_total', coalesce(t.spent_total, 0), 'uses_total', coalesce(t.uses_total, 0),
+      'last_use_at', t.last_use_at, 'bonus_total', coalesce(t.bonus_total, 0),
+      'orders_confirmed', coalesce(o.confirmed, 0), 'orders_pending', coalesce(o.pending, 0)) order by c.name), '[]'::jsonb)
+    from public.companies c
+    left join lateral (
+      select sum(l.amount) as balance,
+             count(*) filter (where l.kind = 'consulta' and l.created_at > now() - interval '30 days') as queries_30d,
+             count(*) filter (where l.kind = 'documento' and l.created_at > now() - interval '30 days') as docs_30d,
+             count(*) filter (where l.kind = 'assinatura' and l.created_at > now() - interval '30 days') as signatures_30d,
+             -sum(l.amount) filter (where l.kind in ('consulta', 'documento', 'assinatura') and l.created_at > now() - interval '30 days') as spent_30d,
+             sum(l.amount) filter (where l.kind = 'recarga') as bought_total,
+             max(l.created_at) filter (where l.kind = 'recarga') as last_recharge_at,
+             -sum(l.amount) filter (where l.kind in ('consulta', 'documento', 'assinatura')) as spent_total,
+             count(*) filter (where l.kind in ('consulta', 'documento', 'assinatura')) as uses_total,
+             max(l.created_at) filter (where l.kind in ('consulta', 'documento', 'assinatura')) as last_use_at,
+             sum(l.amount) filter (where l.kind = 'ajuste' and l.amount > 0) as bonus_total
+      from public.plate_credit_ledger l where l.company_id = c.id
+    ) t on true
+    left join lateral (
+      select count(*) filter (where x.status = 'confirmado') as confirmed,
+             count(*) filter (where x.status = 'pendente') as pending
+      from public.plate_credit_orders x where x.company_id = c.id
+    ) o on true
+    where exists (select 1 from public.plate_credit_ledger l where l.company_id = c.id)
+       or exists (select 1 from public.plate_credit_orders x where x.company_id = c.id)
+  );
+end $$;
+revoke execute on function public.platform_plate_credits() from anon, public;
+grant execute on function public.platform_plate_credits() to authenticated;
+
+-- 81) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

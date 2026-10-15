@@ -136,8 +136,10 @@ function seo_for_path($path, $config)
         }
         $title = seo_car_title($car);
         $url = $base . '/carro/' . rawurlencode($car['slug']);
+        // Jet ski conta horas de uso no lugar da quilometragem (utils/vehicleTypes.js)
+        $hours = ($car['category'] ?? '') === 'jetski';
         $facts = array_filter([
-            isset($car['km']) && $car['km'] !== '' ? number_format((float) $car['km'], 0, ',', '.') . ' km' : '',
+            isset($car['km']) && $car['km'] !== '' ? number_format((float) $car['km'], 0, ',', '.') . ($hours ? ' h' : ' km') : '',
             $car['transmission'] ?? '',
             $car['fuel'] ?? '',
             $car['color'] ?? '',
@@ -166,7 +168,7 @@ function seo_for_path($path, $config)
         $years = array_values(array_filter(array_map('trim', explode('/', (string) ($car['model_year'] ?? '')))));
         if ($years) $ld['vehicleModelDate'] = end($years);
         if (!empty($car['year'])) $ld['productionDate'] = (string) $car['year'];
-        if (isset($car['km']) && $car['km'] !== '') $ld['mileageFromOdometer'] = ['@type' => 'QuantitativeValue', 'value' => (float) $car['km'], 'unitCode' => 'KMT'];
+        if (!$hours && isset($car['km']) && $car['km'] !== '') $ld['mileageFromOdometer'] = ['@type' => 'QuantitativeValue', 'value' => (float) $car['km'], 'unitCode' => 'KMT'];
         if (!empty($car['color'])) $ld['color'] = $car['color'];
         if (!empty($car['transmission'])) $ld['vehicleTransmission'] = $car['transmission'];
         if (!empty($car['fuel'])) $ld['fuelType'] = $car['fuel'];

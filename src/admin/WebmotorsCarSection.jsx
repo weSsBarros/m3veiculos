@@ -7,6 +7,7 @@ import { parseIntBR } from '../utils/carFormat.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import WebmotorsCatalogPicker from './WebmotorsCatalogPicker.jsx'
 import WebmotorsPreviewDialog from './WebmotorsPreviewDialog.jsx'
+import { isCarCategory } from '../utils/vehicleTypes.js'
 
 // Seção "Webmotors" do cadastro do carro (seção 61): "Publicar na Webmotors", a
 // marca, o modelo e a versão da Webmotors (e, se quiser, cor, câmbio e
@@ -45,11 +46,15 @@ export default function WebmotorsCarSection({ car, carId, noPrice, onChange }) {
 
   if (isStoreTabHidden('portais') || !account?.connected) return null
 
-  if (car.category === 'moto') {
+  if (!isCarCategory(car.category)) {
     return (
       <section className="admin-form-section">
         <h2>Webmotors</h2>
-        <p className="admin-form-note">A Webmotors usa outro serviço para motos: este cadastro não vai para a Webmotors.</p>
+        <p className="admin-form-note">
+          {car.category === 'moto'
+            ? 'A Webmotors usa outro serviço para motos: este cadastro não vai para a Webmotors.'
+            : 'A integração com a Webmotors é só de carros: este cadastro não vai para a Webmotors.'}
+        </p>
       </section>
     )
   }

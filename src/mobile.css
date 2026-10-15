@@ -1,0 +1,10 @@
+/* Celular (site e painel): o iPhone dá zoom ao tocar num campo com letra menor
+   que 16px e a página não volta sozinha. No toque, todo campo fica com pelo
+   menos 16px. Igual em todas as lojas (importado no main.jsx). */
+@media (pointer: coarse), (max-width: 640px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  select,
+  textarea {
+    font-size: max(16px, 1em) !important;
+  }
+}

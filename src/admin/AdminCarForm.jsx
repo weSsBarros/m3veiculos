@@ -14,12 +14,11 @@ import CustomerPicker from './CustomerPicker.jsx'
 import PaymentFields, { paymentFromSale, EMPTY_PAYMENT } from './PaymentFields.jsx'
 import { IntakeChecklist, InspectionChecklist } from './CarChecklists.jsx'
 import { buildIntake, buildInspection, compactChecklist } from '../utils/carChecklists.js'
-import { parseMoneyBR } from '../utils/financing.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import VehicleAutofill from './VehicleAutofill.jsx'
 import { AUTOFILL_SOURCES, fipePriceNote } from '../utils/preenchimento.js'
 import { vehicleDocWarnings } from '../utils/documentosVeiculo.js'
-import { formatCurrency } from '../utils/carFormat.js'
+import { formatCurrency, formatCurrencyCents } from '../utils/carFormat.js'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -48,6 +47,9 @@ import OlxCarSection from './OlxCarSection.jsx'
 import WebmotorsCarSection from './WebmotorsCarSection.jsx'
 import NewCarTabs from './NewCarTabs.jsx'
 import { olxSellerPhones } from '../utils/olxStatus.js'
+import { vehicleHasDoors, mileageLabel, mileageUnit } from '../utils/vehicleTypes.js'
+import { fetchCommissionTiers } from '../lib/commissionTiersApi.js'
+import { salePayment } from '../utils/salePayments.js'
 
 const EMPTY_CAR = {
   brand: '',
@@ -85,6 +87,7 @@ const EMPTY_CAR = {
   entryType: 'showroom',
   ownerCustomerId: '',
   whatsappSellerId: '',
+  commissionTierId: '',
   renaveEntryStatus: 'pendente',
   renaveEntryOn: '',
   renaveEntryProtocol: '',
@@ -151,6 +154,10 @@ export default function AdminCarForm() {
   const [noPrice, setNoPrice] = useState(false)
   const [customers, setCustomers] = useState([])
   const [sellers, setSellers] = useState([])
+  // Faixas de comissão da loja (seção 78); a faixa do carro novo segue a categoria
+  // até a pessoa escolher outra
+  const [tiers, setTiers] = useState([])
+  const [tierTouched, setTierTouched] = useState(false)
   const [existingSale, setExistingSale] = useState(null)
   const [sale, setSale] = useState({ sellerId: '', price: '', date: todayISO() })
   // Todas as fotos que passaram pelo formulário (gravadas ou enviadas agora):
@@ -179,6 +186,7 @@ export default function AdminCarForm() {
   useEffect(() => {
     fetchAllCustomers().then(setCustomers).catch(() => {})
     fetchSellers().then(setSellers).catch(() => {})
+    fetchCommissionTiers().then(setTiers).catch(() => {})
     fetchAllContractTemplates()
       .then((list) => {
         const entry = list.filter((t) => t.kind === 'entrada')
@@ -209,7 +217,7 @@ export default function AdminCarForm() {
     if (!isEditing) return
     fetchCarById(id).then((found) => {
       if (found) {
-        setCar({ ...found, modelYear: anoModeloFromSaved(found.modelYear, found.year), customerId: found.customerId || '', ownerCustomerId: found.ownerCustomerId || '', whatsappSellerId: found.whatsappSellerId || '' })
+        setCar({ ...found, modelYear: anoModeloFromSaved(found.modelYear, found.year), customerId: found.customerId || '', ownerCustomerId: found.ownerCustomerId || '', whatsappSellerId: found.whatsappSellerId || '', commissionTierId: found.commissionTierId || '' })
         found.images.forEach((url) => seenImages.current.add(url))
         setOriginalStatus(found.status)
         if (found.status === 'reservado') {
@@ -294,6 +302,10 @@ export default function AdminCarForm() {
     update('images', images)
   }
 
+  // Faixa de comissão: no carro novo segue a categoria até a pessoa escolher outra
+  const suggestedTier = tiers.find((t) => t.active && t.categories.includes(car.category))
+  const tierValue = !isEditing && !tierTouched ? suggestedTier?.id || '' : car.commissionTierId || ''
+
   async function handleSubmit(e) {
     e.preventDefault()
     setSaving(true)
@@ -360,9 +372,10 @@ export default function AdminCarForm() {
       year: anoModelo.year,
       modelYear: anoModelo.modelYear,
       km: parseIntBR(car.km),
-      doors: car.category === 'moto' ? 0 : Number(car.doors) || 4,
+      doors: vehicleHasDoors(car.category) ? Number(car.doors) || 4 : 0,
       ownerCustomerId: car.ownerCustomerId || null,
       whatsappSellerId: car.whatsappSellerId || null,
+      commissionTierId: tierValue || null,
       price: noPrice ? null : parseIntBR(car.price),
       originalPrice: !noPrice && car.originalPrice ? parseIntBR(car.originalPrice) : null,
       purchasePrice: car.purchasePrice ? parseIntBR(car.purchasePrice) : null,
@@ -407,12 +420,7 @@ export default function AdminCarForm() {
           sellerId: isSeller ? me?.id || null : sale.sellerId || null,
           salePrice,
           saleDate: sale.date,
-          payment: {
-            method: payment.method,
-            bank: payment.bank.trim(),
-            downPayment: payment.method === 'financiado' ? parseMoneyBR(payment.downPayment) : null,
-            financedAmount: payment.method === 'financiado' ? parseMoneyBR(payment.financedAmount) : null,
-          },
+          payment: salePayment(payment),
           insertOnly: isSeller && !existingSale,
         })
       } else if (existingSale) {
@@ -687,8 +695,8 @@ export default function AdminCarForm() {
               {autofillNote('modelYear')}
             </label>
             <label>
-              Quilometragem
-              <KmInput required value={car.km} onChange={(v) => update('km', v)} />
+              {mileageLabel(car.category)}
+              <KmInput required affix={mileageUnit(car.category)} value={car.km} onChange={(v) => update('km', v)} />
             </label>
             <label className={autofillClass('transmission')}>
               Câmbio
@@ -710,7 +718,7 @@ export default function AdminCarForm() {
               <input required value={car.color} onChange={(e) => update('color', e.target.value)} />
               {autofillNote('color')}
             </label>
-            {car.category !== 'moto' && (
+            {vehicleHasDoors(car.category) && (
               <label className={autofillClass('doors')}>
                 Portas
                 <input type="number" min="2" max="5" required value={car.doors || 4} onChange={(e) => update('doors', e.target.value)} />
@@ -858,7 +866,14 @@ export default function AdminCarForm() {
                   disabled={saving}
                 />
               </div>
-              <PaymentFields value={payment} onChange={setPayment} banks={lists.banks} disabled={saving} />
+              <PaymentFields
+                value={payment}
+                onChange={setPayment}
+                banks={lists.banks}
+                disabled={saving}
+                salePrice={parseIntBR(sale.price)}
+                tradeInValue={existingSale?.tradeInValue || 0}
+              />
             </div>
           )}
 
@@ -919,6 +934,23 @@ export default function AdminCarForm() {
                   .map((s) => <option key={s.id} value={s.id}>{s.name}{s.phone ? ` · ${s.phone}` : ' (sem telefone)'}</option>)}
               </select>
             </label>
+            {isStaff && tiers.length > 0 && (
+              <label>
+                Faixa de comissão
+                <select
+                  value={tierValue}
+                  onChange={(e) => {
+                    setTierTouched(true)
+                    update('commissionTierId', e.target.value)
+                  }}
+                >
+                  <option value="">Sem faixa (sem comissão para quem recebe pela faixa)</option>
+                  {tiers
+                    .filter((t) => t.active || t.id === car.commissionTierId)
+                    .map((t) => <option key={t.id} value={t.id}>{t.name} · {formatCurrencyCents(t.amount)}</option>)}
+                </select>
+              </label>
+            )}
             <CustomerPicker
               customers={customers}
               value={car.ownerCustomerId || ''}

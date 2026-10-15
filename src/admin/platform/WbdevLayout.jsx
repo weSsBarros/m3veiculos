@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Users,
   Receipt,
+  Coins,
   Wallet,
   LifeBuoy,
   Contact,
@@ -36,6 +37,7 @@ const NAV = [
   { to: '/wbdev', end: true, icon: LayoutDashboard, label: 'Visão geral' },
   { to: '/wbdev/clientes', icon: Users, label: 'Clientes' },
   { to: '/wbdev/cobranca', icon: Receipt, label: 'Cobrança', badge: 'claims' },
+  { to: '/wbdev/creditos', icon: Coins, label: 'Créditos', badge: 'credits' },
   { to: '/wbdev/financeiro', icon: Wallet, label: 'Financeiro' },
   { to: '/wbdev/suporte', icon: LifeBuoy, label: 'Suporte', badge: 'unread' },
   { to: '/wbdev/contatos', icon: Contact, label: 'Contatos' },
@@ -46,6 +48,7 @@ const NAV = [
 
 const BADGE_TEXT = {
   claims: (n) => `${n} ${n === 1 ? 'pagamento informado' : 'pagamentos informados'} para conferir`,
+  credits: (n) => `${n} ${n === 1 ? 'compra de créditos' : 'compras de créditos'} para conferir`,
   unread: (n) => `${n} ${n === 1 ? 'chamado com mensagem nova' : 'chamados com mensagem nova'}`,
 }
 

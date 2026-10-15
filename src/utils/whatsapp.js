@@ -1,4 +1,5 @@
-import { formatCurrency, estimateInstallment } from './carFormat.js'
+import { formatCurrency } from './carFormat.js'
+import { formatMileage } from './vehicleTypes.js'
 
 export const WHATSAPP_NUMBER = '5598981893675'
 
@@ -27,7 +28,7 @@ export function whatsappLinkForCar(car) {
     '',
     `${car.brand} ${car.model} ${car.version} (${car.modelYear})`,
     `Preço: ${car.price != null ? formatCurrency(car.price) : 'Consulte o valor'}`,
-    `${car.km.toLocaleString('pt-BR')} km · ${car.transmission} · ${car.color}`,
+    `${formatMileage(car)} · ${car.transmission} · ${car.color}`,
     '',
     carPageUrl(car),
   ].join('\n')
@@ -39,7 +40,7 @@ export function whatsappLinkForFinancing(car, buyer = {}) {
     'Olá! Quero simular o financiamento deste carro:',
     '',
     `${car.brand} ${car.model} ${car.version} (${car.modelYear})`,
-    `Preço: ${formatCurrency(car.price)} — ou em até 48x de ${estimateInstallment(car.price)}`,
+    `Preço: ${formatCurrency(car.price)}`,
     '',
     carPageUrl(car),
   ]

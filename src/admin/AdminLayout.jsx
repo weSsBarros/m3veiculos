@@ -131,7 +131,7 @@ export default function AdminLayout() {
   const alerts = usePostSaleAlerts(isStaff, canManageCustomerFinance, pathname)
   // Dono do sistema: troca para o painel WB.Dev (/wbdev), com as pendências de lá
   const platformBadges = usePlatformBadges(isPlatformAdmin, pathname)
-  const platformPending = platformBadges.claims + platformBadges.unread
+  const platformPending = platformBadges.claims + platformBadges.credits + platformBadges.unread
   useRememberPanel('loja')
 
   useEffect(() => {

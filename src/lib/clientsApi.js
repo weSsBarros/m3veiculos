@@ -296,6 +296,8 @@ function expenseFromRow(e) {
     amount: Number(e.amount) || 0,
     companyId: e.company_id || null,
     notes: e.notes || '',
+    // Lançada por uma despesa que se repete todo mês (seção 77)
+    recurrenceId: e.recurrence_id || null,
   }
 }
 
@@ -304,7 +306,24 @@ export async function fetchExpenses() {
   return (await run(query)).map(expenseFromRow)
 }
 
-export async function saveExpense(expense) {
+// Despesa nova: com "Repetir todo mês", também cria o modelo (seção 77)
+export async function saveExpense(expense, { repeat = false } = {}) {
+  if (!expense.id) {
+    const created = await run(
+      supabase.rpc('create_platform_expense', {
+        p: {
+          spent_on: expense.spentOn,
+          description: expense.description.trim(),
+          category: expense.category,
+          amount: expense.amount,
+          company_id: expense.companyId || '',
+          notes: expense.notes || '',
+        },
+        p_repeat: repeat,
+      })
+    )
+    return expenseFromRow(created)
+  }
   const row = {
     spent_on: expense.spentOn,
     description: expense.description.trim(),
@@ -319,6 +338,44 @@ export async function saveExpense(expense) {
 
 export async function deleteExpense(id) {
   await run(supabase.from('platform_expenses').delete().eq('id', id))
+}
+
+// Despesas que se repetem todo mês (modelos)
+function recurrenceFromRow(r) {
+  return {
+    id: r.id,
+    description: r.description,
+    category: r.category || 'outros',
+    amount: Number(r.amount) || 0,
+    day: Number(r.day) || 1,
+    companyId: r.company_id || null,
+    notes: r.notes || '',
+    active: r.active !== false,
+  }
+}
+
+export async function fetchExpenseRecurrences() {
+  const data = await run(supabase.from('platform_expense_recurrences').select('*').order('active', { ascending: false }).order('day'))
+  return (data || []).map(recurrenceFromRow)
+}
+
+// Muda os próximos meses (os já lançados ficam como estão)
+export async function saveExpenseRecurrence(r) {
+  const row = {
+    description: r.description.trim(),
+    category: r.category,
+    amount: r.amount,
+    day: r.day,
+    company_id: r.companyId || null,
+    notes: r.notes || '',
+    active: r.active !== false,
+  }
+  return recurrenceFromRow(await run(supabase.from('platform_expense_recurrences').update(row).eq('id', r.id).select().single()))
+}
+
+// Lança as despesas dos meses que faltam (também roda todo dia pelo cron)
+export async function generatePlatformExpenses() {
+  return Number(await run(supabase.rpc('platform_expenses_generate'))) || 0
 }
 
 // ------------------------------------------------------- lado das lojas
