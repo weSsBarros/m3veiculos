@@ -155,8 +155,10 @@ function PublicLayout() {
   return (
     <CarsProvider>
       <VisitTracker />
-      <TopBar />
-      <ModeloTopo padrao={<Header />} />
+      <ModeloTopo padrao={<>
+        <TopBar />
+        <Header />
+      </>} />
       <main>
         <Outlet />
       </main>
