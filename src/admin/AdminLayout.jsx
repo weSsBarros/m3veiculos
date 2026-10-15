@@ -38,6 +38,7 @@ import { transferAlert } from '../utils/transfer.js'
 import { tabForPath } from '../utils/panelSettings.js'
 import { storeBillingNotice } from '../utils/billing.js'
 import './admin.css'
+import '../modelos/painel.css'
 import './admin-dark.css'
 import { useAdminTheme } from '../utils/adminTheme.js'
 

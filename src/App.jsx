@@ -17,6 +17,7 @@ import { trackSiteVisit } from './lib/statsApi.js'
 import { fetchCompanyStatus } from './lib/clientsApi.js'
 import MaintenancePage from './components/MaintenancePage.jsx'
 import { pageSeo } from './utils/seoPages.js'
+import { ModeloTopo, ModeloRodape, ModeloBar } from './modelos/Modelos.jsx'
 
 // Painel da loja (/admin): carrega à parte, só quando alguém entra nele. O site
 // público não baixa o código do painel (fica mais leve e mais rápido, o que
@@ -155,12 +156,13 @@ function PublicLayout() {
     <CarsProvider>
       <VisitTracker />
       <TopBar />
-      <Header />
+      <ModeloTopo padrao={<Header />} />
       <main>
         <Outlet />
       </main>
-      <Footer />
+      <ModeloRodape padrao={<Footer />} />
       <WhatsAppButton />
+      <ModeloBar />
     </CarsProvider>
   )
 }

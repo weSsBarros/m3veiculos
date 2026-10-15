@@ -1,0 +1,789 @@
+/* Modelo 2, "Vitrine": o carro no palco. Topo, palco e rodapé na tinta escura da loja,
+   foto sangrando, nome do carro enorme, cantos retos e réguas finas. */
+html[data-modelo='vitrine'] {
+  --m-raio-botao: 2px;
+  --m-cor-no-escuro: color-mix(in srgb, var(--m-cor) 55%, #fff);
+}
+
+/* Topo escuro */
+.m-vit-topo {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--m-tinta);
+  color: #fff;
+}
+
+.m-vit-topo-linha {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-height: 72px;
+}
+
+.m-vit-nav {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  gap: 6px;
+}
+
+.m-vit-nav a {
+  position: relative;
+  padding: 10px 12px;
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.72);
+  transition: color 0.15s ease;
+}
+
+.m-vit-nav a:hover,
+.m-vit-nav a.active {
+  color: #fff;
+}
+
+.m-vit-nav a.active::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 1px;
+  background: var(--m-cor-no-escuro);
+}
+
+.m-vit-zap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.m-vit-zap svg {
+  color: var(--m-zap);
+}
+
+.m-vit-topo .m-burger {
+  color: #fff;
+}
+
+/* Palco: a foto do carro da vez ocupa a primeira tela */
+.m-vit-palco {
+  position: relative;
+  display: flex;
+  /* Em tela larga, a altura acompanha a largura: a foto deitada corta pouco em cima e embaixo */
+  min-height: clamp(520px, min(calc(100svh - 72px), 56vw), 900px);
+  overflow: hidden;
+  background: var(--m-tinta);
+  color: #fff;
+}
+
+.m-vit-fotos {
+  position: absolute;
+  inset: 0;
+}
+
+.m-vit-foto {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.m-vit-foto.is-ativa {
+  opacity: 1;
+}
+
+.m-vit-foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 60% 62%;
+  transform: scale(1.06);
+  transition: transform 7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.m-vit-foto.is-ativa img {
+  transform: scale(1);
+}
+
+/* Escurece a esquerda e o pé da foto para o texto ler bem */
+.m-vit-fotos::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--m-tinta) 88%, transparent) 0%, color-mix(in srgb, var(--m-tinta) 52%, transparent) 42%, transparent 72%),
+    linear-gradient(0deg, color-mix(in srgb, var(--m-tinta) 80%, transparent) 0%, transparent 46%);
+  pointer-events: none;
+}
+
+.m-vit-palco-conteudo {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 40px;
+  padding-top: 56px;
+  padding-bottom: 52px;
+}
+
+.m-vit-legenda {
+  max-width: 660px;
+  animation: m-vit-entra 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes m-vit-entra {
+  from {
+    opacity: 0.15;
+    transform: translateY(12px);
+    filter: blur(6px);
+  }
+}
+
+.m-vit-modelo {
+  margin: 0;
+  font: 800 clamp(48px, 8.2vw, 116px) / 0.92 var(--m-titulo);
+  letter-spacing: -0.04em;
+  color: #fff;
+  text-wrap: balance;
+}
+
+.m-vit-versao {
+  margin: 14px 0 0;
+  font-size: 16.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.8);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-vit-preco {
+  margin: 20px 0 0;
+  font: 700 clamp(28px, 3.2vw, 42px) / 1 var(--m-titulo);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.m-vit-preco.is-consulte {
+  font-size: 24px;
+}
+
+.m-vit-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.m-vit-acoes .m-btn {
+  min-height: 50px;
+  padding: 0 24px;
+}
+
+.m-vit-seletor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.m-vit-setas {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.m-vit-setas button {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 2px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.m-vit-setas button:hover {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.m-vit-contador {
+  min-width: 52px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-vit-miniaturas {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.m-vit-miniaturas button {
+  display: block;
+  width: 84px;
+  height: 58px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.2s ease, border-color 0.2s ease;
+}
+
+.m-vit-miniaturas button:hover {
+  opacity: 0.85;
+}
+
+.m-vit-miniaturas button[aria-pressed='true'] {
+  border-color: #fff;
+  opacity: 1;
+}
+
+.m-vit-miniaturas img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.m-vit-palco-vazio {
+  min-height: clamp(420px, 60svh, 620px);
+}
+
+/* Mais carros: uma foto grande por linha, alternando o lado */
+.m-vit-lotes {
+  padding: 84px 0 40px;
+  background: #fff;
+  color: var(--m-texto);
+}
+
+.m-vit-cabeca {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--m-linha);
+}
+
+.m-vit-cabeca h2 {
+  margin: 0;
+  font: 800 clamp(28px, 3.4vw, 46px) / 1.02 var(--m-titulo);
+  letter-spacing: -0.03em;
+}
+
+.m-vit-tudo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--m-cor-escura);
+  white-space: nowrap;
+}
+
+.m-vit-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.m-vit-lista li {
+  padding: 56px 0;
+  border-bottom: 1px solid var(--m-linha);
+}
+
+.m-vit-lote {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  align-items: center;
+  gap: clamp(28px, 4vw, 64px);
+}
+
+.m-vit-lista li:nth-child(even) .m-vit-lote-foto {
+  order: 2;
+}
+
+.m-vit-lote-foto {
+  overflow: hidden;
+  aspect-ratio: 3 / 2;
+  border-radius: 2px;
+  background: var(--m-fundo-2);
+}
+
+.m-vit-lote-foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.m-vit-lote:hover .m-vit-lote-foto img {
+  transform: scale(1.03);
+}
+
+.m-vit-semfoto {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 14px;
+  color: var(--m-texto-2);
+}
+
+.m-vit-lote-dados h3 {
+  margin: 4px 0 0;
+  font: 800 clamp(32px, 3.8vw, 54px) / 0.98 var(--m-titulo);
+  letter-spacing: -0.035em;
+}
+
+.m-vit-lote-link,
+.m-vit-cartao-link {
+  color: var(--m-texto);
+}
+
+.m-vit-lote-link::after,
+.m-vit-cartao-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.m-vit-lote-versao {
+  margin: 10px 0 0;
+  font-size: 16px;
+  color: var(--m-texto-2);
+}
+
+.m-vit-ficha {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 22px 0 0;
+}
+
+.m-vit-ficha div {
+  padding: 10px 0;
+  border-top: 1px solid var(--m-linha);
+}
+
+.m-vit-ficha dt {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--m-texto-2);
+}
+
+.m-vit-ficha dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.m-vit-lote-preco {
+  margin: 20px 0 0;
+  font: 700 clamp(26px, 2.6vw, 34px) / 1 var(--m-titulo);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.m-vit-lote-preco.is-consulte {
+  font-size: 20px;
+  color: var(--m-cor-escura);
+}
+
+.m-vit-lote-ver {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--m-cor-escura);
+}
+
+.m-vit-lote-ver svg {
+  transition: transform 0.2s ease;
+}
+
+.m-vit-lote:hover .m-vit-lote-ver svg {
+  transform: translateX(4px);
+}
+
+/* Serviços: três linhas numa régua */
+.m-vit-servicos {
+  padding: 24px 0 72px;
+  background: #fff;
+  color: var(--m-texto);
+}
+
+.m-vit-servicos ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.m-vit-servicos li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) auto;
+  align-items: baseline;
+  gap: 20px;
+  padding: 26px 0;
+  border-bottom: 1px solid var(--m-linha);
+}
+
+.m-vit-servicos h2 {
+  margin: 0;
+  font: 700 clamp(22px, 2.2vw, 28px) / 1.1 var(--m-titulo);
+  letter-spacing: -0.02em;
+}
+
+.m-vit-servicos p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--m-texto-2);
+}
+
+.m-vit-servico-acao {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--m-cor-escura);
+  white-space: nowrap;
+}
+
+/* Cartão do estoque completo */
+.m-vit-cartao {
+  position: relative;
+  color: var(--m-texto);
+}
+
+.m-vit-cartao-foto {
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 14px;
+  border-radius: 2px;
+  background: var(--m-fundo-2);
+}
+
+.m-vit-cartao-foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.m-vit-cartao:hover .m-vit-cartao-foto img {
+  transform: scale(1.04);
+}
+
+.m-vit-cartao h3 {
+  margin: 2px 0 0;
+  font: 800 25px/1.05 var(--m-titulo);
+  letter-spacing: -0.03em;
+}
+
+.m-vit-cartao-versao {
+  margin: 4px 0 0;
+  overflow: hidden;
+  font-size: 14.5px;
+  color: var(--m-texto-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.m-vit-cartao-linha {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--m-linha);
+  font-size: 14px;
+  color: var(--m-texto-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-vit-cartao-linha strong {
+  font: 700 20px/1 var(--m-titulo);
+  color: var(--m-texto);
+  white-space: nowrap;
+}
+
+.m-vit-cartao-linha strong.is-consulte {
+  font-size: 15px;
+  color: var(--m-cor-escura);
+}
+
+/* Rodapé escuro */
+.m-vit-rodape {
+  padding-top: 56px;
+  background: var(--m-tinta);
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.m-vit-rodape-grade {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1.2fr;
+  align-items: start;
+  gap: 36px;
+}
+
+.m-vit-rodape-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 26px;
+  font-size: 15px;
+}
+
+.m-vit-rodape-nav a {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.m-vit-rodape-nav a:hover {
+  color: #fff;
+}
+
+.m-vit-rodape .m-contatos svg {
+  color: var(--m-cor-no-escuro);
+}
+
+.m-vit-rodape .m-rodape-base {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Estoque completo e página do carro: foto grande primeiro */
+html[data-modelo='vitrine'] :not(.car-carousel-item):has(> .m-vit-cartao) {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)) !important;
+  gap: 48px 28px !important;
+}
+
+html[data-modelo='vitrine'] .car-detail {
+  --radius-lg: 2px;
+  --radius-md: 2px;
+}
+
+html[data-modelo='vitrine'] .car-detail-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+}
+
+html[data-modelo='vitrine'] .car-gallery-main {
+  aspect-ratio: 16 / 9;
+}
+
+html[data-modelo='vitrine'] .car-gallery-thumbs button {
+  border-radius: 2px;
+}
+
+html[data-modelo='vitrine'] .car-info {
+  position: static;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+  column-gap: 56px;
+  row-gap: 14px;
+  align-items: start;
+  padding: 28px 0 0;
+  border: none;
+  border-top: 1px solid var(--m-linha);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-modelo='vitrine'] .car-info > * {
+  grid-column: 1;
+}
+
+html[data-modelo='vitrine'] .car-info > :is(.car-price-block, .car-cta-group, .car-cta, .car-trade-badge) {
+  grid-column: 2;
+}
+
+html[data-modelo='vitrine'] .car-info > .car-info-stock {
+  grid-row: 1;
+}
+
+html[data-modelo='vitrine'] .car-info > h1 {
+  grid-row: 2;
+  font-size: clamp(34px, 4.6vw, 62px);
+  letter-spacing: -0.035em;
+}
+
+html[data-modelo='vitrine'] .car-info > .car-info-quick {
+  grid-row: 3;
+}
+
+html[data-modelo='vitrine'] .car-info > .car-feature-icons {
+  grid-row: 4;
+}
+
+html[data-modelo='vitrine'] .car-info > .car-price-block {
+  grid-row: 1 / span 2;
+}
+
+html[data-modelo='vitrine'] .car-info > :is(.car-cta-group, .car-cta) {
+  grid-row: 3 / span 2;
+}
+
+html[data-modelo='vitrine'] .car-info > .car-trade-badge {
+  grid-row: 5;
+}
+
+html[data-modelo='vitrine'] :is(.car-description, .car-specs) {
+  max-width: 820px;
+}
+
+@media (max-width: 1100px) {
+  .m-vit-nav {
+    display: none;
+  }
+
+  .m-vit-zap {
+    margin-left: auto;
+  }
+
+  .m-vit-topo .m-burger {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 900px) {
+  /* No celular o texto fica embaixo, sobre o pé escurecido da foto */
+  .m-vit-palco-conteudo {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-end;
+    gap: 22px;
+    width: 100%;
+    padding-bottom: 28px;
+  }
+
+  .m-vit-fotos::after {
+    background: linear-gradient(0deg, color-mix(in srgb, var(--m-tinta) 94%, transparent) 0%, color-mix(in srgb, var(--m-tinta) 62%, transparent) 46%, transparent 78%);
+  }
+
+  .m-vit-seletor {
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .m-vit-miniaturas {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .m-vit-miniaturas button {
+    width: 64px;
+    height: 46px;
+  }
+
+  .m-vit-lote {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .m-vit-lista li {
+    padding: 36px 0;
+  }
+
+  .m-vit-lista li:nth-child(even) .m-vit-lote-foto {
+    order: 0;
+  }
+
+  .m-vit-servicos li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .m-vit-rodape-grade {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[data-modelo='vitrine'] .car-info {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[data-modelo='vitrine'] .car-info > * {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+  }
+}
+
+@media (max-width: 760px) {
+  /* Celular: a foto em bloco, de borda a borda (o carro inteiro), e o texto embaixo, na tinta */
+  .m-vit-palco {
+    display: block;
+    min-height: 0;
+  }
+
+  .m-vit-fotos {
+    position: relative;
+    aspect-ratio: 4 / 3;
+  }
+
+  .m-vit-fotos::after {
+    background: linear-gradient(0deg, color-mix(in srgb, var(--m-tinta) 72%, transparent) 0%, transparent 38%);
+  }
+
+  .m-vit-palco-conteudo {
+    padding-top: 22px;
+    padding-bottom: 28px;
+  }
+
+  .m-vit-seletor {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+
+  .m-vit-miniaturas {
+    display: none;
+  }
+
+  /* O topo já tem o WhatsApp; o botão flutuante cobria as setas do palco */
+  html[data-modelo='vitrine'] .whatsapp-float {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .m-vit-zap span {
+    display: none;
+  }
+
+  .m-vit-miniaturas li:nth-child(n + 4) {
+    display: none;
+  }
+
+  .m-vit-acoes .m-btn {
+    flex: 1 1 100%;
+  }
+
+  .m-vit-cabeca {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

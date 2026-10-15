@@ -18,6 +18,10 @@ import '../components/ConfirmDialog.css'
 import './admin.css'
 import useConfirm from '../components/useConfirm.jsx'
 import CommissionTiers from './CommissionTiers.jsx'
+import CommissionPriceBands from './CommissionPriceBands.jsx'
+
+// Comissão que vem de uma faixa: a do carro (seção 78) ou a de valor da venda (seção 82)
+const BAND_TYPES = ['tier', 'price_band']
 
 const EMPTY_FORM = {
   // Nível de acesso ('seller', 'manager' ou 'admin') e cargo personalizado (null = Vendedor/Gerente)
@@ -257,12 +261,14 @@ export default function AdminSellers() {
     setFormError('')
     setFormSuccess('')
     const commissionType = form.hasCommission ? form.commissionType : 'none'
-    const commissionValue = !form.hasCommission || form.commissionValue === '' ? 0 : parseCommission(form.commissionValue)
+    // Pela faixa (do carro ou de valor): o valor vem da faixa na hora da venda
+    const byBand = BAND_TYPES.includes(commissionType)
+    const commissionValue = !form.hasCommission || byBand || form.commissionValue === '' ? 0 : parseCommission(form.commissionValue)
     if (Number.isNaN(commissionValue) || commissionValue < 0) {
       setFormError('Valor de comissão inválido.')
       return
     }
-    if (form.hasCommission && commissionType !== 'tier' && commissionValue === 0) {
+    if (form.hasCommission && !byBand && commissionValue === 0) {
       setFormError('Informe o valor da comissão (ou desmarque "Recebe comissão").')
       return
     }
@@ -550,13 +556,25 @@ export default function AdminSellers() {
               >
                 Pela faixa do carro
               </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={form.commissionType === 'price_band'}
+                className={form.commissionType === 'price_band' ? 'is-active' : ''}
+                onClick={() => update('commissionType', 'price_band')}
+              >
+                Pela faixa de valor
+              </button>
             </div>
             {form.commissionType === 'tier' && (
               <span className="admin-form-note">O valor vem da faixa do carro vendido (veja "Faixas de comissão por veículo" nesta página).</span>
             )}
+            {form.commissionType === 'price_band' && (
+              <span className="admin-form-note">O valor vem da faixa em que o valor da venda cai (veja "Faixas de comissão por valor da venda" nesta página).</span>
+            )}
           </div>
           )}
-          {form.hasCommission && form.commissionType !== 'tier' && (
+          {form.hasCommission && !BAND_TYPES.includes(form.commissionType) && (
           <label>
             {form.commissionType === 'percent' ? 'Comissão (%)' : 'Comissão por carro'}
             {form.commissionType === 'percent' ? (
@@ -702,6 +720,7 @@ export default function AdminSellers() {
       {!isAdmin && formSuccess && <p className="admin-success">{formSuccess}</p>}
 
       {isAdmin && <CommissionTiers />}
+      {isAdmin && <CommissionPriceBands />}
 
       <h2 className="admin-section-title">Desempenho no período</h2>
       {listed.length === 0 ? (
@@ -888,7 +907,9 @@ export default function AdminSellers() {
                                   ? `${String(sale.commissionValue).replace('.', ',')}%`
                                   : sale.commissionType === 'tier'
                                     ? 'faixa do carro'
-                                    : 'valor fixo'}
+                                    : sale.commissionType === 'price_band'
+                                      ? 'faixa de valor'
+                                      : 'valor fixo'}
                               </span>
                             )}
                           </td>

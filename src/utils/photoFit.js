@@ -10,6 +10,9 @@
 const CAR_PHOTO = /\/uploads\/carros\//
 // Cortar até uns 20% da foto ainda fica bom; mais que isso, mostra inteira
 const MAX_CROP = 0.8
+// Quadro marcado com data-foto-cheia (palco do modelo Vitrine): a foto deitada cobre
+// o quadro largo (corta mais); só a foto em pé (ou muito estreita) aparece inteira
+const MAX_CROP_CHEIA = 0.5
 
 const STYLE = `
 .photo-fit-box { isolation: isolate; overflow: hidden; }
@@ -34,7 +37,9 @@ export function fitPhoto(img) {
   if (!box || !w || !h || !box.clientWidth || !box.clientHeight) return false
   const fit = getComputedStyle(img).objectFit
   if (fit !== 'cover' && !img.classList.contains('photo-fit-contain')) return false
-  const contain = shouldShowWhole(w / h, box.clientWidth / box.clientHeight)
+  const photo = w / h
+  const frame = box.clientWidth / box.clientHeight
+  const contain = img.closest('[data-foto-cheia]') ? photo < 1 || shouldShowWhole(photo, frame, MAX_CROP_CHEIA) : shouldShowWhole(photo, frame)
   img.classList.toggle('photo-fit-contain', contain)
   box.classList.toggle('photo-fit-box', contain)
   if (contain) {
@@ -45,8 +50,8 @@ export function fitPhoto(img) {
 }
 
 // photo e frame: largura / altura
-export function shouldShowWhole(photo, frame) {
-  return photo > 0 && frame > 0 && photo < frame * MAX_CROP
+export function shouldShowWhole(photo, frame, maxCrop = MAX_CROP) {
+  return photo > 0 && frame > 0 && photo < frame * maxCrop
 }
 
 export function installPhotoFit() {

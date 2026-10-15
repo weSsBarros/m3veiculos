@@ -164,6 +164,8 @@ export function describeCommission(seller) {
   if (seller.commissionType === 'none') return 'Sem comissão'
   // Faixas de comissão da loja (seção 78): o valor vem da faixa do carro vendido
   if (seller.commissionType === 'tier') return 'Pela faixa do carro'
+  // Faixas de valor da venda (seção 82): o valor vem da faixa em que a venda cai
+  if (seller.commissionType === 'price_band') return 'Pela faixa de valor'
   if (seller.commissionType === 'fixed') {
     return `${seller.commissionValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} por carro`
   }

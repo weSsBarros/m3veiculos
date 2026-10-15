@@ -1,0 +1,673 @@
+/* Modelo 1, "Estoque primeiro": claro, réguas finas, cantos pequenos e números
+   alinhados, como uma página de classificados. A lista do estoque é a página inicial. */
+html[data-modelo='estoque'] {
+  --m-raio-botao: 6px;
+}
+
+/* Topo fino com a busca */
+.m-est-topo {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: #fff;
+  color: var(--m-texto);
+  border-bottom: 1px solid var(--m-linha);
+}
+
+.m-est-topo-linha {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 64px;
+}
+
+.m-est-busca {
+  position: relative;
+  flex: 1 1 320px;
+  max-width: 440px;
+}
+
+.m-est-busca svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--m-texto-2);
+  pointer-events: none;
+}
+
+.m-est-busca input {
+  width: 100%;
+  height: 42px;
+  padding: 0 14px 0 38px;
+  border: 1px solid var(--m-linha);
+  border-radius: 6px;
+  background: var(--m-fundo-2);
+  font: 500 15px/1 var(--m-corpo);
+  color: var(--m-texto);
+}
+
+.m-est-busca input::placeholder {
+  color: var(--m-texto-2);
+}
+
+.m-est-busca input:focus {
+  outline: none;
+  border-color: var(--m-cor);
+  background: #fff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-cor) 18%, transparent);
+}
+
+.m-est-nav {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.m-est-nav a {
+  position: relative;
+  padding: 10px 10px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--m-texto-2);
+}
+
+.m-est-nav a:hover,
+.m-est-nav a.active {
+  color: var(--m-texto);
+}
+
+.m-est-nav a.active::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 2px;
+  height: 2px;
+  background: var(--m-cor);
+}
+
+.m-est-zap {
+  min-height: 40px;
+  padding: 0 16px;
+}
+
+/* Painel: contagem, abas de categoria, índice de marcas e a lista */
+.m-est-painel {
+  padding: 28px 0 36px;
+  background: #fff;
+  color: var(--m-texto);
+}
+
+.m-est-cabeca {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.m-est-cabeca h1 {
+  margin: 0;
+  font: 800 clamp(28px, 4vw, 44px) / 1.02 var(--m-titulo);
+  letter-spacing: -0.03em;
+  color: var(--m-texto);
+}
+
+.m-est-num {
+  color: var(--m-cor-escura);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-est-ordem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--m-texto-2);
+}
+
+.m-est-ordem select {
+  height: 38px;
+  padding: 0 34px 0 12px;
+  border: 1px solid var(--m-linha);
+  border-radius: 6px;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235a6475' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 11px center;
+  font: 600 14.5px/1 var(--m-corpo);
+  color: var(--m-texto);
+  appearance: none;
+  cursor: pointer;
+}
+
+.m-est-ordem select:hover {
+  border-color: var(--m-texto-2);
+}
+
+.m-est-abas {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--m-linha);
+}
+
+.m-est-abas::-webkit-scrollbar {
+  display: none;
+}
+
+.m-est-abas button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-bottom: -1px;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: none;
+  font: 600 15px/1 var(--m-corpo);
+  color: var(--m-texto-2);
+  cursor: pointer;
+}
+
+.m-est-abas button span {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--m-texto-2);
+}
+
+.m-est-abas button:hover {
+  color: var(--m-texto);
+}
+
+.m-est-abas button[aria-pressed='true'] {
+  border-bottom-color: var(--m-cor);
+  color: var(--m-texto);
+}
+
+.m-est-marcas {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 14px 0 4px;
+}
+
+.m-est-marcas-rotulo {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--m-texto-2);
+}
+
+.m-est-marcas-lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.m-est-marcas-lista button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--m-linha);
+  border-radius: 6px;
+  background: #fff;
+  font: 600 13.5px/1 var(--m-corpo);
+  color: var(--m-texto);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.m-est-marcas-lista button span {
+  font-variant-numeric: tabular-nums;
+  color: var(--m-texto-2);
+}
+
+.m-est-marcas-lista button:hover {
+  border-color: var(--m-texto-2);
+}
+
+.m-est-marcas-lista button[aria-pressed='true'] {
+  border-color: var(--m-tinta);
+  background: var(--m-tinta);
+  color: #fff;
+}
+
+.m-est-marcas-lista button[aria-pressed='true'] span {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.m-est-resultado {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 18px 0 0;
+  padding-bottom: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--m-texto-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-est-resultado button {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--m-cor-escura);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.m-est-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--m-linha);
+}
+
+.m-est-mais {
+  margin-top: 22px;
+}
+
+.m-est-aviso,
+.m-est-vazio p {
+  color: var(--m-texto-2);
+}
+
+.m-est-vazio {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 22px;
+  border: 1px dashed var(--m-linha);
+  border-radius: 8px;
+}
+
+/* Uma linha do estoque */
+.m-linha {
+  position: relative;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr) auto 46px;
+  align-items: center;
+  gap: 22px;
+  padding: 14px 8px;
+  border-bottom: 1px solid var(--m-linha);
+  background: #fff;
+  color: var(--m-texto);
+  transition: background-color 0.15s ease;
+}
+
+.m-linha:hover {
+  background: var(--m-fundo-2);
+}
+
+.m-linha-foto {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  background: var(--m-fundo-2);
+}
+
+.m-linha-foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.m-linha-semfoto {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 13px;
+  color: var(--m-texto-2);
+}
+
+.m-linha-tags {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.m-linha-tags span {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--m-tinta);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.m-linha-tags .is-oferta {
+  background: var(--m-cor);
+  color: var(--m-sobre);
+}
+
+.m-linha-dados h3 {
+  margin: 0;
+  font: 700 19px/1.2 var(--m-titulo);
+  letter-spacing: -0.015em;
+}
+
+.m-linha-link {
+  color: var(--m-texto);
+}
+
+.m-linha-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.m-linha:hover .m-linha-link {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--m-cor);
+}
+
+.m-linha-versao {
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-size: 14px;
+  color: var(--m-texto-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.m-linha-ficha {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--m-texto);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-linha-ficha li + li::before {
+  content: '·';
+  margin: 0 8px;
+  color: var(--m-texto-2);
+}
+
+.m-linha-preco {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.m-linha-preco s {
+  font-size: 13px;
+  color: var(--m-texto-2);
+}
+
+.m-linha-preco strong {
+  font: 800 24px/1.1 var(--m-titulo);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--m-texto);
+}
+
+.m-linha-preco strong.is-consulte {
+  font-size: 16px;
+  color: var(--m-cor-escura);
+}
+
+.m-linha-zap {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1.5px solid var(--m-zap);
+  border-radius: 8px;
+  color: var(--m-zap-escuro);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.m-linha-zap:hover {
+  background: var(--m-zap);
+  color: #fff;
+}
+
+/* Atendimento: três ligações numa régua */
+.m-est-servicos {
+  border-top: 1px solid var(--m-linha);
+  background: var(--m-fundo-2);
+  color: var(--m-texto);
+}
+
+.m-est-servicos-grade {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.m-est-servicos-grade a {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 26px 22px;
+  color: var(--m-texto);
+}
+
+.m-est-servicos-grade a + a {
+  border-left: 1px solid var(--m-linha);
+}
+
+.m-est-servicos-grade strong {
+  font: 700 17px/1.2 var(--m-titulo);
+}
+
+.m-est-servicos-grade span {
+  grid-column: 1;
+  font-size: 14px;
+  color: var(--m-texto-2);
+}
+
+.m-est-servicos-grade svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--m-cor-escura);
+  transition: transform 0.15s ease;
+}
+
+.m-est-servicos-grade a:hover svg {
+  transform: translateX(3px);
+}
+
+/* Rodapé claro e compacto */
+.m-est-rodape {
+  padding-top: 40px;
+  border-top: 1px solid var(--m-linha);
+  background: #fff;
+  color: var(--m-texto);
+}
+
+.m-est-rodape-grade {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.2fr;
+  gap: 32px;
+}
+
+.m-est-rodape-marca {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.m-est-rodape-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 10px 16px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.m-est-rodape-nav a {
+  color: var(--m-texto);
+}
+
+.m-est-rodape-nav a:hover {
+  color: var(--m-cor-escura);
+}
+
+.m-est-rodape .m-rodape-base {
+  color: var(--m-texto-2);
+}
+
+/* Estoque completo e página do carro no mesmo jeito */
+html[data-modelo='estoque'] :not(.car-carousel-item):has(> .m-linha) {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0 !important;
+  border-top: 1px solid var(--m-linha);
+}
+
+html[data-modelo='estoque'] .car-detail {
+  --radius-lg: 8px;
+  --radius-md: 6px;
+}
+
+html[data-modelo='estoque'] .car-info {
+  box-shadow: none;
+}
+
+html[data-modelo='estoque'] :is(.price-main, .car-specs-row dd) {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  .m-est-nav,
+  .m-est-zap span {
+    display: none;
+  }
+
+  .m-est-topo .m-burger {
+    display: inline-flex;
+  }
+
+  .m-est-zap {
+    margin-left: auto;
+    width: 44px;
+    padding: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .m-est-topo-linha {
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .m-est-busca {
+    order: 3;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .m-est-cabeca {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .m-est-marcas {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .m-est-marcas-lista {
+    flex-wrap: nowrap;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .m-est-marcas-lista button {
+    flex-shrink: 0;
+  }
+
+  .m-linha {
+    grid-template-columns: 116px minmax(0, 1fr);
+    align-items: start;
+    gap: 6px 14px;
+    padding: 12px 0;
+  }
+
+  .m-linha-foto {
+    grid-row: 1 / span 2;
+  }
+
+  .m-linha-dados h3 {
+    font-size: 16.5px;
+  }
+
+  .m-linha-ficha {
+    margin-top: 6px;
+    font-size: 12.5px;
+  }
+
+  /* No celular a ficha fica com ano e km, numa linha só (o resto está na página do carro) */
+  .m-linha-ficha li:nth-child(n + 3) {
+    display: none;
+  }
+
+  .m-linha-preco {
+    grid-column: 2;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+    padding-right: 54px;
+  }
+
+  .m-linha-preco strong {
+    font-size: 19px;
+  }
+
+  .m-linha-zap {
+    position: absolute;
+    right: 0;
+    bottom: 12px;
+    width: 42px;
+    height: 42px;
+  }
+
+  .m-est-servicos-grade {
+    grid-template-columns: 1fr;
+  }
+
+  .m-est-servicos-grade a + a {
+    border-left: none;
+    border-top: 1px solid var(--m-linha);
+  }
+
+  .m-est-rodape-grade {
+    grid-template-columns: 1fr;
+  }
+
+  /* Cada linha e o topo já têm o WhatsApp; o botão flutuante cobria os preços */
+  html[data-modelo='estoque'] .whatsapp-float {
+    display: none;
+  }
+}

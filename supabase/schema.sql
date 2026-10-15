@@ -10112,7 +10112,120 @@ end $$;
 revoke execute on function public.platform_plate_credits() from anon, public;
 grant execute on function public.platform_plate_credits() to authenticated;
 
--- 81) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 81) Conferência: passou para a seção 83, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 82) Comissão por faixa de valor da venda (pedido do Wesley em 15/10/2026) -----
+--
+-- Outra comissão por faixa, agora pelo valor da venda (ex.: até R$ 30.000 =
+-- R$ 300; até R$ 70.000 = R$ 500; acima disso = R$ 1.000). O admin cadastra as
+-- faixas da loja: cada uma vale "até" um valor (inclusive) e a faixa sem "até"
+-- vale para o que passar da maior. Quem tem a comissão "Pela faixa de valor"
+-- (sellers.commission_type = 'price_band') recebe a faixa em que o valor da venda
+-- cai; sem faixa que sirva, sem comissão (a janela da venda avisa). Convive com a
+-- faixa do carro (seção 78): cada pessoa da equipe fica com um tipo.
+create table if not exists public.commission_price_bands (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null default public.current_company_id() references public.companies(id) on delete cascade,
+  up_to numeric(12, 2) check (up_to is null or (up_to > 0 and up_to < 1000000000)),
+  amount numeric(12, 2) not null check (amount >= 0 and amount < 10000000),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+-- Um "até" por valor e uma faixa "acima" só, por loja
+create unique index if not exists commission_price_bands_up_to_key
+  on public.commission_price_bands (company_id, coalesce(up_to, -1));
+
+drop trigger if exists commission_price_bands_set_updated_at on public.commission_price_bands;
+create trigger commission_price_bands_set_updated_at
+before update on public.commission_price_bands
+for each row execute function public.set_updated_at();
+
+alter table public.commission_price_bands enable row level security;
+revoke all on public.commission_price_bands from anon;
+
+drop policy if exists "Staff read commission price bands" on public.commission_price_bands;
+create policy "Staff read commission price bands"
+on public.commission_price_bands for select
+to authenticated
+using (company_id = public.current_company_id());
+
+drop policy if exists "Admins manage commission price bands" on public.commission_price_bands;
+create policy "Admins manage commission price bands"
+on public.commission_price_bands for all
+to authenticated
+using (company_id = public.current_company_id() and public.is_company_admin())
+with check (company_id = public.current_company_id() and public.is_company_admin());
+
+drop trigger if exists commission_price_bands_log_activity on public.commission_price_bands;
+create trigger commission_price_bands_log_activity after insert or update or delete on public.commission_price_bands
+for each row execute function public.log_activity();
+
+-- Comissão da faixa em que o valor cai (a menor faixa "até" que cobre o valor; depois
+-- a "acima"). Só o gatilho da venda chama.
+create or replace function public.commission_band_amount(p_company uuid, p_price numeric)
+returns numeric
+language sql stable security definer set search_path = public
+as $$
+  select b.amount
+  from public.commission_price_bands b
+  where b.company_id = p_company and p_price is not null and (b.up_to is null or p_price <= b.up_to)
+  order by b.up_to nulls last
+  limit 1
+$$;
+revoke execute on function public.commission_band_amount(uuid, numeric) from anon, authenticated, public;
+
+alter table public.sellers drop constraint if exists sellers_commission_type_check;
+alter table public.sellers add constraint sellers_commission_type_check check (commission_type in ('percent', 'fixed', 'none', 'tier', 'price_band'));
+
+create or replace function public.sales_compute_commission()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  s public.sellers%rowtype;
+  v_tier numeric(12, 2);
+begin
+  if new.seller_id is null then
+    new.commission_type := null;
+    new.commission_value := null;
+    new.commission_amount := 0;
+    return new;
+  end if;
+  -- Numa edição, só recalcula se trocou o vendedor ou o valor da venda.
+  if tg_op = 'UPDATE' and new.seller_id is not distinct from old.seller_id
+     and new.sale_price = old.sale_price then
+    new.commission_type := old.commission_type;
+    new.commission_value := old.commission_value;
+    new.commission_amount := old.commission_amount;
+    return new;
+  end if;
+  select * into s from public.sellers where id = new.seller_id and company_id = new.company_id;
+  if not found then
+    raise exception 'Vendedor inválido para esta empresa';
+  end if;
+  new.commission_type := s.commission_type;
+  new.commission_value := s.commission_value;
+  if s.commission_type = 'tier' then
+    -- Pela faixa do carro vendido (sem faixa: sem comissão)
+    select t.amount into v_tier
+    from public.cars c join public.commission_tiers t on t.id = c.commission_tier_id
+    where c.id = new.car_id;
+    new.commission_value := coalesce(v_tier, 0);
+  elsif s.commission_type = 'price_band' then
+    -- Pela faixa de valor em que a venda cai (sem faixa: sem comissão)
+    new.commission_value := coalesce(public.commission_band_amount(new.company_id, new.sale_price), 0);
+  end if;
+  new.commission_amount := case
+    when s.commission_type = 'percent' then round(new.sale_price * s.commission_value / 100, 2)
+    when s.commission_type in ('fixed', 'tier', 'price_band') then new.commission_value
+    else 0
+  end;
+  return new;
+end;
+$$;
+
+-- 83) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

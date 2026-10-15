@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { SlidersHorizontal, X } from 'lucide-react'
-import CarCard from '../components/CarCard.jsx'
 import SetupNotice from '../components/SetupNotice.jsx'
 import { siteCategories, BRANDS, parseIntBR } from '../utils/carFormat.js'
 import { useCars } from '../context/CarsContext.jsx'
+import { ModeloCard } from '../modelos/Modelos.jsx'
 import './Estoque.css'
 
 // Campo de preço livre: só dígitos, exibidos com separador de milhar
@@ -158,7 +158,7 @@ export default function Estoque() {
         ) : filtered.length > 0 ? (
           <div className="stock-grid">
             {filtered.map((car) => (
-              <CarCard car={car} key={car.id} />
+              <ModeloCard car={car} key={car.id} />
             ))}
           </div>
         ) : (

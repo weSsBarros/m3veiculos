@@ -1,0 +1,424 @@
+/* Modelos de site (src/modelos): peças comuns aos três. Tudo sai das variáveis da loja
+   (--color-*, --font-*), com reserva para as lojas antigas que não têm alguma. Duas
+   variáveis podem vir da loja: --m-sobre-cor (texto em cima da cor principal; branco
+   por padrão) e --m-logo-fundo (placa atrás do logo em fundo claro, para logo feito
+   para fundo escuro). */
+html[data-modelo] {
+  --m-cor: var(--color-primary, #2446c8);
+  --m-cor-escura: var(--color-primary-dark, color-mix(in srgb, var(--m-cor) 78%, #000));
+  --m-cor-clara: var(--color-primary-light, color-mix(in srgb, var(--m-cor) 12%, #fff));
+  --m-sobre: var(--m-sobre-cor, #fff);
+  --m-tinta: var(--color-black, #0e1117);
+  --m-tinta-2: var(--color-black-soft, color-mix(in srgb, var(--m-tinta) 86%, #fff));
+  --m-texto: var(--color-text, #141a24);
+  --m-texto-2: var(--color-text-muted, #5a6475);
+  --m-linha: var(--color-border, #dde2e9);
+  --m-fundo: #fff;
+  --m-fundo-2: var(--color-bg-alt, #f3f5f8);
+  --m-titulo: var(--font-display, var(--font-heading, inherit));
+  --m-corpo: var(--font-body, inherit);
+  --m-zap: #1fae55;
+  --m-zap-escuro: #168a43;
+  --m-largura: 1280px;
+}
+
+html[data-modelo] ::selection {
+  background: var(--m-cor);
+  color: var(--m-sobre);
+}
+
+.m-container {
+  width: 100%;
+  max-width: var(--m-largura);
+  margin: 0 auto;
+  padding: 0 clamp(16px, 2.5vw, 32px);
+}
+
+.m-escondido {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.m-topo,
+.m-rodape,
+[class^='m-est-'],
+[class^='m-vit-'],
+[class^='m-bai-'] {
+  font-family: var(--m-corpo);
+  box-sizing: border-box;
+}
+
+.m-topo *,
+.m-rodape *,
+.m-previa * {
+  box-sizing: border-box;
+}
+
+.m-topo a,
+.m-rodape a {
+  text-decoration: none;
+}
+
+.m-topo ul,
+.m-rodape ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+html[data-modelo] :is(.m-topo, .m-rodape, main) :is(a, button, select, input):focus-visible {
+  outline: 2px solid var(--m-cor);
+  outline-offset: 2px;
+}
+
+/* Botões dos modelos (não dependem dos botões de cada loja) */
+.m-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 20px;
+  border: 1.5px solid transparent;
+  border-radius: var(--m-raio-botao, 10px);
+  font: 600 15px/1.1 var(--m-corpo);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.m-btn:active {
+  transform: scale(0.98);
+}
+
+.m-btn-zap {
+  background: var(--m-zap);
+  color: #fff;
+}
+
+.m-btn-zap:hover {
+  background: var(--m-zap-escuro);
+}
+
+.m-btn-primario {
+  background: var(--m-cor);
+  color: var(--m-sobre);
+}
+
+.m-btn-primario:hover {
+  background: var(--m-cor-escura);
+}
+
+.m-btn-linha {
+  background: transparent;
+  color: var(--m-texto);
+  border-color: var(--m-linha);
+}
+
+.m-btn-linha:hover {
+  border-color: var(--m-cor);
+  color: var(--m-cor-escura);
+}
+
+.m-btn-claro {
+  background: #fff;
+  color: var(--m-tinta);
+}
+
+.m-btn-claro:hover {
+  background: var(--m-cor-clara);
+}
+
+.m-btn-vazado {
+  background: transparent;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+.m-btn-vazado:hover {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.m-btn-bloco {
+  width: 100%;
+}
+
+/* Logo: o da loja (Logo.jsx) ou o nome em texto; em fundo claro, a placa da loja */
+.m-logo {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-height: 40px;
+  color: inherit;
+}
+
+.m-logo img {
+  display: block;
+  max-height: 44px;
+  width: auto;
+}
+
+.m-logo-texto {
+  font: 800 22px/1 var(--m-titulo);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.m-claro .m-logo {
+  padding: var(--m-logo-folga, 0);
+  border-radius: 8px;
+  background: var(--m-logo-fundo, transparent);
+}
+
+/* Botão do menu (celular) e o menu aberto */
+.m-burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.85;
+  cursor: pointer;
+}
+
+.m-menu-celular {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 16px 18px;
+  border-top: 1px solid var(--m-linha);
+  background: #fff;
+  color: var(--m-texto);
+}
+
+.m-menu-celular a:not(.m-btn) {
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--m-fundo-2);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--m-texto);
+}
+
+.m-menu-celular a.active:not(.m-btn) {
+  color: var(--m-cor-escura);
+  font-weight: 700;
+}
+
+.m-menu-celular .m-btn {
+  margin-top: 8px;
+}
+
+/* Contatos (rodapé e "Fale com a gente") */
+.m-contatos {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.m-contatos li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.m-contatos svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--m-cor);
+}
+
+.m-contatos a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.m-contatos a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Pé do rodapé: direitos, crédito da WB.AUTO e nota da loja */
+.m-rodape-base {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 36px;
+  padding: 20px 0 26px;
+  border-top: 1px solid currentColor;
+  border-top-color: color-mix(in srgb, currentColor 16%, transparent);
+  font-size: 13px;
+}
+
+.m-rodape-base p {
+  margin: 0;
+}
+
+.m-rodape-nota {
+  opacity: 0.7;
+}
+
+/* Barrinha da prévia (?modelo=): fica no canto de baixo à esquerda */
+.m-previa {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 90;
+  width: min(340px, calc(100vw - 96px));
+  padding: 12px;
+  border-radius: 14px;
+  background: #11141a;
+  color: #e9edf3;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.32);
+  font: 14px/1.35 system-ui, 'Segoe UI', sans-serif;
+}
+
+.m-previa.is-recolhida {
+  width: auto;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.m-previa-pilula {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 999px;
+  background: #11141a;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  font: 600 13px/1 system-ui, 'Segoe UI', sans-serif;
+  cursor: pointer;
+}
+
+.m-previa-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.m-previa-titulo {
+  margin-right: auto;
+  font-size: 13px;
+  font-weight: 700;
+  color: #9aa6b8;
+}
+
+.m-previa-icone {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #c7cfdb;
+  cursor: pointer;
+}
+
+.m-previa-icone:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.m-previa-opcoes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.m-previa-opcoes button {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.m-previa-opcoes button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.m-previa-opcoes button[aria-pressed='true'] {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.m-previa-num {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.12);
+  font-weight: 800;
+  font-size: 13px;
+}
+
+button[aria-pressed='true'] .m-previa-num {
+  background: #fff;
+  color: #11141a;
+}
+
+.m-previa-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.m-previa-texto strong {
+  font-size: 14px;
+}
+
+.m-previa-texto span {
+  font-size: 12.5px;
+  color: #9aa6b8;
+}
+
+.m-previa :focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .m-previa {
+    left: 10px;
+    bottom: 10px;
+    width: calc(100vw - 92px);
+  }
+
+  .m-previa-texto span {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-modelo] * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

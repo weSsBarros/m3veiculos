@@ -1,0 +1,716 @@
+/* Modelo 3, "Revenda de bairro": direto ao ponto. Faixa na cor da loja com o contato,
+   o preço pintado na foto (placa inclinada, como no para-brisa) e o WhatsApp em todo
+   carro; faixas cheias de cor para financiamento e troca. */
+html[data-modelo='bairro'] {
+  --m-raio-botao: 10px;
+  --m-cor-no-escuro: color-mix(in srgb, var(--m-cor) 55%, #fff);
+}
+
+/* Faixa de contato (rola com a página) */
+.m-bai-faixa {
+  background: var(--m-cor);
+  color: var(--m-sobre);
+  font-family: var(--m-corpo);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.m-bai-faixa-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+}
+
+.m-bai-faixa ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.m-bai-faixa li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.m-bai-faixa a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.m-bai-faixa-zap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  text-decoration: underline !important;
+  text-underline-offset: 3px;
+}
+
+/* Topo branco com o WhatsApp grande */
+.m-bai-topo {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: #fff;
+  color: var(--m-texto);
+  border-bottom: 3px solid var(--m-cor);
+}
+
+.m-bai-topo-linha {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-height: 72px;
+}
+
+.m-bai-nav {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.m-bai-nav a {
+  padding: 10px 11px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--m-texto);
+}
+
+.m-bai-nav a:hover {
+  background: var(--m-fundo-2);
+}
+
+.m-bai-nav a.active {
+  color: var(--m-cor-escura);
+}
+
+.m-bai-topo-zap {
+  min-height: 48px;
+  font-size: 15.5px;
+}
+
+/* Chamada com a placa da contagem: faixa cheia na cor da loja */
+.m-bai-chamada {
+  padding: 36px 0 28px;
+  background: var(--m-cor);
+  color: var(--m-sobre);
+}
+
+.m-bai-chamada-grade {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 28px;
+}
+
+.m-bai-chamada h1 {
+  margin: 0;
+  font: 800 clamp(30px, 4.8vw, 58px) / 1 var(--m-titulo);
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+.m-bai-chamada-grade p:not(.m-bai-placa) {
+  margin: 12px 0 0;
+  font-size: 17px;
+  color: color-mix(in srgb, var(--m-sobre) 84%, transparent);
+}
+
+.m-bai-placa {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0;
+  padding: 14px 22px 16px;
+  border-radius: 6px;
+  background: var(--m-tinta);
+  color: #fff;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.28);
+  transform: rotate(-3deg);
+}
+
+.m-bai-placa strong {
+  font: italic 800 clamp(46px, 6vw, 76px) / 0.9 var(--m-titulo);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.m-bai-placa span {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.m-bai-categorias {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.m-bai-categorias a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border: 2px solid var(--m-sobre);
+  border-radius: 999px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--m-sobre);
+  text-decoration: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.m-bai-categorias a span {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.m-bai-categorias a:hover {
+  background: var(--m-sobre);
+  color: var(--m-cor-escura);
+}
+
+/* O pátio */
+.m-bai-patio {
+  padding: 28px 0 52px;
+  background: #fff;
+  color: var(--m-texto);
+}
+
+.m-bai-grade {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.m-bai-mais {
+  margin-top: 26px;
+}
+
+.m-bai-aviso,
+.m-bai-vazio p {
+  color: var(--m-texto-2);
+}
+
+.m-bai-vazio {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px;
+  border: 2px dashed var(--m-linha);
+  border-radius: 10px;
+}
+
+/* Cartão: foto com o preço pintado e o botão de WhatsApp */
+.m-bai-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--m-linha);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--m-texto);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.m-bai-card:hover {
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.m-bai-card-foto {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--m-fundo-2);
+}
+
+.m-bai-card-foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.m-bai-semfoto {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 13px;
+  color: var(--m-texto-2);
+}
+
+.m-bai-tags {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.m-bai-tags span {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--m-tinta);
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.m-bai-tags .is-oferta {
+  background: #fff;
+  color: var(--m-tinta);
+}
+
+/* O preço pintado */
+.m-bai-preco {
+  position: absolute;
+  left: 10px;
+  bottom: 12px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 12px 7px;
+  border-radius: 4px;
+  background: var(--m-cor);
+  color: var(--m-sobre);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.28);
+  font: italic 800 clamp(17px, 1.55vw, 22px) / 1 var(--m-titulo);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transform: rotate(-2.5deg);
+  transform-origin: left bottom;
+}
+
+.m-bai-preco s {
+  margin-bottom: 2px;
+  font: 600 11px/1 var(--m-corpo);
+  opacity: 0.85;
+}
+
+.m-bai-preco.is-consulte {
+  font-size: 15px;
+}
+
+.m-bai-card-dados {
+  flex: 1;
+  padding: 14px 14px 0;
+}
+
+.m-bai-card-dados h3 {
+  margin: 0;
+  font: 800 17.5px/1.2 var(--m-titulo);
+  letter-spacing: -0.01em;
+}
+
+.m-bai-card-link {
+  color: var(--m-texto);
+  text-decoration: none;
+}
+
+.m-bai-card-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.m-bai-card-ficha {
+  margin: 5px 0 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cada dado inteiro numa linha: o "·" vai junto com o item quando a ficha quebra */
+.m-bai-card-ficha {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.m-bai-card-ficha span {
+  white-space: nowrap;
+}
+
+.m-bai-card-ficha span + span::before {
+  content: '·';
+  margin: 0 5px;
+}
+
+.m-bai-card-versao {
+  margin: 4px 0 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--m-texto-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.m-bai-card-zap {
+  position: relative;
+  z-index: 1;
+  min-height: 44px;
+  margin: 12px 14px 14px;
+}
+
+/* Financiamento e troca: faixas cheias */
+.m-bai-servicos-grade {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+}
+
+.m-bai-servicos {
+  background: #fff;
+}
+
+.m-bai-servicos .m-container {
+  max-width: none;
+  padding: 0;
+}
+
+.m-bai-faixa-servico {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 18px;
+  padding: clamp(28px, 4vw, 46px) clamp(20px, 5vw, 64px);
+  text-decoration: none;
+}
+
+.m-bai-faixa-servico strong {
+  font: 800 clamp(24px, 2.8vw, 36px) / 1.05 var(--m-titulo);
+  letter-spacing: -0.02em;
+}
+
+.m-bai-faixa-servico span {
+  grid-column: 1;
+  font-size: 16px;
+  opacity: 0.86;
+}
+
+.m-bai-faixa-servico svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  transition: transform 0.2s ease;
+}
+
+.m-bai-faixa-servico:hover svg {
+  transform: translateX(5px);
+}
+
+.m-bai-faixa-servico.is-cor {
+  background: var(--m-cor);
+  color: var(--m-sobre);
+}
+
+.m-bai-faixa-servico.is-tinta {
+  background: var(--m-tinta);
+  color: #fff;
+}
+
+/* Fale com a gente */
+.m-bai-visite {
+  padding: 48px 0;
+  background: var(--m-fundo-2);
+  color: var(--m-texto);
+}
+
+.m-bai-visite-grade {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 28px;
+}
+
+.m-bai-visite h2 {
+  margin: 0 0 16px;
+  font: 800 clamp(26px, 3vw, 38px) / 1.05 var(--m-titulo);
+  letter-spacing: -0.02em;
+}
+
+.m-bai-visite-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Rodapé */
+.m-bai-rodape {
+  background: var(--m-tinta);
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.m-bai-rodape-faixa {
+  background: var(--m-cor);
+  color: var(--m-sobre);
+}
+
+.m-bai-rodape-faixa-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 22px;
+  padding-bottom: 22px;
+}
+
+.m-bai-rodape-faixa p {
+  margin: 0;
+  font: 800 clamp(20px, 2.2vw, 26px) / 1.15 var(--m-titulo);
+}
+
+.m-bai-rodape-grade {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr 1.2fr;
+  align-items: start;
+  gap: 32px;
+  padding-top: 44px;
+}
+
+.m-bai-rodape-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.m-bai-rodape-nav a {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.m-bai-rodape-nav a:hover {
+  color: #fff;
+}
+
+.m-bai-rodape .m-contatos svg {
+  color: var(--m-cor-no-escuro);
+}
+
+.m-bai-rodape .m-rodape-base {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Barra fixa da página do carro (só no celular) */
+.m-bai-barra {
+  display: none;
+}
+
+/* Estoque completo e página do carro */
+html[data-modelo='bairro'] :not(.car-carousel-item):has(> .m-bai-card) {
+  gap: 18px !important;
+}
+
+html[data-modelo='bairro'] .car-price-block {
+  background: var(--m-cor);
+  color: var(--m-sobre);
+  transform: rotate(-1.2deg);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.16);
+}
+
+html[data-modelo='bairro'] .car-price-block :is(.price-main, .price-old) {
+  color: inherit;
+}
+
+html[data-modelo='bairro'] .car-price-block .price-main {
+  font-style: italic;
+  font-size: clamp(34px, 4vw, 46px);
+}
+
+html[data-modelo='bairro'] .car-price-block .price-old {
+  opacity: 0.82;
+}
+
+html[data-modelo='bairro'] .car-cta {
+  min-height: 56px;
+  font-size: 17px;
+}
+
+@media (max-width: 1100px) {
+  .m-bai-nav {
+    display: none;
+  }
+
+  .m-bai-topo-zap {
+    margin-left: auto;
+  }
+
+  .m-bai-topo .m-burger {
+    display: inline-flex;
+  }
+
+  .m-bai-grade {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .m-bai-faixa-endereco,
+  .m-bai-faixa-horario {
+    display: none !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .m-bai-barra {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--m-linha);
+    background: #fff;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.1);
+    color: var(--m-texto);
+    font-family: var(--m-corpo);
+  }
+
+  .m-bai-barra-texto {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .m-bai-barra-texto span {
+    overflow: hidden;
+    font-size: 13px;
+    color: var(--m-texto-2);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .m-bai-barra-texto strong {
+    font: italic 800 20px/1.1 var(--m-titulo);
+    font-variant-numeric: tabular-nums;
+  }
+
+  html[data-modelo='bairro'] body:has(.m-bai-barra) :is(.whatsapp-float, .whatsapp-button) {
+    display: none !important;
+  }
+
+  html[data-modelo='bairro'] body:has(.m-bai-barra) main {
+    padding-bottom: 78px;
+  }
+
+  html[data-modelo='bairro'] body:has(.m-bai-barra) .m-previa {
+    bottom: 88px;
+  }
+}
+
+@media (max-width: 760px) {
+  .m-bai-faixa-linha {
+    font-size: 13px;
+  }
+
+  .m-bai-topo-zap span {
+    display: none;
+  }
+
+  .m-bai-topo-zap {
+    width: 48px;
+    padding: 0;
+  }
+
+  .m-bai-chamada-grade {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .m-bai-placa {
+    flex-direction: row;
+    align-items: baseline;
+    justify-self: start;
+    gap: 10px;
+    padding: 10px 16px;
+  }
+
+  .m-bai-placa strong {
+    font-size: 40px;
+  }
+
+  .m-bai-categorias {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .m-bai-categorias li {
+    flex-shrink: 0;
+  }
+
+  .m-bai-grade,
+  html[data-modelo='bairro'] :not(.car-carousel-item):has(> .m-bai-card) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+  }
+
+  .m-bai-card-dados {
+    padding: 10px 10px 0;
+  }
+
+  .m-bai-card-dados h3 {
+    font-size: 15px;
+  }
+
+  .m-bai-card-ficha {
+    font-size: 12.5px;
+  }
+
+  /* No celular, ano e km numa linha só */
+  .m-bai-card-ficha span:nth-child(n + 3) {
+    display: none;
+  }
+
+  .m-bai-card-versao {
+    display: none;
+  }
+
+  .m-bai-preco {
+    left: 8px;
+    bottom: 8px;
+    padding: 5px 9px 6px;
+    font-size: 15.5px;
+  }
+
+  .m-bai-card-zap {
+    min-height: 40px;
+    margin: 10px;
+    padding: 0 10px;
+    font-size: 14px;
+  }
+
+  .m-bai-servicos-grade,
+  .m-bai-visite-grade,
+  .m-bai-rodape-grade {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .m-bai-rodape-faixa-linha {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

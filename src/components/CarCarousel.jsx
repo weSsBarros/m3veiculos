@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import CarCard from './CarCard.jsx'
+import { ModeloCard } from '../modelos/Modelos.jsx'
 import './CarCarousel.css'
 
 export default function CarCarousel({ eyebrow, title, cars, viewAllLink }) {
@@ -38,7 +38,7 @@ export default function CarCarousel({ eyebrow, title, cars, viewAllLink }) {
         <div className="car-carousel-track" ref={trackRef}>
           {cars.map((car) => (
             <div className="car-carousel-item" key={car.id}>
-              <CarCard car={car} />
+              <ModeloCard grade car={car} />
             </div>
           ))}
         </div>

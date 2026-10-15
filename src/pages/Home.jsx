@@ -7,9 +7,10 @@ import FAQ from '../components/FAQ.jsx'
 import SetupNotice from '../components/SetupNotice.jsx'
 import { useCars } from '../context/CarsContext.jsx'
 import { Award } from 'lucide-react'
+import { ModeloInicio } from '../modelos/Modelos.jsx'
 import './Home.css'
 
-export default function Home() {
+function HomeAtual() {
   const { cars, loading, error } = useCars()
 
   if (error === 'not-configured') return <SetupNotice />
@@ -65,4 +66,9 @@ export default function Home() {
       </section>
     </>
   )
+}
+
+// Modelo de site escolhido (src/modelos): sem modelo, a página inicial da loja
+export default function Home() {
+  return <ModeloInicio padrao={<HomeAtual />} />
 }

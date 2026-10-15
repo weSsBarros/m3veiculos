@@ -811,6 +811,18 @@ html[data-admin-theme='escuro'] .admin-segmented button.is-active {
   color: #fff;
 }
 
+html[data-admin-theme='escuro'] .admin-commission-field .admin-segmented button + button {
+  border-left: none;
+}
+
+html[data-admin-theme='escuro'] .admin-commission-field .admin-segmented button:nth-child(even) {
+  border-left: 1px solid var(--color-border);
+}
+
+html[data-admin-theme='escuro'] .admin-commission-field .admin-segmented button:nth-child(n + 3) {
+  border-top: 1px solid var(--color-border);
+}
+
 html[data-admin-theme='escuro'] .admin-sale-fields {
   background: var(--color-bg-alt);
 }

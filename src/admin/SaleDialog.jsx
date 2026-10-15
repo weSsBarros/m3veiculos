@@ -3,7 +3,8 @@ import { X } from 'lucide-react'
 import DateInputBR from '../components/DateInputBR.jsx'
 import { formatCurrencyCents, parseIntBR, todayISO } from '../utils/carFormat.js'
 import { describeCommission } from '../lib/sellersApi.js'
-import { fetchCommissionTiers, tierCommission } from '../lib/commissionTiersApi.js'
+import { fetchCommissionTiers, tierCommission, fetchCommissionBands } from '../lib/commissionTiersApi.js'
+import { bandFor, bandCommission, bandRangeLabel } from '../utils/commissionBands.js'
 import { checklistSummary } from '../utils/saleChecklist.js'
 import { deliveryChecklistFromIntake } from '../utils/carChecklists.js'
 import CustomerPicker from './CustomerPicker.jsx'
@@ -61,11 +62,15 @@ export default function SaleDialog({
   const [checklist, setChecklist] = useState(() => deliveryChecklistFromIntake(checklistItems, car.intakeItems, initialSale?.checklist || []))
   const [generateTerm, setGenerateTerm] = useState(false)
   const [error, setError] = useState('')
-  // Faixas de comissão (seção 78): prévia de quem recebe "Pela faixa do carro"
+  // Faixas de comissão: prévia de quem recebe "Pela faixa do carro" (seção 78) ou
+  // "Pela faixa de valor" (seção 82; o banco calcula de novo ao salvar)
   const [tiers, setTiers] = useState([])
+  const [bands, setBands] = useState([])
 
   useEffect(() => {
-    if (showCommission) fetchCommissionTiers().then(setTiers).catch(() => {})
+    if (!showCommission) return
+    fetchCommissionTiers().then(setTiers).catch(() => {})
+    fetchCommissionBands().then(setBands).catch(() => {})
   }, [showCommission])
 
   const seller = activeSellers.find((s) => s.id === sellerId)
@@ -75,6 +80,7 @@ export default function SaleDialog({
     if (seller.commissionType === 'percent') commissionPreview = Math.round(priceValue * seller.commissionValue) / 100
     else if (seller.commissionType === 'fixed') commissionPreview = seller.commissionValue
     else if (seller.commissionType === 'tier') commissionPreview = tierCommission(tiers, car.commissionTierId)
+    else if (seller.commissionType === 'price_band') commissionPreview = bandCommission(bands, priceValue)
     else commissionPreview = 0
   }
 
@@ -183,13 +189,17 @@ export default function SaleDialog({
             <div className="sale-dialog-commission">
               <span>
                 Comissão ({describeCommission(seller)}
-                {seller.commissionType === 'tier' && car.commissionTierId ? `: ${tiers.find((t) => t.id === car.commissionTierId)?.name || ''}` : ''})
+                {seller.commissionType === 'tier' && car.commissionTierId ? `: ${tiers.find((t) => t.id === car.commissionTierId)?.name || ''}` : ''}
+                {seller.commissionType === 'price_band' && priceValue && bandFor(bands, priceValue) ? `: ${bandRangeLabel(bands, bandFor(bands, priceValue))}` : ''})
               </span>
               <strong>{commissionPreview != null ? formatCurrencyCents(commissionPreview) : '—'}</strong>
             </div>
           )}
           {seller && showCommission && seller.commissionType === 'tier' && !car.commissionTierId && (
             <span className="sale-dialog-note">Este carro está sem faixa de comissão: escolha a faixa no cadastro do carro antes de salvar a venda.</span>
+          )}
+          {seller && showCommission && seller.commissionType === 'price_band' && priceValue > 0 && !bandFor(bands, priceValue) && (
+            <span className="sale-dialog-note">Nenhuma faixa de valor cobre esta venda: a comissão fica zerada (o admin cadastra as faixas na Equipe).</span>
           )}
 
           <div className="sale-dialog-section">

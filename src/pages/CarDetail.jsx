@@ -14,6 +14,7 @@ import FinancingModal from '../components/FinancingModal.jsx'
 import './CarDetail.css'
 import { useCarSeo } from '../utils/carSeo.js'
 import { formatMileage, mileageLabel, vehicleHasDoors } from '../utils/vehicleTypes.js'
+import { ModeloBarraCarro } from '../modelos/Modelos.jsx'
 
 const HIGHLIGHT_ICONS = {
   'Revisado na concessionária': Wrench,
@@ -255,6 +256,7 @@ export default function CarDetail() {
         <CarCarousel eyebrow="Você também pode gostar" title="Carros parecidos" cars={similar} viewAllLink="/estoque" />
       )}
 
+      {!isSold && <ModeloBarraCarro car={car} />}
       {showFinancing && <FinancingModal car={car} onClose={() => setShowFinancing(false)} />}
     </div>
   )

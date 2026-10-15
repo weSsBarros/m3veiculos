@@ -54,3 +54,31 @@ export function tierCommission(tiers, tierId) {
   const tier = (tiers || []).find((t) => t.id === tierId)
   return tier ? tier.amount : 0
 }
+
+// Faixas de comissão por valor da venda (seção 82): "até" um valor (null = acima da
+// maior) e a comissão. Toda a equipe lê; só o admin grava. Contas em utils/commissionBands.js.
+function bandFromRow(row) {
+  return {
+    id: row.id,
+    upTo: row.up_to == null ? null : Number(row.up_to),
+    amount: Number(row.amount) || 0,
+  }
+}
+
+export async function fetchCommissionBands() {
+  if (!supabase) return []
+  const data = await run(supabase.from('commission_price_bands').select('id, up_to, amount').eq('company_id', COMPANY_ID))
+  return (data || []).map(bandFromRow)
+}
+
+export async function saveCommissionBand(band) {
+  const row = { up_to: band.upTo, amount: band.amount }
+  const query = band.id
+    ? supabase.from('commission_price_bands').update(row).eq('id', band.id).eq('company_id', COMPANY_ID)
+    : supabase.from('commission_price_bands').insert({ ...row, company_id: COMPANY_ID })
+  return bandFromRow(await run(query.select('id, up_to, amount').single()))
+}
+
+export async function deleteCommissionBand(id) {
+  await run(supabase.from('commission_price_bands').delete().eq('id', id).eq('company_id', COMPANY_ID))
+}

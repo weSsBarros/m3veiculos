@@ -2074,6 +2074,25 @@ a.admin-form-note {
   color: #fff;
 }
 
+/* Tipo de comissão: quatro opções (com a faixa de valor, seção 82), duas por linha,
+   para cada nome caber numa linha só */
+.admin-commission-field .admin-segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.admin-commission-field .admin-segmented button + button {
+  border-left: none;
+}
+
+.admin-commission-field .admin-segmented button:nth-child(even) {
+  border-left: 1px solid var(--color-border);
+}
+
+.admin-commission-field .admin-segmented button:nth-child(n + 3) {
+  border-top: 1px solid var(--color-border);
+}
+
 /* Dados da venda no formulário do carro */
 .admin-sale-fields {
   background: var(--color-bg-alt);
@@ -2927,25 +2946,31 @@ span.car-plate {
 }
 
 /* Checklist da venda com as colunas "Possui" e "Entregue" (14/10/2026): o item
-   na primeira linha e as duas colunas embaixo, lado a lado */
+   na primeira linha e as duas colunas embaixo, lado a lado quando cabem. Na janela
+   estreita (celular) "Entregue" desce para baixo de "Possui", com os botões
+   alinhados (rótulos da mesma largura), em vez de passar da borda e ser cortado. */
 .sale-checklist-col-label {
   display: none;
 }
 
 .sale-checklist.is-delivery li {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, max-content));
-  justify-content: start;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 8px 18px;
 }
 
 .sale-checklist.is-delivery .sale-checklist-item {
-  grid-column: 1 / -1;
+  flex: 1 1 100%;
+}
+
+.sale-checklist.is-delivery .sale-checklist-options {
+  align-items: center;
 }
 
 .sale-checklist.is-delivery .sale-checklist-col-label {
-  display: inline;
-  align-self: center;
+  display: inline-block;
+  min-width: 58px;
   margin-right: 2px;
   font-size: 12px;
   font-weight: 700;

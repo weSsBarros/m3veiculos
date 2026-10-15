@@ -2572,6 +2572,60 @@ select test.check('dono da plataforma: créditos de cada loja com último uso e 
    from jsonb_array_elements(platform_plate_credits()) x where x ->> 'company_id' = test.company_a()::text));
 reset role;
 
+-- ======================================== 82) comissão por faixa de valor da venda
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: cria as faixas de valor (até 30 mil, até 70 mil e acima)',
+  test.allowed($$insert into commission_price_bands (up_to, amount) values (30000, 300), (70000, 500), (null, 1000)$$));
+select test.check('admin A: não repete o mesmo "até" nem cria outra faixa "acima"',
+  test.denied($$insert into commission_price_bands (up_to, amount) values (30000, 400)$$)
+  and test.denied($$insert into commission_price_bands (up_to, amount) values (null, 2000)$$));
+select test.check('admin A: valor negativo é recusado',
+  test.denied($$insert into commission_price_bands (up_to, amount) values (90000, -1)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: vê as faixas de valor, mas não cria nem muda',
+  test.count($$select * from commission_price_bands$$) = 3
+  and test.denied($$insert into commission_price_bands (up_to, amount) values (100000, 9000)$$));
+select test.try($$update commission_price_bands set amount = 9999$$);
+select test.check('vendedor A: chamar a conta da faixa direto é recusado',
+  test.denied($$select commission_band_amount(current_company_id(), 1000)$$));
+reset role;
+select test.check('vendedor A: o valor das faixas continua o mesmo',
+  (select sum(amount) from public.commission_price_bands where company_id = test.company_a()) = 1800);
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê as faixas de valor da loja A', test.count($$select * from commission_price_bands$$) = 0);
+reset role;
+set role anon;
+select test.check('anon: não lê faixas nem chama a conta',
+  test.denied($$select * from commission_price_bands$$)
+  and test.denied($$select commission_band_amount(gen_random_uuid(), 1000)$$));
+reset role;
+select test.login(null);
+
+update public.sellers set commission_type = 'price_band', commission_value = 0 where id = '5e000000-0000-0000-0000-000000000004';
+insert into public.sales (company_id, car_id, seller_id, sale_price, sale_date)
+values (test.company_a(), 'ca000000-0000-0000-0000-0000000000a1', '5e000000-0000-0000-0000-000000000004', 30000, current_date);
+select test.check('venda de R$ 30.000 (até 30 mil, inclusive): comissão R$ 300',
+  (select commission_type = 'price_band' and commission_amount = 300 from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+update public.sales set sale_price = 30001 where car_id = 'ca000000-0000-0000-0000-0000000000a1';
+select test.check('venda corrigida para R$ 30.001: comissão R$ 500',
+  (select commission_amount = 500 from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+update public.sales set sale_price = 85000 where car_id = 'ca000000-0000-0000-0000-0000000000a1';
+select test.check('venda de R$ 85.000 (acima de 70 mil): comissão R$ 1.000',
+  (select commission_amount = 1000 from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+delete from public.commission_price_bands where company_id = test.company_a() and up_to is null;
+update public.sales set sale_price = 85001 where car_id = 'ca000000-0000-0000-0000-0000000000a1';
+select test.check('sem a faixa "acima", venda maior que a última fica sem comissão',
+  (select commission_amount = 0 from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+delete from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1';
+update public.sellers set commission_type = 'percent', commission_value = 0 where id = '5e000000-0000-0000-0000-000000000004';
+delete from public.commission_price_bands where company_id = test.company_a();
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;
