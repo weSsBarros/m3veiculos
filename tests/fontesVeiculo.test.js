@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { makeFipeSources, fipeQuery, FipeError, fipeCacheKey, fipeCacheFresh, checkFipeParams, fipeCandidatesForCrlv } from '../src/utils/fipeFontes.js'
-import { makeApiBrasilProvider, makeMockProvider, vehicleFromAgregados, candidatesFromPlacaFipe, sanitizePlateResult, PlacaError } from '../src/utils/placaProvedor.js'
+import { makeApiBrasilProvider, makeMockProvider, vehicleFromAgregados, candidatesFromPlacaFipe, sanitizePlateResult, PlacaError, PLACA_SEM_DADOS } from '../src/utils/placaProvedor.js'
 import { parseCrlvText, textFromPdfItems } from '../src/utils/crlvParser.js'
 
 // fetch de mentira: responde pela URL; registra as chamadas
@@ -152,6 +152,28 @@ test('placa: erro que vem com HTTP 200, saldo acabado (402) e placa inválida', 
   await assert.rejects(makeApiBrasilProvider({ fetch: nada, token: 't' }).lookupByPlate('AB12'), (err) => err.code === 'placa')
   assert.equal(nada.calls.length, 0)
   assert.throws(() => makeApiBrasilProvider({ fetch: nada, token: '' }), PlacaError)
+})
+
+test('placa: erro de servidor numa placa só (caso de 13/10/2026) fala da placa e guarda o que a APIBrasil disse, sem dados', async () => {
+  const fora = apiBrasilFetch({
+    'agregados-propria': { status: 500, body: { error: true, message: 'Falha na placa ROG8E54 (chassi 9BRBDWHE5N0123456, doc 123.456.789-09)' } },
+  })
+  await assert.rejects(makeApiBrasilProvider({ fetch: fora, token: 't' }).lookupByPlate('ROG8E54'), (err) => {
+    assert.equal(err.code, 'fora')
+    assert.equal(err.message, PLACA_SEM_DADOS)
+    assert.deepEqual(err.detail, { status: 500, message: 'Falha na placa [placa] (chassi [chassi], doc [número])' })
+    return true
+  })
+  // repete uma vez, como na falha de rede
+  assert.equal(fora.calls.length, 2)
+  // página de erro sem JSON: só o status
+  const html = async () => ({ status: 502, ok: false, json: async () => { throw new SyntaxError('html') } })
+  await assert.rejects(makeApiBrasilProvider({ fetch: html, token: 't' }).lookupByPlate('ROG8E54'),
+    (err) => err.message === PLACA_SEM_DADOS && err.detail.status === 502 && !('message' in err.detail))
+  // erro com HTTP 200 também leva o detalhe; palavra comprida não vira chassi
+  const erro200 = apiBrasilFetch({ 'agregados-propria': { body: { error: true, message: 'Placa não encontrada na base: indisponibilidade' } } })
+  await assert.rejects(makeApiBrasilProvider({ fetch: erro200, token: 't' }).lookupByPlate('ABC1D23'),
+    (err) => err.code === 'recusado' && err.detail.message === 'Placa não encontrada na base: indisponibilidade')
 })
 
 test('placa: falha de rede repete uma vez; sem candidatos FIPE, devolve só o veículo', async () => {

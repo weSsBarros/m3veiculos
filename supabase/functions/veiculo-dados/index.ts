@@ -459,7 +459,12 @@ Deno.serve(async (req) => {
   } catch (err) {
     if (err instanceof FipeError) return reply({ error: err.message, motivo: err.reason }, FIPE_STATUS[err.reason] || 503)
     if (err instanceof CrlvError) return reply({ error: CRLV_MESSAGES[err.code] || CRLV_MESSAGES.pdf_invalido, motivo: err.code }, 422)
-    if (err instanceof PlacaError) return reply({ error: err.message, motivo: err.code }, PLACA_STATUS[err.code] || 503)
+    if (err instanceof PlacaError) {
+      // O que a APIBrasil respondeu (status e mensagem, sem placa nem documento): mostra se
+      // o problema é a placa ou o serviço
+      if (err.detail) console.warn('veiculo-dados: APIBrasil', err.code, JSON.stringify(err.detail))
+      return reply({ error: err.message, motivo: err.code }, PLACA_STATUS[err.code] || 503)
+    }
     // Só o tipo do erro vai para o log (nada do PDF, da foto nem do documento)
     console.error('veiculo-dados: erro inesperado', (err as Error)?.name || 'Error')
     return reply({ error: 'Não deu certo agora. Tente de novo ou preencha à mão.' }, 500)
@@ -1406,10 +1411,27 @@ const APIBRASIL_URL = 'https://gateway.apibrasil.io/api/v2/consulta/veiculos/cre
 
 export class PlacaError extends Error {
   // code: 'placa' (placa inválida), 'saldo' (402), 'recusado' (erro da API), 'fora' (rede, 5xx, tempo)
-  constructor(message, code = 'fora') {
+  // detail: o que a APIBrasil respondeu ({ status, message }), só para o log da função
+  constructor(message, code = 'fora', detail = null) {
     super(message)
     this.code = code
+    this.detail = detail
   }
+}
+
+// A APIBrasil respondeu erro de servidor para esta placa (13/10/2026: uma placa só dava
+// 5xx, também na repetição, e as outras funcionavam)
+export const PLACA_SEM_DADOS = 'Não deu para buscar os dados desta placa agora. Confira a placa ou use a tabela FIPE. Não foi cobrado.'
+
+// Resposta da APIBrasil para o log: status e mensagem, sem placa, chassi nem números longos
+// (CPF, CNPJ, RENAVAM)
+export function apiBrasilDetail(status, json) {
+  const message = String(json?.message || json?.error_message || json?.erro || '')
+    .replace(/\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b/gi, '[placa]')
+    .replace(/\b(?=[A-Z]*\d)[A-HJ-NPR-Z0-9]{17}\b/gi, '[chassi]')
+    .replace(/\d[\d.\-/]{7,}\d/g, '[número]')
+    .slice(0, 200)
+  return message ? { status, message } : { status }
 }
 
 function titleCase(text) {
@@ -1485,22 +1507,30 @@ async function postOnce(fetchImpl, token, body, timeoutMs) {
       signal: controller.signal,
     })
   } catch {
-    throw new PlacaError('A consulta de placa não respondeu agora.', 'fora')
+    throw new PlacaError('A consulta de placa não respondeu agora.', 'fora', { status: 'sem resposta' })
   } finally {
     clearTimeout(timer)
   }
-  if (res.status === 402) throw new PlacaError('Acabou o saldo da consulta de placa (APIBrasil). Avise a WB.Dev.', 'saldo')
-  if (res.status >= 500) throw new PlacaError('A consulta de placa está fora do ar agora.', 'fora')
+  if (res.status === 402) throw new PlacaError('Acabou o saldo da consulta de placa (APIBrasil). Avise a WB.Dev.', 'saldo', { status: 402 })
+  if (res.status >= 500) {
+    let body = null
+    try {
+      body = await res.json()
+    } catch {
+      // página de erro sem JSON: fica só o status
+    }
+    throw new PlacaError(PLACA_SEM_DADOS, 'fora', apiBrasilDetail(res.status, body))
+  }
   let json
   try {
     json = await res.json()
   } catch {
-    throw new PlacaError('A consulta de placa respondeu algo inesperado.', res.status >= 400 ? 'recusado' : 'fora')
+    throw new PlacaError('A consulta de placa respondeu algo inesperado.', res.status >= 400 ? 'recusado' : 'fora', { status: res.status })
   }
   // A APIBrasil devolve erro com HTTP 200: vale o campo "error"
   if (!res.ok || json?.error !== false) {
     const message = String(json?.message || '').slice(0, 160)
-    throw new PlacaError(message ? `A consulta de placa recusou: ${message}` : 'A consulta de placa recusou o pedido.', 'recusado')
+    throw new PlacaError(message ? `A consulta de placa recusou: ${message}` : 'A consulta de placa recusou o pedido.', 'recusado', apiBrasilDetail(res.status, json))
   }
   return json.data || {}
 }
