@@ -23,6 +23,7 @@ export const PANEL_TABS = [
 export const DASHBOARD_BLOCKS = [
   { key: 'alerts', label: 'Alertas de transferências e parcelas em atraso' },
   { key: 'pendencies', label: 'Pendências' },
+  { key: 'installmentsDue', label: 'Parcelas de clientes a vencer' },
   { key: 'stats', label: 'Números do período (vendas, faturamento, estoque)' },
   { key: 'revenue6m', label: 'Faturamento dos últimos 6 meses' },
   { key: 'salesByMonth', label: 'Vendas por mês' },
@@ -45,6 +46,7 @@ export const PENDENCY_TABS = {
   'sale-customer': 'vendas',
   'sale-contract': 'vendas',
   'sale-checklist': 'vendas',
+  'sale-nfse': 'vendas',
   'car-photo': 'estoque',
   'car-price': 'estoque',
   'car-docs': 'estoque',
@@ -152,6 +154,7 @@ export const PENDENCY_LABELS = {
   'sale-customer': 'Vendas sem cliente vinculado',
   'sale-contract': 'Vendas sem contrato ou documento',
   'sale-checklist': 'Checklist de entrega incompleto',
+  'sale-nfse': 'Vendas sem nota fiscal (NFS-e)',
   'car-photo': 'Carros sem foto',
   'car-price': 'Carros sem preço',
   'car-docs': 'Carros sem documento anexado',

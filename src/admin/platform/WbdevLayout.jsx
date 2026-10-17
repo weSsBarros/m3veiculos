@@ -14,14 +14,13 @@ import {
   Menu,
   X,
   LogOut,
-  Moon,
-  Sun,
   Presentation,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { useAdminTheme } from '../../utils/adminTheme.js'
 import useConfirm from '../../components/useConfirm.jsx'
 import PanelSwitch, { useRememberPanel } from '../PanelSwitch.jsx'
+import PanelTopBar from '../PanelTopBar.jsx'
 import { usePlatformBadges } from './platformBadges.js'
 import { usePresentation, setPresentation } from './presentation.js'
 import '../admin.css'
@@ -199,7 +198,8 @@ export default function WbdevLayout() {
           })}
         </nav>
 
-        <div className="admin-sidebar-bottom">
+        {/* Tema e nome ficam no canto de cima (17/10/2026); com o menu aberto, linha de ícones */}
+        <div className={`admin-sidebar-bottom${showLabels ? ' is-row' : ''}`}>
           <button
             type="button"
             className={`admin-sidebar-action ${presenting ? 'is-presenting' : ''}`}
@@ -210,22 +210,6 @@ export default function WbdevLayout() {
             <Presentation size={18} />
             <span className="admin-sidenav-label">{presenting ? 'Sair da apresentação' : 'Modo apresentação'}</span>
           </button>
-          <button
-            type="button"
-            className="admin-sidebar-action"
-            onClick={toggleTheme}
-            data-tooltip={showLabels ? undefined : theme === 'escuro' ? 'Tema claro' : 'Tema escuro'}
-            aria-label={theme === 'escuro' ? 'Usar o tema claro' : 'Usar o tema escuro'}
-          >
-            {theme === 'escuro' ? <Sun size={18} /> : <Moon size={18} />}
-            <span className="admin-sidenav-label">{theme === 'escuro' ? 'Tema claro' : 'Tema escuro'}</span>
-          </button>
-          {showLabels && (
-            <div className="admin-sidebar-user">
-              <strong>WB.Dev</strong>
-              <span>{user?.email}</span>
-            </div>
-          )}
           <button
             type="button"
             className="admin-sidebar-logout"
@@ -246,6 +230,7 @@ export default function WbdevLayout() {
       )}
 
       <main className="admin-main">
+        <PanelTopBar name={user?.email || 'WB.Dev'} role="WB.Dev" email={user?.email} theme={theme} onToggleTheme={toggleTheme} />
         {presenting && (
           <div className="wbdev-present-bar">
             <Presentation size={16} />

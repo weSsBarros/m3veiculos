@@ -62,9 +62,11 @@ function PrivateBadge({ car, card }) {
 }
 
 // Botões de ação com ícone + nome, iguais na tabela (desktop) e nos cards (celular)
-function RowActions({ car, busy, canDelete: roleCanDelete, canSeeCosts: roleSeesCosts, canEditSales, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
-  // Carro com o cadeado de outro sócio: só lança gasto e não exclui
-  const canSeeCosts = roleSeesCosts && !car.valuesHidden
+function RowActions({ car, busy, canDelete: roleCanDelete, canEditSales, onToggleFeatured, onToggleHidden, onDelete, onEditSale }) {
+  // Lista dos gastos: admin e gerente com "Gasto em manutenção" (seção 89). Carro
+  // com o cadeado de outro sócio: só lança gasto e não exclui
+  const { canSeeExpenses } = useAuth()
+  const seeExpenses = canSeeExpenses && !car.valuesHidden
   const canDelete = roleCanDelete && !car.valuesHidden
   return (
     <div className="admin-action-group">
@@ -92,7 +94,7 @@ function RowActions({ car, busy, canDelete: roleCanDelete, canSeeCosts: roleSees
         {car.hidden ? <EyeOff size={15} /> : <Eye size={15} />} {car.hidden ? 'Mostrar' : 'Ocultar'}
       </button>
       <Link to={`/admin/carros/${car.id}/gastos`} className="admin-action-btn">
-        <Receipt size={15} /> {canSeeCosts ? 'Gastos' : 'Lançar gasto'}
+        <Receipt size={15} /> {seeExpenses ? 'Gastos' : 'Lançar gasto'}
       </Link>
       <Link to={`/admin/carros/${car.id}`} className="admin-action-btn">
         <Pencil size={15} /> Editar

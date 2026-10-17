@@ -58,6 +58,8 @@ export function creditsFromRow(row) {
     signatureFreeLeft: signatureFreeLeft == null ? 0 : Math.max(0, Math.floor(toNumber(signatureFreeLeft))),
     packages: packages.map((amount) => ({ amount, queries: queriesFor(amount, price) })),
     admin: row.admin === true,
+    // PIX da WB.Dev para comprar créditos (seção 86: a equipe toda compra)
+    pix: row.pix ? { pixKey: row.pix.pix_key || '', pixName: row.pix.pix_name || '', pixCity: row.pix.pix_city || '' } : null,
     orders: (row.orders || []).map((o) => ({
       id: o.id,
       amount: toNumber(o.amount),
@@ -65,6 +67,7 @@ export function creditsFromRow(row) {
       status: o.status || 'pendente',
       response: o.response || '',
       createdAt: o.created_at || '',
+      createdByEmail: o.created_by_email || '',
     })),
     ledger: (row.ledger || []).map((l) => ({
       id: l.id,

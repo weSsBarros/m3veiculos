@@ -10,8 +10,9 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { maskCPF, maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
 import { matchesCarSearch, parseIntBR, todayISO } from '../utils/carFormat.js'
 import { fetchTeamDirectory } from '../lib/storeSettingsApi.js'
-import { fetchMatches, fetchContacts, fetchInterests } from '../lib/customerCrmApi.js'
-import { likedCarGone, PAYMENT_INTENTS } from '../utils/customerInterests.js'
+import { fetchMatches, fetchContacts, fetchInterests, createInterest } from '../lib/customerCrmApi.js'
+import { likedCarGone, hasCriteria, PAYMENT_INTENTS, EMPTY_SEARCH } from '../utils/customerInterests.js'
+import InterestSearchFields from './InterestSearchFields.jsx'
 import CustomerFileDialog from './CustomerFileDialog.jsx'
 import PersonalDocuments, { uploadPendingPersonalDocs } from './PersonalDocuments.jsx'
 import './admin.css'
@@ -73,6 +74,8 @@ export default function AdminCustomers() {
   const [editingId, setEditingId] = useState(null)
   // CNH, RG e comprovantes escolhidos no cadastro novo: vão depois de cadastrar
   const [pendingDocs, setPendingDocs] = useState([])
+  // Carro que ele procura, marcado já no cadastro novo (vira um interesse da ficha)
+  const [interest, setInterest] = useState(EMPTY_SEARCH)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
 
@@ -258,7 +261,21 @@ export default function AdminCustomers() {
   function cancelEdit() {
     setEditingId(null)
     setPendingDocs([])
+    setInterest(EMPTY_SEARCH)
     setForm(emptyCustomer(isSeller ? mySellerId : ''))
+  }
+
+  // Interesse do cadastro novo, no formato da ficha (null = nada preenchido)
+  function interestToSave(customerId) {
+    const item = {
+      ...interest,
+      kind: 'procura',
+      customerId,
+      yearMin: parseIntBR(interest.yearMin),
+      priceMax: parseIntBR(interest.priceMax),
+      kmMax: parseIntBR(interest.kmMax),
+    }
+    return hasCriteria(item) ? item : null
   }
 
   // Valores da negociação viram número (o resto, texto)
@@ -290,6 +307,16 @@ export default function AdminCustomers() {
       } else {
         const created = await createCustomer(formToCustomer())
         setCustomers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
+        const wanted = interestToSave(created.id)
+        if (wanted) {
+          try {
+            await createInterest(wanted)
+            loadCrm()
+          } catch (err) {
+            // O cliente já foi cadastrado: o interesse pode ser registrado na ficha
+            setError('Cliente cadastrado, mas o interesse não foi salvo (' + err.message + '). Registre na ficha dele, aba Interesses.')
+          }
+        }
         if (pendingDocs.length > 0) {
           try {
             await uploadPendingPersonalDocs(created.id, pendingDocs)
@@ -440,6 +467,29 @@ export default function AdminCustomers() {
             </label>
           </div>
         </details>
+        {editingId ? (
+          <p className="admin-form-note">
+            O carro que ele procura fica na ficha do cliente:{' '}
+            <button type="button" className="admin-link-btn" onClick={() => openFile({ id: editingId }, 'interesses')}>
+              abrir a aba Interesses
+            </button>
+            .
+          </p>
+        ) : (
+          <details className="crm-negotiation">
+            <summary>O que ele procura (opcional): marca, tipo, ano, preço até… O sistema avisa quando entrar um carro que combina</summary>
+            <p className="admin-form-hint">Preencha só o que importa para ele; o resto vale "qualquer um".</p>
+            <InterestSearchFields
+              form={interest}
+              onChange={(field, value) => setInterest((prev) => ({ ...prev, [field]: value }))}
+              idPrefix="novo-cliente"
+            />
+            <label>
+              Observações do interesse
+              <input value={interest.notes} onChange={(e) => setInterest((prev) => ({ ...prev, notes: e.target.value }))} placeholder="Opcional (ex.: prefere cor clara)" />
+            </label>
+          </details>
+        )}
         <div className="admin-form-actions">
           {editingId && (
             <button type="button" className="btn btn-outline" onClick={cancelEdit}>

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase, isSupabaseConfigured, COMPANY_ID } from '../lib/supabaseClient.js'
 import { fetchMySeller } from '../lib/sellersApi.js'
 import { setCarsAccess } from '../lib/carsApi.js'
+import { setExpensesAccess } from '../lib/expensesApi.js'
 import { logLogin } from '../lib/activityApi.js'
 import { setViewScope } from '../lib/viewScope.js'
 import { fetchStoreSettings } from '../lib/storeSettingsApi.js'
@@ -129,7 +130,13 @@ export function AuthProvider({ children }) {
       setSuspended(false)
       setSuspendedInfo(null)
       setPanelSettings(store ? store.panel : normalizePanelSettings(null))
-      setCarsAccess(userRole)
+      // Gerente (seção 89): custo de compra pela car_costs() e os gastos (lista
+      // inteira ou só o total de cada carro, para a margem)
+      const isManagerLogin = userRole === 'manager'
+      const managerCosts = isManagerLogin && sellerRecord?.canSeeCosts === true
+      const managerExpenses = isManagerLogin && sellerRecord?.canSeeExpenses === true
+      setCarsAccess(userRole, { costs: managerCosts })
+      setExpensesAccess(userRole === 'admin' || managerExpenses ? 'full' : managerCosts ? 'totals' : 'none')
       setUser(session.user)
       setRole(userRole)
       setSeller(sellerRecord)
@@ -219,8 +226,11 @@ export function AuthProvider({ children }) {
   // Estoque: todos da equipe cadastram e editam carros, fotos, status, gastos
   // e documentos (sem custo de compra e sem excluir, fora o admin)
   const canEditStock = Boolean(effectiveRole)
-  // Custo de aquisição, gastos, margem e lucro: só o admin (o banco também bloqueia)
-  const canSeeCosts = isAdmin
+  // Custo de aquisição, margem e lucro: o admin e o gerente com "Custo de compra,
+  // margem e lucro"; a lista dos gastos: o admin e o gerente com "Gasto em
+  // manutenção" (seção 89; o banco também bloqueia)
+  const canSeeCosts = isAdmin || (isManager && effectiveSeller?.canSeeCosts === true)
+  const canSeeExpenses = isAdmin || (isManager && effectiveSeller?.canSeeExpenses === true)
   // Valores das vendas (faturamento, comissões): admin, ou gerente que o admin
   // liberou para ver valores. O gerente em "só quantidades" vê só contagens.
   const canSeeSaleValues = isAdmin || (isManager && effectiveSeller?.financeAccess === 'values')
@@ -251,6 +261,7 @@ export function AuthProvider({ children }) {
         isStaff,
         canEditStock,
         canSeeCosts,
+        canSeeExpenses,
         canSeeSaleValues,
         canManageCustomerFinance,
         seller: effectiveSeller,

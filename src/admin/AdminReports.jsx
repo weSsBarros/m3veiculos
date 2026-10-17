@@ -25,6 +25,7 @@ import {
   buildLeadsReport,
   buildEntryTypeReport,
   buildResultReport,
+  buildDiscountReport,
 } from '../utils/reports/build.js'
 import { exportReportPdf, exportReportExcel } from '../utils/reports/export.js'
 import PeriodFilter from './PeriodFilter.jsx'
@@ -40,7 +41,7 @@ function notePrivate(report, count) {
 // números). Cada papel só tira o que pode ver: o vendedor tira o das vendas e
 // comissões dele; gastos, custo e margem são só do admin.
 export default function AdminReports() {
-  const { isAdmin, isStaff, isSeller, canSeeCosts, canSeeSaleValues, canManageCustomerFinance } = useAuth()
+  const { isAdmin, isStaff, isSeller, canSeeCosts, canSeeExpenses, canSeeSaleValues, canManageCustomerFinance } = useAuth()
   const [period, setPeriod] = useState('mes')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
@@ -69,6 +70,23 @@ export default function AdminReports() {
           buildSalesReport({ sales: money.items, cars, sellers, customers, externals, range, showValues: canSeeSaleValues || isSeller }),
           money.hidden
         )
+      },
+    },
+    {
+      id: 'descontos',
+      title: isSeller ? 'Meus descontos nas vendas' : 'Descontos nas vendas',
+      description: 'Vendas do período com desconto (valor antes, desconto, % e valor final, quem deu) e o resumo por vendedor.',
+      usesPeriod: true,
+      show: canSeeSaleValues || isSeller,
+      build: async () => {
+        const [sales, cars, sellers, customers] = await Promise.all([
+          fetchSales(),
+          fetchAllCarsAdmin(),
+          fetchSellers().catch(() => []),
+          fetchAllCustomers().catch(() => []),
+        ])
+        const money = itemsWithoutPrivate(sales, cars)
+        return notePrivate(buildDiscountReport({ sales: money.items, cars, sellers, customers, range }), money.hidden)
       },
     },
     {
@@ -144,7 +162,8 @@ export default function AdminReports() {
       title: 'Gastos',
       description: 'Gastos do período por carro, categoria e fornecedor, com o total por categoria.',
       usesPeriod: true,
-      show: isAdmin,
+      // Admin e gerente com "Gasto em manutenção" (seção 89)
+      show: canSeeExpenses,
       build: async () => {
         const [expenses, cars, suppliers] = await Promise.all([fetchAllExpensesAdmin(), fetchAllCarsAdmin(), fetchAllSuppliers().catch(() => [])])
         // Os gastos dos carros trancados nem chegam (o banco não manda)

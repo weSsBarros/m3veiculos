@@ -10225,7 +10225,411 @@ begin
 end;
 $$;
 
--- 83) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 83) Conferência: passou para a seção 85, no fim do arquivo (precisa ser a
+-- última consulta para o resultado aparecer no SQL Editor).
+
+-- 84) Aparência: modelo do site e visual do painel (pedido do Wesley em 15/10/2026)
+-- O admin da loja escolhe em Configurações → Aparência, um independente do outro:
+-- * site_modelo: 'atual' (o visual próprio da loja), 'estoque' (Estoque primeiro),
+--   'vitrine' (Vitrine) ou 'bairro' (Revenda de bairro). O site lê pelo
+--   company_status (público) e o api/pagina.php já entrega a página com ele.
+-- * painel_visual: 'atual' (padrão), 'compacto', 'escuro' (menu escuro) ou 'cor'
+--   (menu na cor da loja). Vale para toda a equipe da loja.
+-- Só o admin grava, pela save_store_settings (as colunas não têm update direto).
+alter table public.companies add column if not exists site_modelo text not null default 'atual';
+alter table public.companies drop constraint if exists companies_site_modelo_check;
+alter table public.companies add constraint companies_site_modelo_check check (site_modelo in ('atual', 'estoque', 'vitrine', 'bairro'));
+alter table public.companies add column if not exists painel_visual text not null default 'atual';
+alter table public.companies drop constraint if exists companies_painel_visual_check;
+alter table public.companies add constraint companies_painel_visual_check check (painel_visual in ('atual', 'compacto', 'escuro', 'cor'));
+
+create or replace function public.save_store_settings(p jsonb)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_keys text[];
+begin
+  if v_company is null or not public.is_company_admin() then
+    raise exception 'Só o administrador altera as configurações';
+  end if;
+  update public.companies set
+    whatsapp_mode = case when p ? 'whatsapp_mode' then p->>'whatsapp_mode' else whatsapp_mode end,
+    whatsapp_main = case when p ? 'whatsapp_main' then left(coalesce(p->>'whatsapp_main', ''), 30) else whatsapp_main end,
+    whatsapp_sticky_days = case when p ? 'whatsapp_sticky_days' then (p->>'whatsapp_sticky_days')::integer else whatsapp_sticky_days end,
+    whatsapp_templates = case when p ? 'whatsapp_templates' then p->'whatsapp_templates' else whatsapp_templates end,
+    panel_settings = case when p ? 'panel_settings' then p->'panel_settings' else panel_settings end,
+    site_modelo = case when p ? 'site_modelo' then p->>'site_modelo' else site_modelo end,
+    painel_visual = case when p ? 'painel_visual' then p->>'painel_visual' else painel_visual end
+  where id = v_company;
+
+  select array_agg(k order by k) into v_keys from jsonb_object_keys(p) k;
+  insert into public.activity_log (company_id, user_id, user_email, action, entity, label, details)
+  values (v_company, auth.uid(), (select email from auth.users where id = auth.uid()), 'update', 'companies',
+          'Configurações', array_to_string(v_keys, ', '));
+end;
+$$;
+revoke execute on function public.save_store_settings(jsonb) from anon, public;
+grant execute on function public.save_store_settings(jsonb) to authenticated;
+
+-- O site (sem login) e o painel de toda a equipe leem a escolha por aqui
+create or replace function public.company_status(p_company uuid)
+returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  select jsonb_build_object('blocked', public.company_blocked(c.id), 'name', c.name,
+                            'modelo', c.site_modelo, 'painel', c.painel_visual)
+  from public.companies c
+  where c.id = p_company
+$$;
+revoke execute on function public.company_status(uuid) from public;
+grant execute on function public.company_status(uuid) to anon, authenticated;
+
+-- 85) Conferência: passou para o fim do arquivo (precisa ser a última consulta para
+-- o resultado aparecer no SQL Editor).
+
+-- 86) Créditos comprados pela equipe toda (pedido do Wesley em 16/10/2026) ---------
+-- Gerente e vendedor também compram créditos (pacote, PIX e "Já paguei"): a loja sem
+-- crédito deixava a equipe sem a consulta da placa e sem a foto do documento. A equipe
+-- vê o PIX da WB.Dev e os pedidos de compra da loja; o extrato (cada consulta, quem fez
+-- e quando) continua só do admin. Os comprovantes dos créditos ficam em
+-- payment-receipts/<loja>/creditos/ (o resto da pasta da loja continua só do admin).
+create or replace function public.my_plate_credits()
+returns jsonb
+language plpgsql stable security definer set search_path = public, auth
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_admin boolean := public.is_company_admin();
+  s public.platform_settings%rowtype;
+begin
+  if v_company is null then
+    raise exception 'Acesso restrito à equipe da loja' using errcode = '42501';
+  end if;
+  select * into s from public.platform_settings where id = 1;
+  return jsonb_build_object(
+    'balance', public.plate_credit_balance(v_company),
+    'price', coalesce(s.plate_price, 0.40),
+    'doc_price', coalesce(s.doc_photo_price, 0.20),
+    'signature_price', coalesce(s.signature_price, 1.00),
+    'signature_free_monthly', coalesce(s.signature_free_monthly, 5),
+    'signature_free_left', public.signature_free_left(v_company),
+    'packages', to_jsonb(coalesce(s.plate_packages, '{20,40,100}'::numeric[])),
+    'admin', v_admin,
+    'pix', jsonb_build_object('pix_key', coalesce(s.pix_key, ''), 'pix_name', coalesce(s.pix_name, ''), 'pix_city', coalesce(s.pix_city, '')),
+    'orders', (
+      select coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'amount', o.amount, 'paid_on', o.paid_on, 'status', o.status,
+        'response', o.response, 'created_at', o.created_at, 'created_by_email', o.created_by_email) order by o.created_at desc), '[]'::jsonb)
+      from (select * from public.plate_credit_orders where company_id = v_company order by created_at desc limit 20) o
+    ),
+    'ledger', case when v_admin then (
+      select coalesce(jsonb_agg(jsonb_build_object('id', l.id, 'kind', l.kind, 'amount', l.amount, 'plate', l.plate,
+        'note', l.note, 'created_at', l.created_at, 'user_email', coalesce(u.email, '')) order by l.created_at desc, l.id desc), '[]'::jsonb)
+      from (select * from public.plate_credit_ledger where company_id = v_company order by created_at desc, id desc limit 50) l
+      left join auth.users u on u.id = l.created_by
+    ) else '[]'::jsonb end);
+end $$;
+revoke execute on function public.my_plate_credits() from anon, public;
+grant execute on function public.my_plate_credits() to authenticated;
+
+create or replace function public.request_plate_credit(p_amount numeric, p_paid_on date, p_receipt jsonb default null, p_note text default '')
+returns public.plate_credit_orders
+language plpgsql security definer set search_path = public, auth
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_packages numeric[];
+  v_row public.plate_credit_orders;
+begin
+  if v_company is null then
+    raise exception 'Acesso restrito à equipe da loja' using errcode = '42501';
+  end if;
+  select plate_packages into v_packages from public.platform_settings where id = 1;
+  if p_amount is null or not (p_amount = any (coalesce(v_packages, '{20,40,100}'::numeric[]))) then
+    raise exception 'Escolha um dos pacotes de crédito' using errcode = '22023';
+  end if;
+  if p_paid_on is null or p_paid_on > (now() at time zone 'America/Fortaleza')::date + 1 then
+    raise exception 'Informe a data do pagamento' using errcode = '22023';
+  end if;
+  if p_receipt is not null and (p_receipt ->> 'path') is not null then
+    if split_part(p_receipt ->> 'path', '/', 1) <> v_company::text then
+      raise exception 'Comprovante de outra loja' using errcode = '42501';
+    end if;
+    -- Gerente e vendedor enviam o comprovante na pasta dos créditos
+    if not public.is_company_admin() and split_part(p_receipt ->> 'path', '/', 2) <> 'creditos' then
+      raise exception 'Comprovante fora da pasta dos créditos' using errcode = '42501';
+    end if;
+  end if;
+  -- Clique repetido: o mesmo pacote, no mesmo dia, há poucos minutos
+  if exists (select 1 from public.plate_credit_orders o where o.company_id = v_company and o.status = 'pendente'
+             and o.amount = p_amount and o.paid_on = p_paid_on and o.created_at > now() - interval '10 minutes') then
+    raise exception 'Esse pagamento já foi informado. Aguarde a WB.Dev conferir.' using errcode = '23505';
+  end if;
+  insert into public.plate_credit_orders (company_id, amount, paid_on, receipt, note, created_by_email)
+  values (v_company, p_amount, p_paid_on, p_receipt, left(coalesce(p_note, ''), 500),
+          coalesce((select u.email from auth.users u where u.id = auth.uid()), ''))
+  returning * into v_row;
+  return v_row;
+end $$;
+revoke execute on function public.request_plate_credit(numeric, date, jsonb, text) from anon, public;
+grant execute on function public.request_plate_credit(numeric, date, jsonb, text) to authenticated;
+
+-- A equipe da loja vê os pedidos de compra (o aviso no WhatsApp da WB.Dev confere por aqui)
+drop policy if exists "Store admins and platform read plate credit orders" on public.plate_credit_orders;
+drop policy if exists "Store team and platform read plate credit orders" on public.plate_credit_orders;
+create policy "Store team and platform read plate credit orders"
+on public.plate_credit_orders for select
+to authenticated
+using (company_id = public.current_company_id() or public.is_platform_admin());
+
+-- Comprovantes dos créditos: payment-receipts/<loja>/creditos/<arquivo>, da equipe toda
+drop policy if exists "Store team upload credit receipts" on storage.objects;
+create policy "Store team upload credit receipts"
+on storage.objects for insert
+to authenticated
+with check (bucket_id = 'payment-receipts' and (storage.foldername(name))[1] = public.current_company_id()::text
+            and (storage.foldername(name))[2] = 'creditos');
+
+drop policy if exists "Store team read credit receipts" on storage.objects;
+create policy "Store team read credit receipts"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'payment-receipts' and (storage.foldername(name))[1] = public.current_company_id()::text
+       and (storage.foldername(name))[2] = 'creditos');
+
+-- 87) Desconto na venda (pedido do Wesley em 16/10/2026) ---------------------
+-- Quem registra a venda (admin, gerente ou vendedor) pode dar desconto em cima do
+-- valor da venda: sale_price continua sendo o valor final (já com o desconto), e a
+-- comissão, o contrato e o recibo seguem por ele. Ficam guardados o desconto, quem
+-- deu e quando; o banco preenche pelo login (o que a tela mandar é ignorado). Venda
+-- antiga fica com desconto 0. Relatório de descontos em Relatórios.
+alter table public.sales add column if not exists discount integer not null default 0;
+alter table public.sales drop constraint if exists sales_discount_check;
+alter table public.sales add constraint sales_discount_check check (discount >= 0);
+alter table public.sales add column if not exists discount_by uuid;
+alter table public.sales add column if not exists discount_by_name text not null default '';
+alter table public.sales add column if not exists discount_at timestamptz;
+
+create or replace function public.sales_discount_author()
+returns trigger
+language plpgsql security definer set search_path = public, auth
+as $$
+begin
+  -- Negativo não passa daqui: a regra sales_discount_check recusa
+  if coalesce(new.discount, 0) = 0 then
+    new.discount := 0;
+    new.discount_by := null;
+    new.discount_by_name := '';
+    new.discount_at := null;
+    return new;
+  end if;
+  -- Edição sem mexer no desconto: continua o de quem deu
+  if tg_op = 'UPDATE' and new.discount = old.discount then
+    new.discount_by := old.discount_by;
+    new.discount_by_name := old.discount_by_name;
+    new.discount_at := old.discount_at;
+    return new;
+  end if;
+  new.discount_by := auth.uid();
+  new.discount_by_name := coalesce(
+    (select s.name from public.sellers s
+     where s.company_id = new.company_id and s.user_id = auth.uid() and s.deleted_at is null
+     order by s.active desc limit 1),
+    (select u.email from auth.users u where u.id = auth.uid()),
+    '');
+  new.discount_at := now();
+  return new;
+end $$;
+revoke execute on function public.sales_discount_author() from anon, authenticated, public;
+
+drop trigger if exists sales_discount_author on public.sales;
+create trigger sales_discount_author before insert or update on public.sales
+for each row execute function public.sales_discount_author();
+
+-- 88) Nota fiscal de serviço (NFS-e) na venda (pedido do Wesley em 16/10/2026) ----
+-- A nota é emitida no Emissor Nacional (nfse.gov.br), que não abre dentro de outro
+-- site: o painel leva os dados prontos para copiar e, depois, a loja guarda aqui o
+-- número, a data e o PDF (no bucket car-documents, <loja>/<carro>/...). Situação:
+-- 'pendente' (padrão), 'emitida' ou 'nao_precisa'. O aviso "vendas sem nota" do
+-- início só conta as vendas a partir de 16/10/2026 (as antigas não viram pendência).
+-- Quem grava é quem edita a venda (admin e gerente, pela regra da sales).
+alter table public.sales add column if not exists nfse_status text not null default 'pendente';
+alter table public.sales drop constraint if exists sales_nfse_status_check;
+alter table public.sales add constraint sales_nfse_status_check check (nfse_status in ('pendente', 'emitida', 'nao_precisa'));
+alter table public.sales add column if not exists nfse_number text not null default '';
+alter table public.sales add column if not exists nfse_issued_on date;
+alter table public.sales add column if not exists nfse_file jsonb;
+
+create or replace function public.sales_nfse_guard()
+returns trigger
+language plpgsql set search_path = public
+as $$
+begin
+  new.nfse_number := left(btrim(coalesce(new.nfse_number, '')), 40);
+  -- O PDF tem que estar na pasta da própria loja
+  if new.nfse_file is not null and split_part(coalesce(new.nfse_file ->> 'path', ''), '/', 1) <> new.company_id::text then
+    raise exception 'Arquivo da nota de outra loja' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists sales_nfse_guard on public.sales;
+create trigger sales_nfse_guard before insert or update on public.sales
+for each row execute function public.sales_nfse_guard();
+
+-- 89) O que cada gerente vê de gastos e custos (pedido do Wesley em 16/10/2026) ----
+-- Na Equipe, o admin marca por gerente (o gerente não muda o próprio cadastro):
+-- * can_see_expenses ("Gasto em manutenção"): lista, valores e anexos dos gastos
+--   de cada carro (as despesas da empresa continuam só do admin);
+-- * can_see_costs ("Custo de compra, margem e lucro"): custo de compra e o total
+--   dos gastos de cada carro (para a margem), pela função car_costs(); o gerente
+--   continua lendo os carros pela staff_cars.
+-- Carro com valores privados (seção 73) continua escondido. Gravar continua como
+-- antes: editar e excluir gasto e mudar o custo já informado só o admin.
+alter table public.sellers add column if not exists can_see_expenses boolean not null default false;
+alter table public.sellers add column if not exists can_see_costs boolean not null default false;
+
+create or replace function public.staff_sees_expenses()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select public.is_company_admin() or (public.is_company_staff() and exists (
+    select 1 from public.sellers s
+    where s.user_id = auth.uid() and s.company_id = public.current_company_id()
+      and s.active and s.deleted_at is null and s.can_see_expenses))
+$$;
+revoke execute on function public.staff_sees_expenses() from anon, public;
+grant execute on function public.staff_sees_expenses() to authenticated;
+
+create or replace function public.staff_sees_costs()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select public.is_company_admin() or (public.is_company_staff() and exists (
+    select 1 from public.sellers s
+    where s.user_id = auth.uid() and s.company_id = public.current_company_id()
+      and s.active and s.deleted_at is null and s.can_see_costs))
+$$;
+revoke execute on function public.staff_sees_costs() from anon, public;
+grant execute on function public.staff_sees_costs() to authenticated;
+
+-- Custo de compra e total dos gastos dos carros cujos valores quem chama vê
+create or replace function public.car_costs()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+begin
+  if v_company is null or not public.staff_sees_costs() then
+    raise exception 'Sem permissão para ver os custos' using errcode = '42501';
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'car_id', c.id,
+      'purchase_price', c.purchase_price,
+      'purchase_date', c.purchase_date,
+      'expenses_total', coalesce((select sum(e.amount) from public.car_expenses e where e.car_id = c.id and e.company_id = v_company), 0)))
+    from public.cars c
+    where c.company_id = v_company and public.can_see_car_values(c.id)), '[]'::jsonb);
+end $$;
+revoke execute on function public.car_costs() from anon, public;
+grant execute on function public.car_costs() to authenticated;
+
+-- Gastos: ler com "Gasto em manutenção" (ou admin); editar e excluir continua do admin
+drop policy if exists "Authenticated can read expenses" on public.car_expenses;
+create policy "Authenticated can read expenses"
+on public.car_expenses for select
+to authenticated
+using (company_id = public.current_company_id() and public.staff_sees_expenses() and public.can_see_car_values(car_id));
+
+drop policy if exists "Authenticated can view expense attachments" on storage.objects;
+create policy "Authenticated can view expense attachments"
+on storage.objects for select
+to authenticated
+using (bucket_id = 'expense-attachments' and (storage.foldername(name))[1] = public.current_company_id()::text
+       and (public.is_company_admin()
+            or (public.staff_sees_expenses() and (storage.foldername(name))[2] <> 'empresa'))
+       and public.can_see_car_values_folder((storage.foldername(name))[2]));
+
+-- 90) Simulador de bancos: taxas da loja (pedido do Wesley em 16/10/2026) -------
+-- Financ. externos → Simulador de bancos: valor, entrada e prazos mostram a
+-- parcela em cada banco, com as taxas que a loja cadastra (% ao mês). É uma
+-- estimativa, sem integração com os bancos. Admin e gerente editam as taxas (como
+-- a lista de bancos); a equipe toda usa. A simulação enviada ao cliente fica no
+-- atendimento da ficha (customer_contacts, sem coluna nova).
+alter table public.companies add column if not exists bank_rates jsonb not null default '[]'::jsonb;
+alter table public.companies drop constraint if exists companies_bank_rates_check;
+alter table public.companies add constraint companies_bank_rates_check
+  check (jsonb_typeof(bank_rates) = 'array' and jsonb_array_length(bank_rates) <= 40);
+grant update (bank_rates) on public.companies to authenticated;
+
+-- 91) Conferência: passou para a seção 93, no fim do arquivo (precisa ser a última
+-- consulta para o resultado aparecer no SQL Editor).
+
+-- 92) Suporte: o painel WB.Dev diz que fala como WB.Dev (pedido do Wesley em 17/10/2026) --
+-- O dono da plataforma também é admin da WB.AUTO. O banco decidia "WB.Dev ou loja"
+-- comparando a loja do chamado com a loja do login: nos chamados da própria WB.AUTO
+-- (os de teste), abrir ou responder pelo painel WB.Dev contava como a loja, e o aviso
+-- "mensagem nova" da WB.Dev nunca sumia. Agora a tela do painel WB.Dev manda
+-- p_as_wbdev; sem ele vale a regra de antes (as lojas com o painel antigo seguem iguais).
+drop function if exists public.post_support_message(uuid, text, jsonb);
+create or replace function public.post_support_message(p_ticket uuid, p_body text, p_attachments jsonb default '[]'::jsonb, p_as_wbdev boolean default false)
+returns public.support_messages
+language plpgsql security definer set search_path = public, auth
+as $$
+declare
+  t public.support_tickets;
+  v_wbdev boolean := public.is_platform_admin();
+  v_name text;
+  v_row public.support_messages;
+begin
+  select * into t from public.support_tickets where id = p_ticket for update;
+  if not found or not public.can_see_support_ticket(t.company_id, t.opened_by) then
+    raise exception 'Chamado não encontrado' using errcode = 'P0002';
+  end if;
+  -- O dono da plataforma responde como WB.Dev pelo painel WB.Dev e nos chamados das outras lojas
+  v_wbdev := v_wbdev and (coalesce(p_as_wbdev, false) or t.company_id is distinct from public.current_company_id());
+  v_name := case when v_wbdev then 'WB.Dev'
+    else coalesce(nullif((select s.name from public.sellers s where s.user_id = auth.uid()), ''),
+                  (select u.email from auth.users u where u.id = auth.uid()), '') end;
+  insert into public.support_messages (ticket_id, company_id, author_kind, author_name, body, attachments)
+  values (t.id, t.company_id, case when v_wbdev then 'wbdev' else 'loja' end, v_name, btrim(p_body), coalesce(p_attachments, '[]'::jsonb))
+  returning * into v_row;
+  update public.support_tickets
+  set last_message_at = now(),
+      status = case when v_wbdev then 'respondido' else 'aberto' end,
+      store_unread = v_wbdev,
+      wbdev_unread = not v_wbdev
+  where id = t.id;
+  return v_row;
+end $$;
+revoke execute on function public.post_support_message(uuid, text, jsonb, boolean) from anon, public;
+grant execute on function public.post_support_message(uuid, text, jsonb, boolean) to authenticated;
+
+drop function if exists public.mark_support_ticket_read(uuid);
+create or replace function public.mark_support_ticket_read(p_ticket uuid, p_as_wbdev boolean default false)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  t public.support_tickets;
+begin
+  select * into t from public.support_tickets where id = p_ticket;
+  if not found or not public.can_see_support_ticket(t.company_id, t.opened_by) then
+    raise exception 'Chamado não encontrado' using errcode = 'P0002';
+  end if;
+  if public.is_platform_admin() and (coalesce(p_as_wbdev, false) or t.company_id is distinct from public.current_company_id()) then
+    update public.support_tickets set wbdev_unread = false where id = t.id and wbdev_unread;
+  else
+    update public.support_tickets set store_unread = false where id = t.id and store_unread;
+  end if;
+end $$;
+revoke execute on function public.mark_support_ticket_read(uuid, boolean) from anon, public;
+grant execute on function public.mark_support_ticket_read(uuid, boolean) to authenticated;
+
+-- 93) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

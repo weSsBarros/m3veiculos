@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2, HandCoins, ShieldCheck } from 'lucide-react'
-import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, financeAccessLabel, accessLabel, fetchAdminsOutsideTeam, addAdminToTeam } from '../lib/sellersApi.js'
+import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, managerAccessText, accessLabel, fetchAdminsOutsideTeam, addAdminToTeam } from '../lib/sellersApi.js'
 import { fetchCustomRoles } from '../lib/customRolesApi.js'
 import { tabsForRole } from '../utils/panelSettings.js'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -38,6 +38,10 @@ const EMPTY_FORM = {
   commissionValue: '',
   // Só para gerente: 'values' (vê valores das vendas) ou 'counts' (só quantidades)
   financeAccess: 'counts',
+  // Só para gerente (seção 89): vê os gastos de cada carro; vê custo de compra,
+  // margem e lucro (este só com "Vendas com valores")
+  canSeeExpenses: false,
+  canSeeCosts: false,
   active: true,
   // Comissão de financiamento externo
   extCommissionType: 'none',
@@ -243,6 +247,8 @@ export default function AdminSellers() {
       commissionType: hasCommission ? seller.commissionType : 'percent',
       commissionValue: hasCommission ? String(seller.commissionValue).replace('.', ',') : '',
       financeAccess: seller.financeAccess,
+      canSeeExpenses: seller.canSeeExpenses === true,
+      canSeeCosts: seller.canSeeCosts === true,
       active: seller.active,
       extCommissionType: seller.extCommissionType || 'none',
       extCommissionValue: seller.extCommissionType && seller.extCommissionType !== 'none' ? String(seller.extCommissionValue).replace('.', ',') : '',
@@ -308,15 +314,20 @@ export default function AdminSellers() {
       if (!ok) return
     }
 
+    // Gastos e custos (seção 89): só gerente; custo, margem e lucro só com "Vendas com valores"
+    const isManagerForm = form.role === 'manager'
+    const canSeeExpenses = isManagerForm && form.canSeeExpenses
+    const canSeeCosts = isManagerForm && form.financeAccess === 'values' && form.canSeeCosts
+
     setSaving(true)
     try {
       if (editingId) {
-        const saved = await updateSeller(editingId, { ...form, commissionType, commissionValue, extCommissionType, extCommissionValue })
+        const saved = await updateSeller(editingId, { ...form, canSeeExpenses, canSeeCosts, commissionType, commissionValue, extCommissionType, extCommissionValue })
         setSellers((prev) => prev.map((s) => (s.id === editingId ? saved : s)))
         setFormSuccess(`${roleLabel(saved.role, saved.customRole)} "${saved.name}" atualizado.`)
         cancelEdit()
       } else {
-        const created = await createSeller({ ...form, commissionType, commissionValue, extCommissionType, extCommissionValue })
+        const created = await createSeller({ ...form, canSeeExpenses, canSeeCosts, commissionType, commissionValue, extCommissionType, extCommissionValue })
         setSellers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
         setFormSuccess(`${roleLabel(created.role, created.customRole)} "${created.name}" cadastrado. Já pode entrar no painel com o e-mail ${created.email}.`)
         setForm(EMPTY_FORM)
@@ -638,11 +649,27 @@ export default function AdminSellers() {
             </div>
             <p className="admin-form-note">
               {form.financeAccess === 'values'
-                ? 'Vê faturamento, valor de cada venda e comissões da equipe (Dashboard, Histórico e Equipe).'
-                : 'Vê só números de carros: vendidos, em estoque e vendas por vendedor, sem valores em R$.'}{' '}
-              Em qualquer opção, o gerente não vê preço de compra, gastos, custo total, margem, lucro nem o Financeiro. Ele cadastra
-              carros e clientes, registra vendas e contratos, lança gastos e fornecedores (sem ver os já lançados), mas não exclui
-              nada e não gerencia a equipe.
+                ? 'Vê faturamento, valor de cada venda e comissões da equipe (Dashboard, Vendas e Equipe).'
+                : 'Vê só números de carros: vendidos, em estoque e vendas por vendedor, sem valores em R$.'}
+            </p>
+            <span className="admin-field-label">O que mais o gerente vê</span>
+            <label className="admin-checkbox">
+              <input type="checkbox" checked={form.canSeeExpenses} onChange={(e) => update('canSeeExpenses', e.target.checked)} />
+              Gasto em manutenção (a lista, os valores e os anexos dos gastos de cada carro)
+            </label>
+            <label className="admin-checkbox">
+              <input
+                type="checkbox"
+                checked={form.financeAccess === 'values' && form.canSeeCosts}
+                onChange={(e) => update('canSeeCosts', e.target.checked)}
+                disabled={form.financeAccess !== 'values'}
+              />
+              Custo de compra, margem e lucro de cada carro{form.financeAccess !== 'values' ? ' (precisa de "Vendas com valores")' : ''}
+            </label>
+            <p className="admin-form-note">
+              Carro com valores privados continua escondido. O gerente não vê o Financeiro da loja nem as despesas da empresa, não
+              edita nem exclui gastos e não muda o custo depois do cadastro. Ele cadastra carros e clientes, registra vendas e
+              contratos, lança gastos e fornecedores, mas não exclui nada e não gerencia a equipe.
             </p>
           </div>
         )}
@@ -757,7 +784,7 @@ export default function AdminSellers() {
                       <td>
                         <span className={`admin-role-pill role-${s.role}`}>{roleLabel(s.role, s.customRole)}</span>
                         {s.customRole && <span className="admin-table-sub">{accessLabel(s.role)}</span>}
-                        {s.role === 'manager' && isAdmin && <span className="admin-table-sub">{financeAccessLabel(s.financeAccess)}</span>}
+                        {s.role === 'manager' && isAdmin && <span className="admin-table-sub">{managerAccessText(s)}</span>}
                       </td>
                       {canSeeSaleValues && (
                         <td>
@@ -819,7 +846,7 @@ export default function AdminSellers() {
                         {roleLabel(s.role, s.customRole)}
                         {s.customRole ? ` (${accessLabel(s.role)})` : ''}
                         {canSeeSaleValues ? ` · ${describeCommission(s)}` : ''}
-                        {s.role === 'manager' && isAdmin ? ` · ${financeAccessLabel(s.financeAccess).toLowerCase()}` : ''}
+                        {s.role === 'manager' && isAdmin ? ` · ${managerAccessText(s).toLowerCase()}` : ''}
                       </span>
                     </div>
                     <StatusPill seller={s} />

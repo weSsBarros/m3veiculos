@@ -11,7 +11,7 @@ import { closeReservation } from './reservationsApi.js'
 // insertOnly: o vendedor só registra venda nova.
 // Devolve { sale, car, tradeInCarId }.
 export async function registerSaleFromDialog(car, data, { reservation = null, insertOnly = false } = {}) {
-  const { sellerId, customerId, salePrice, saleDate, checklist, payment, tradeIn } = data
+  const { sellerId, customerId, salePrice, discount, saleDate, checklist, payment, tradeIn } = data
   let tradeInCarId = null
   if (tradeIn) tradeInCarId = await registerTradeIn(tradeIn)
 
@@ -20,6 +20,7 @@ export async function registerSaleFromDialog(car, data, { reservation = null, in
     sale = await saveSaleForCar(car.id, {
       sellerId,
       salePrice,
+      discount,
       saleDate,
       checklist,
       payment,

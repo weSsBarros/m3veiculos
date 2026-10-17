@@ -33,7 +33,7 @@ function PlateCreditDialog({ pack, storeName, onClose, onDone }) {
     setSaving(true)
     setError('')
     try {
-      const receipt = file ? await uploadPaymentReceipt(file) : null
+      const receipt = file ? await uploadPaymentReceipt(file, 'creditos') : null
       const order = await requestPlateCredit({ amount: pack.amount, paidOn, receipt, note: note.trim() })
       await notifyWbdev('credito_informado', order.id)
       setDone(true)
@@ -106,9 +106,11 @@ function PlateCreditDialog({ pack, storeName, onClose, onDone }) {
   )
 }
 
-// Página Mensalidade → créditos da consulta por placa (só o admin): saldo,
-// pacotes com PIX, "Já paguei", compras informadas e extrato
-export default function PlateCredits({ payment, storeName }) {
+// Créditos (placa, documento e assinatura): saldo, pacotes com PIX, "Já paguei" e
+// compras informadas. Na Mensalidade e em Configurações (admin) e na página
+// Créditos (equipe toda, seção 86); o extrato só aparece para o admin.
+// embedded: dentro de uma seção que já tem o título (Configurações).
+export default function PlateCredits({ payment, storeName, embedded = false }) {
   const [credits, setCredits] = useState(null)
   const [error, setError] = useState('')
   const [chosen, setChosen] = useState(null)
@@ -130,7 +132,7 @@ export default function PlateCredits({ payment, storeName }) {
     load()
   }, [])
 
-  // Link "Comprar créditos" do cadastro do carro (/admin/mensalidade#creditos)
+  // Link "Comprar créditos" do cadastro do carro (#creditos)
   useEffect(() => {
     if (credits && window.location.hash === '#creditos') document.getElementById('creditos')?.scrollIntoView({ block: 'start' })
   }, [credits])
@@ -140,16 +142,18 @@ export default function PlateCredits({ payment, storeName }) {
   }
 
   const pack = credits.packages.find((p) => p.amount === chosen) || null
-  const payload = payment?.pixKey && pack
-    ? pixPayload({ key: payment.pixKey, name: payment.pixName, city: payment.pixCity, amount: pack.amount, txid: `WBC${COMPANY_ID.replace(/[^A-Za-z0-9]/g, '').slice(0, 12).toUpperCase()}` })
+  // Gerente e vendedor não recebem os dados de pagamento da Mensalidade: o PIX vem do my_plate_credits
+  const pix = payment?.pixKey ? payment : credits.pix
+  const payload = pix?.pixKey && pack
+    ? pixPayload({ key: pix.pixKey, name: pix.pixName, city: pix.pixCity, amount: pack.amount, txid: `WBC${COMPANY_ID.replace(/[^A-Za-z0-9]/g, '').slice(0, 12).toUpperCase()}` })
     : ''
   const pending = credits.orders.filter((o) => o.status === 'pendente')
   const reviewed = credits.orders.filter((o) => o.status !== 'pendente').slice(0, 6)
   const ledger = allLedger ? credits.ledger : credits.ledger.slice(0, 8)
 
   return (
-    <section className="plate-credits" id="creditos">
-      <h2 className="admin-section-title"><ScanSearch size={18} /> Créditos (placa, documento e assinatura)</h2>
+    <section className="plate-credits" id={embedded ? undefined : 'creditos'}>
+      {!embedded && <h2 className="admin-section-title"><ScanSearch size={18} /> Créditos (placa, documento e assinatura)</h2>}
       <p className="plate-credits-lead">
         Saldo: <strong>{moneyBR(credits.balance)}</strong> · dá para <strong>{queriesText(credits.queries)}</strong> de placa ou{' '}
         <strong>{readsText(credits.docReads)}</strong> de foto do documento
@@ -169,7 +173,8 @@ export default function PlateCredits({ payment, storeName }) {
       {error && <p className="admin-error">{error}</p>}
       {pending.map((o) => (
         <p className="admin-success" key={o.id}>
-          <CheckCircle2 size={15} /> Você informou a compra de {moneyBR(o.amount)} em {dateBR(o.createdAt?.slice(0, 10))}. A WB.Dev está conferindo.
+          <CheckCircle2 size={15} /> {o.createdByEmail ? `${o.createdByEmail} informou` : 'A loja informou'} a compra de {moneyBR(o.amount)} em{' '}
+          {dateBR(o.createdAt?.slice(0, 10))}. A WB.Dev está conferindo.
         </p>
       ))}
 
@@ -189,11 +194,11 @@ export default function PlateCredits({ payment, storeName }) {
             </button>
           ))}
         </div>
-        {payment?.pixKey ? (
+        {pix?.pixKey ? (
           <>
-            <PixQr payload={payload} pixKey={payment.pixKey} />
+            <PixQr payload={payload} pixKey={pix.pixKey} />
             <p className="admin-form-note">
-              Pague o valor do pacote pelo PIX {payment.pixName ? `(${payment.pixName})` : ''} e clique em "Já paguei". O crédito entra quando a WB.Dev confirmar.
+              Pague o valor do pacote pelo PIX {pix.pixName ? `(${pix.pixName})` : ''} e clique em "Já paguei". O crédito entra quando a WB.Dev confirmar.
             </p>
           </>
         ) : (
@@ -212,7 +217,7 @@ export default function PlateCredits({ payment, storeName }) {
               <div className="billing-list-row" key={o.id}>
                 <div>
                   <strong>{moneyBR(o.amount)}</strong>
-                  <span className="admin-table-sub">Pago em {dateBR(o.paidOn)}</span>
+                  <span className="admin-table-sub">Pago em {dateBR(o.paidOn)}{o.createdByEmail ? ` · ${o.createdByEmail}` : ''}</span>
                   {o.status === 'recusado' && o.response && <span className="admin-table-sub">Motivo: {o.response}</span>}
                 </div>
                 <span className={`admin-pill ${ORDER_STATUS[o.status]?.className || ''}`}>{ORDER_STATUS[o.status]?.label || o.status}</span>
@@ -222,8 +227,8 @@ export default function PlateCredits({ payment, storeName }) {
         </>
       )}
 
-      <h3 className="plate-credits-title">Extrato</h3>
-      {credits.ledger.length === 0 ? (
+      {credits.admin && <h3 className="plate-credits-title">Extrato</h3>}
+      {!credits.admin ? null : credits.ledger.length === 0 ? (
         <p className="plate-credits-empty">Nenhum movimento ainda.</p>
       ) : (
         <div className="billing-list">

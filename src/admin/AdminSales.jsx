@@ -17,6 +17,7 @@ import useConfirm from '../components/useConfirm.jsx'
 import { periodRange, inRange } from '../utils/period.js'
 import { DEFAULT_SALE_CHECKLIST, checklistSummary } from '../utils/saleChecklist.js'
 import { isTransferOpen, transferAlert } from '../utils/transfer.js'
+import { needsInvoice } from '../utils/nfse.js'
 import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
 import { saleCost, salesSummary, saleAgeLabel } from '../utils/salesSummary.js'
 import { privateNote } from '../utils/privateValues.js'
@@ -34,9 +35,12 @@ const FILTERS = [
   { value: 'atrasadas', label: 'Transferência atrasada' },
   { value: 'concluidas', label: 'Transferência concluída' },
   { value: 'nao_informadas', label: 'Não informada' },
+  // NFS-e (seção 88): vendas a partir de 16/10/2026 sem nota e sem "Não precisa"
+  { value: 'sem_nota', label: 'Sem nota fiscal' },
 ]
 
 function matchesFilter(row, filter) {
+  if (filter === 'sem_nota') return needsInvoice(row.sale)
   if (filter === 'pendentes') return isTransferOpen(row.sale)
   if (filter === 'atrasadas') return row.alert === 'atrasada'
   if (filter === 'concluidas') return row.sale?.transferStatus === 'concluida'

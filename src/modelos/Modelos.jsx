@@ -2,18 +2,21 @@ import { useState } from 'react'
 import { ChevronDown, X } from 'lucide-react'
 import CarCard from '../components/CarCard.jsx'
 import { MODELOS, useModeloState, useSiteModelo, setModeloPrevia, sairDaPrevia } from './siteModelo.js'
+import { useAparenciaDaLoja } from './aparencia.js'
 import { TopoEstoque, InicioEstoque, LinhaEstoque, RodapeEstoque } from './estoque.jsx'
 import { TopoVitrine, InicioVitrine, CartaoVitrine, RodapeVitrine } from './vitrine.jsx'
 import { TopoBairro, InicioBairro, CartaoBairro, BarraCarroBairro, RodapeBairro } from './bairro.jsx'
 
 // Ponto de entrada dos modelos de site. Cada peça mostra a do modelo escolhido ou, no
-// modelo atual (padrão), a da própria loja (passada em "padrao").
+// visual próprio da loja (padrão), a da própria loja (passada em "padrao").
 
 const TOPOS = { estoque: TopoEstoque, vitrine: TopoVitrine, bairro: TopoBairro }
 const RODAPES = { estoque: RodapeEstoque, vitrine: RodapeVitrine, bairro: RodapeBairro }
 const INICIOS = { estoque: InicioEstoque, vitrine: InicioVitrine, bairro: InicioBairro }
 
+// O topo aparece em toda página do site: é ele que busca o modelo escolhido pela loja
 export function ModeloTopo({ padrao }) {
+  useAparenciaDaLoja()
   const Topo = TOPOS[useSiteModelo()]
   return Topo ? <Topo /> : padrao
 }
@@ -70,7 +73,7 @@ export function ModeloBar() {
         <button type="button" className="m-previa-icone" onClick={() => setAberta(false)} aria-label="Recolher a barrinha" aria-expanded="true">
           <ChevronDown size={16} />
         </button>
-        <button type="button" className="m-previa-icone" onClick={sairDaPrevia} aria-label="Sair da prévia (volta ao visual atual)">
+        <button type="button" className="m-previa-icone" onClick={sairDaPrevia} aria-label="Sair da prévia (volta ao modelo escolhido pela loja)">
           <X size={16} />
         </button>
       </div>

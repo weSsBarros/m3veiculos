@@ -1,26 +1,28 @@
-/* Toque de cada modelo no painel da loja (as telas e o funcionamento não mudam):
-   1 "Estoque primeiro" = painel compacto (cantos menores e menos espaço);
-   2 "Vitrine" = menu lateral escuro, na tinta da loja;
-   3 "Revenda de bairro" = menu lateral na cor da loja.
+/* Visual do painel da loja, escolhido pelo admin em Configurações → Aparência
+   (seção 84, painelVisual.js), sem depender do modelo do site. As telas e o
+   funcionamento não mudam:
+   "compacto" = cantos menores e menos espaço;
+   "escuro" = menu lateral escuro, na tinta da loja;
+   "cor" = menu lateral na cor da loja.
    Vale nos temas claro e escuro; o painel WB.Dev (.is-wbdev) fica de fora. */
 
 /* 1. Compacto */
-html[data-modelo='estoque'] .admin-shell:not(.is-wbdev) {
+html[data-painel='compacto'] .admin-shell:not(.is-wbdev) {
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
 }
 
-html[data-modelo='estoque'] .admin-shell:not(.is-wbdev) .admin-main {
+html[data-painel='compacto'] .admin-shell:not(.is-wbdev) .admin-main {
   padding: 20px 24px 48px;
 }
 
-html[data-modelo='estoque'] .admin-shell:not(.is-wbdev) :is(.admin-sidenav a, .admin-sidebar-bottom a, .admin-sidebar-action, .admin-sidebar-logout) {
+html[data-painel='compacto'] .admin-shell:not(.is-wbdev) :is(.admin-sidenav a, .admin-sidebar-bottom a, .admin-sidebar-action, .admin-sidebar-logout) {
   height: 38px;
 }
 
-/* 2 e 3: menu lateral escuro ou na cor da loja */
-html[data-modelo='vitrine'] .admin-shell:not(.is-wbdev) {
+/* Menu lateral escuro ou na cor da loja */
+html[data-painel='escuro'] .admin-shell:not(.is-wbdev) {
   --m-menu-fundo: var(--color-black, #0e1117);
   --m-menu-texto: #ffffff;
   --radius-sm: 4px;
@@ -28,67 +30,67 @@ html[data-modelo='vitrine'] .admin-shell:not(.is-wbdev) {
   --radius-lg: 10px;
 }
 
-html[data-modelo='bairro'] .admin-shell:not(.is-wbdev) {
+html[data-painel='cor'] .admin-shell:not(.is-wbdev) {
   --m-menu-fundo: var(--color-primary, #2446c8);
   --m-menu-texto: var(--m-sobre-cor, #ffffff);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) :is(.admin-sidebar, .admin-mobilebar) {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) :is(.admin-sidebar, .admin-mobilebar) {
   background: var(--m-menu-fundo);
   border-color: var(--m-menu-fundo);
   color: var(--m-menu-texto);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) .admin-burger {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) .admin-burger {
   color: var(--m-menu-texto);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) .admin-burger:hover {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) .admin-burger:hover {
   background: color-mix(in srgb, var(--m-menu-texto) 12%, transparent);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) .admin-sidenav {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) .admin-sidenav {
   scrollbar-color: color-mix(in srgb, var(--m-menu-texto) 25%, transparent) transparent;
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) :is(.admin-sidenav a, .admin-sidebar-bottom a, .admin-sidebar-action, .admin-sidebar-logout) {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) :is(.admin-sidenav a, .admin-sidebar-bottom a, .admin-sidebar-action, .admin-sidebar-logout) {
   color: color-mix(in srgb, var(--m-menu-texto) 74%, transparent);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) :is(.admin-sidenav a, .admin-sidebar-bottom a, .admin-sidebar-action):hover {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) :is(.admin-sidenav a, .admin-sidebar-bottom a, .admin-sidebar-action):hover {
   background: color-mix(in srgb, var(--m-menu-texto) 12%, transparent);
   color: var(--m-menu-texto);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) :is(.admin-sidenav a.is-active, .admin-sidebar-bottom a.is-active) {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) :is(.admin-sidenav a.is-active, .admin-sidebar-bottom a.is-active) {
   background: var(--m-menu-texto);
   color: var(--m-menu-fundo);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) .admin-sidebar-logout:hover {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) .admin-sidebar-logout:hover {
   background: color-mix(in srgb, var(--m-menu-texto) 12%, transparent);
   color: var(--m-menu-texto);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) .admin-sidebar-bottom {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) .admin-sidebar-bottom {
   border-top-color: color-mix(in srgb, var(--m-menu-texto) 18%, transparent);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) .admin-sidebar-user span {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) .admin-sidebar-user span {
   color: color-mix(in srgb, var(--m-menu-texto) 70%, transparent);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) :is(.panel-switch, .panel-switch-compact) {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) :is(.panel-switch, .panel-switch-compact) {
   border-color: color-mix(in srgb, var(--m-menu-texto) 22%, transparent);
   background: color-mix(in srgb, var(--m-menu-texto) 8%, transparent);
   color: var(--m-menu-texto);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) .panel-switch button {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) .panel-switch button {
   color: color-mix(in srgb, var(--m-menu-texto) 74%, transparent);
 }
 
-html:is([data-modelo='vitrine'], [data-modelo='bairro']) .admin-shell:not(.is-wbdev) .panel-switch button.is-active {
+html:is([data-painel='escuro'], [data-painel='cor']) .admin-shell:not(.is-wbdev) .panel-switch button.is-active {
   background: var(--m-menu-texto);
   color: var(--m-menu-fundo);
   box-shadow: none;

@@ -20,7 +20,9 @@ const money = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency',
 // só avisa, salva do mesmo jeito (decisão do Wesley).
 // allowTradeIn: mostra "Veículo usado na troca" como forma (na tela Contratos;
 // na venda o carro da troca tem a seção própria).
-export default function PaymentFields({ value, onChange, banks = [], disabled, salePrice = null, tradeInValue = 0, allowTradeIn = false }) {
+// onCloseGap(falta): na janela da venda, botão "Dar desconto" quando os pagamentos
+// não fecham o valor (o cliente pagou à vista e ganhou desconto, por exemplo).
+export default function PaymentFields({ value, onChange, banks = [], disabled, salePrice = null, tradeInValue = 0, allowTradeIn = false, onCloseGap = null }) {
   const parts = Array.isArray(value) && value.length ? value : EMPTY_PAYMENT
   const methods = PAYMENT_PART_METHODS.filter((m) => allowTradeIn || !m.tradeIn)
 
@@ -104,6 +106,11 @@ export default function PaymentFields({ value, onChange, banks = [], disabled, s
                 : `Os pagamentos passam ${money(-gap)} do valor da venda.`}
             {tradeInValue ? ` (Conta o carro da troca: ${money(tradeInValue)}.)` : ''}
           </span>
+        )}
+        {onCloseGap && gap > 0 && (
+          <button type="button" className="admin-link-btn payment-gap-discount" onClick={() => onCloseGap(gap)} disabled={disabled}>
+            Dar desconto e fechar com o que foi pago
+          </button>
         )}
       </div>
     </div>

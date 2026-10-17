@@ -8,7 +8,28 @@ import {
   lateCharges,
   installmentStatus,
   summarizeFinancing,
+  dueInText,
+  installmentReminderText,
 } from '../src/utils/financing.js'
+
+test('parcelas a vencer: "vence hoje", "amanhã" e "em N dias"', () => {
+  assert.equal(dueInText('2026-10-16', '2026-10-16'), 'vence hoje')
+  assert.equal(dueInText('2026-10-17', '2026-10-16'), 'vence amanhã')
+  assert.equal(dueInText('2026-10-23', '2026-10-16'), 'vence em 7 dias')
+})
+
+test('lembrete da parcela no WhatsApp: primeiro nome, parcela, carro, data e valor', () => {
+  const text = installmentReminderText({
+    customerName: 'Maria da Silva', number: 3, count: 24, vehicleLabel: 'Fiat Argo 2021',
+    dueDate: '2026-10-20', amount: 1234.5, companyName: 'Loja Teste',
+  })
+  assert.equal(text.split('\n')[0], 'Olá, Maria! Aqui é da Loja Teste.')
+  assert.match(text.replace(/\s/g, ' '), /parcela 3\/24 do financiamento do Fiat Argo 2021 vence em 20\/10\/2026, no valor de R\$ 1\.234,50\./)
+  // sem nome e sem carro: frase continua certa
+  const plain = installmentReminderText({ number: 1, count: 1, dueDate: '2026-10-20', amount: 10 })
+  assert.equal(plain.split('\n')[0], 'Olá! Aqui é da loja.')
+  assert.match(plain, /do seu veículo/)
+})
 
 test('parcela pela Tabela Price e sem juros', () => {
   assert.equal(priceInstallment(10000, 12, 2), 945.6)

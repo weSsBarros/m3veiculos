@@ -17,6 +17,7 @@ import { DEFAULT_BANKS } from '../utils/payment.js'
 import { periodRange, inRange } from '../utils/period.js'
 import PeriodFilter from './PeriodFilter.jsx'
 import ExternalFinancingDialog from './ExternalFinancingDialog.jsx'
+import FinancingTabs from './FinancingTabs.jsx'
 import useConfirm from '../components/useConfirm.jsx'
 import './admin.css'
 
@@ -143,6 +144,7 @@ export default function AdminExternalFinance() {
           </button>
         </div>
       </div>
+      <FinancingTabs />
 
       {error && <p className="admin-error">{error}</p>}
 

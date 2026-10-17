@@ -1,20 +1,23 @@
 import { useSyncExternalStore } from 'react'
 
-// Modelos de visual do site (e um toque no painel). O lojista vai escolher em
-// Configurações → Aparência depois que os modelos forem aprovados; por enquanto só há
-// a prévia: ?modelo=1, 2 ou 3 no endereço liga o modelo nesta aba do navegador
-// (sessionStorage) e mostra a barrinha para trocar; ?modelo=0 volta ao atual. O <html>
-// recebe data-modelo, que os CSS de src/modelos/ usam (o atual não tem atributo).
+// Modelos de visual do site. O admin da loja escolhe em Configurações → Aparência
+// (seção 84, companies.site_modelo): o api/pagina.php já entrega o <html> com
+// data-modelo e o site confirma pelo company_status (aparencia.js). ?modelo=1, 2 ou 3
+// no endereço é a prévia: liga o modelo só nesta aba do navegador (sessionStorage) e
+// mostra a barrinha para trocar; ?modelo=0 mostra o visual próprio da loja. O <html>
+// fica com data-modelo, que os CSS de src/modelos/ usam (o visual próprio não tem
+// atributo).
 
 export const MODELOS = [
-  { id: 'atual', numero: 0, nome: 'Atual', resumo: 'O visual de hoje da loja' },
+  { id: 'atual', numero: 0, nome: 'Próprio da loja', resumo: 'O visual feito para a loja, com as cores e as fotos dela' },
   { id: 'estoque', numero: 1, nome: 'Estoque primeiro', resumo: 'Muitos carros: busca e lista logo no topo' },
   { id: 'vitrine', numero: 2, nome: 'Vitrine', resumo: 'Poucos carros: fotos grandes, um de cada vez' },
   { id: 'bairro', numero: 3, nome: 'Revenda de bairro', resumo: 'Preço e WhatsApp em destaque em cada carro' },
 ]
 
 export const MODELO_PADRAO = 'atual'
-const KEY = 'site_modelo_previa'
+const KEY_PREVIA = 'site_modelo_previa'
+const KEY_LOJA = 'site_modelo_loja'
 
 // "1", "estoque" ou "Estoque" → "estoque"; o que não existe → null
 export function modeloFromParam(value) {
@@ -25,33 +28,47 @@ export function modeloFromParam(value) {
   return found ? found.id : null
 }
 
-function readStored() {
+// Qual modelo abrir. A prévia (do endereço ou a guardada nesta aba) vence a escolha
+// da loja; a escolha da loja vem do <html> (pagina.php) ou da última visita neste
+// navegador. { modelo, previa, loja }
+export function modeloInicial({ daUrl, previaGuardada, doHtml, guardadoDaLoja } = {}) {
+  const loja = modeloFromParam(doHtml) || modeloFromParam(guardadoDaLoja) || MODELO_PADRAO
+  const previa = modeloFromParam(daUrl) || modeloFromParam(previaGuardada)
+  return previa ? { modelo: previa, previa: true, loja } : { modelo: loja, previa: false, loja }
+}
+
+// sessionStorage/localStorage podem não existir (aba anônima, bloqueio): sem eles,
+// a prévia vale até recarregar e a escolha da loja vem sempre do servidor
+function ler(tipo, key) {
   try {
-    return sessionStorage.getItem(KEY)
+    return window[tipo].getItem(key)
   } catch {
     return null
   }
 }
 
-function writeStored(value) {
+function gravar(tipo, key, value) {
   try {
-    if (value == null) sessionStorage.removeItem(KEY)
-    else sessionStorage.setItem(KEY, value)
+    if (value == null) window[tipo].removeItem(key)
+    else window[tipo].setItem(key, value)
   } catch {
-    // armazenamento indisponível: a prévia vale só até recarregar a página
+    // armazenamento indisponível
   }
 }
 
 function readInitial() {
-  if (typeof window === 'undefined') return { modelo: MODELO_PADRAO, previa: false }
-  const fromUrl = modeloFromParam(new URLSearchParams(window.location.search).get('modelo'))
-  if (fromUrl) {
-    writeStored(fromUrl)
-    return { modelo: fromUrl, previa: true }
-  }
-  const stored = modeloFromParam(readStored())
-  if (stored) return { modelo: stored, previa: true }
-  return { modelo: MODELO_PADRAO, previa: false }
+  if (typeof window === 'undefined') return { modelo: MODELO_PADRAO, previa: false, loja: MODELO_PADRAO }
+  const daUrl = new URLSearchParams(window.location.search).get('modelo')
+  const doHtml = document.documentElement.getAttribute('data-modelo')
+  const inicial = modeloInicial({
+    daUrl,
+    previaGuardada: ler('sessionStorage', KEY_PREVIA),
+    doHtml,
+    guardadoDaLoja: ler('localStorage', KEY_LOJA),
+  })
+  if (modeloFromParam(daUrl)) gravar('sessionStorage', KEY_PREVIA, inicial.modelo)
+  if (modeloFromParam(doHtml)) gravar('localStorage', KEY_LOJA, inicial.loja)
+  return inicial
 }
 
 let state = readInitial()
@@ -64,7 +81,7 @@ function applyToDocument() {
   else root.setAttribute('data-modelo', state.modelo)
 }
 
-// O endereço acompanha a escolha (recarregar a página mostra o mesmo modelo)
+// O endereço acompanha a prévia (recarregar a página mostra o mesmo modelo)
 function syncUrl(modelo) {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
@@ -82,16 +99,26 @@ function emit() {
 
 export function setModeloPrevia(value) {
   const modelo = modeloFromParam(value) || MODELO_PADRAO
-  writeStored(modelo)
+  gravar('sessionStorage', KEY_PREVIA, modelo)
   syncUrl(modelo)
-  state = { modelo, previa: true }
+  state = { ...state, modelo, previa: true }
   emit()
 }
 
+// Sai da prévia e volta ao modelo que a loja escolheu
 export function sairDaPrevia() {
-  writeStored(null)
+  gravar('sessionStorage', KEY_PREVIA, null)
   syncUrl(null)
-  state = { modelo: MODELO_PADRAO, previa: false }
+  state = { ...state, modelo: state.loja, previa: false }
+  emit()
+}
+
+// Escolha da loja (do company_status ou de quem acabou de salvar em Configurações)
+export function setModeloDaLoja(value) {
+  const loja = modeloFromParam(value) || MODELO_PADRAO
+  gravar('localStorage', KEY_LOJA, loja)
+  if (loja === state.loja) return
+  state = { ...state, loja, modelo: state.previa ? state.modelo : loja }
   emit()
 }
 
@@ -102,7 +129,7 @@ function subscribe(listener) {
 
 const getSnapshot = () => state
 
-// { modelo, previa }
+// { modelo, previa, loja }
 export function useModeloState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }

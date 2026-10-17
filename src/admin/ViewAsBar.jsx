@@ -8,7 +8,9 @@ import { fetchSellers, roleLabel } from '../lib/sellersApi.js'
 // mostrar exatamente o que ela vê. Sem ninguém de um papel na equipe, dá para
 // ver como um vendedor ou gerente genérico. Só visualização: as gravações
 // ficam bloqueadas até voltar para admin.
-export default function ViewAsBar() {
+// part: 'toggle' (só o botão, no canto superior direito) ou 'banner' (só o aviso de
+// quando está vendo como outra pessoa, embaixo da barra de cima).
+export default function ViewAsBar({ part = 'all' }) {
   const { realRole, viewAs, startViewAs, stopViewAs } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -16,6 +18,8 @@ export default function ViewAsBar() {
   const [error, setError] = useState('')
 
   if (realRole !== 'admin') return null
+  if (part === 'toggle' && viewAs) return null
+  if (part === 'banner' && !viewAs) return null
 
   if (viewAs) {
     return (

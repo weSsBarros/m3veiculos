@@ -23,12 +23,12 @@ import {
   EyeOff,
   Gauge,
   Megaphone,
-  Moon,
-  Sun,
   Receipt,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import ViewAsBar from './ViewAsBar.jsx'
+import PanelTopBar from './PanelTopBar.jsx'
+import { roleLabel } from '../lib/sellersApi.js'
 import AccountNotices from './AccountNotices.jsx'
 import PanelSwitch, { useRememberPanel } from './PanelSwitch.jsx'
 import { usePlatformBadges } from './platform/platformBadges.js'
@@ -39,6 +39,7 @@ import { tabForPath } from '../utils/panelSettings.js'
 import { storeBillingNotice } from '../utils/billing.js'
 import './admin.css'
 import '../modelos/painel.css'
+import { useAparenciaDaLoja } from '../modelos/aparencia.js'
 import './admin-dark.css'
 import { useAdminTheme } from '../utils/adminTheme.js'
 
@@ -122,7 +123,9 @@ function readExpanded() {
 }
 
 export default function AdminLayout() {
-  const { user, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden, isPlatformAdmin, planTabs, account } = useAuth()
+  const { user, role, isAdmin, isManager, isStaff, canManageCustomerFinance, seller, viewAs, signOut, isTabHidden, isPlatformAdmin, planTabs, account } = useAuth()
+  // Visual do painel escolhido pelo admin (Configurações → Aparência)
+  useAparenciaDaLoja()
   const [expanded, setExpanded] = useState(readExpanded)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [tip, setTip] = useState(null)
@@ -181,6 +184,9 @@ export default function AdminLayout() {
   // Mensalidade que vence logo ou atrasou, e que a loja ainda não informou como paga
   const billingNotice = storeBillingNotice(account?.billing, new Date(), account?.payment?.claims || [])
   const billingAlert = Boolean(billingNotice && !billingNotice.informed)
+  // Quem está logado, no canto superior direito (no "Ver como" continua o admin)
+  const whoName = viewAs ? user?.email || '' : seller?.name || user?.email || ''
+  const whoRole = viewAs ? 'Administrador' : roleLabel(role, seller?.customRole)
 
   return (
     <div className={`admin-shell ${expanded ? 'is-expanded' : 'is-collapsed'} ${mobileOpen ? 'is-mobile-open' : ''}`}>
@@ -265,7 +271,9 @@ export default function AdminLayout() {
           })}
         </nav>
 
-        <div className="admin-sidebar-bottom">
+        {/* Usados de vez em quando: com o menu aberto viram uma linha de ícones (17/10/2026),
+            para sobrar espaço para as abas do dia a dia. Tema e nome foram para o canto de cima. */}
+        <div className={`admin-sidebar-bottom${showLabels ? ' is-row' : ''}`}>
           <NavLink
             to="/admin/suporte"
             className={({ isActive }) => (isActive ? 'is-active' : '')}
@@ -288,27 +296,10 @@ export default function AdminLayout() {
               {billingAlert && <span className="admin-nav-badge" title="Mensalidade vence logo ou está em atraso">!</span>}
             </NavLink>
           )}
-          <button
-            type="button"
-            className="admin-sidebar-action"
-            onClick={toggleTheme}
-            data-tooltip={showLabels ? undefined : theme === 'escuro' ? 'Tema claro' : 'Tema escuro'}
-            aria-label={theme === 'escuro' ? 'Usar o tema claro' : 'Usar o tema escuro'}
-          >
-            {theme === 'escuro' ? <Sun size={18} /> : <Moon size={18} />}
-            <span className="admin-sidenav-label">{theme === 'escuro' ? 'Tema claro' : 'Tema escuro'}</span>
-          </button>
           <a href="/" target="_blank" rel="noreferrer" data-tooltip={showLabels ? undefined : 'Ver site'} aria-label="Ver site">
             <ExternalLink size={18} />
             <span className="admin-sidenav-label">Ver site</span>
           </a>
-          {showLabels && (
-            <div className="admin-sidebar-user">
-              <strong>{seller?.name || (isAdmin ? 'Administrador' : isStaff ? 'Gerente' : 'Vendedor')}</strong>
-              {seller && <em>{isManager ? 'Gerente' : 'Vendedor'}</em>}
-              <span>{user?.email}</span>
-            </div>
-          )}
           <button
             type="button"
             className="admin-sidebar-logout"
@@ -329,7 +320,10 @@ export default function AdminLayout() {
       )}
 
       <main className="admin-main">
-        <ViewAsBar />
+        <PanelTopBar name={whoName} role={whoRole} email={user?.email} theme={theme} onToggleTheme={toggleTheme}>
+          <ViewAsBar part="toggle" />
+        </PanelTopBar>
+        <ViewAsBar part="banner" />
         <AccountNotices storeName={STORE_NAME} />
         {/* Trocar a visão remonta a tela, que busca os dados de novo */}
         {hiddenHere ? (

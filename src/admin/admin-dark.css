@@ -179,6 +179,30 @@ html[data-admin-theme='escuro'] .admin-sidebar-user span {
   color: var(--color-text-muted);
 }
 
+html[data-admin-theme='escuro'] .panel-topbar-who span {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .theme-switch {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .theme-switch-knob {
+  background: var(--admin-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.63);
+  color: #f1c77e;
+}
+
+html[data-admin-theme='escuro'] .theme-switch.is-dark .theme-switch-knob {
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .theme-switch:focus-visible {
+  outline: 2px solid var(--color-primary);
+}
+
 @media (max-width: 860px) {
   html[data-admin-theme='escuro'] .admin-mobilebar {
     background: var(--admin-surface);
@@ -839,6 +863,35 @@ html[data-admin-theme='escuro'] .sale-dialog-commission strong {
   color: var(--admin-primary-text);
 }
 
+html[data-admin-theme='escuro'] .sale-discount {
+  border: 1px dashed var(--color-border);
+}
+
+html[data-admin-theme='escuro'] .sale-discount-final {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .sale-discount-final strong {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .sale-discount-error {
+  color: var(--admin-danger-text);
+}
+
+html[data-admin-theme='escuro'] .nfse-copy-field > label {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .simulator-table td.is-best {
+  background: var(--color-primary-light);
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .simulator-rate-input {
+  color: var(--color-text-muted);
+}
+
 html[data-admin-theme='escuro'] .customer-picker-add {
   background: none;
   border: none;
@@ -1234,6 +1287,45 @@ html[data-admin-theme='escuro'] .admin-alert-item strong {
   color: var(--admin-primary-text);
 }
 
+html[data-admin-theme='escuro'] .upcoming-installments {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+html[data-admin-theme='escuro'] .upcoming-installments-head h2 svg {
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .upcoming-installments-total {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .upcoming-installments-list li {
+  border-top: 1px solid var(--color-border);
+}
+
+html[data-admin-theme='escuro'] .upcoming-installments-who a {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .upcoming-installments-who a:hover {
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .upcoming-installments-who span,
+html[data-admin-theme='escuro'] .upcoming-installments-when span {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .upcoming-installments-when span.is-today {
+  color: #f1c57e;
+}
+
+html[data-admin-theme='escuro'] .upcoming-installments-more {
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
 html[data-admin-theme='escuro'] .admin-chip {
   border: 1px solid var(--color-border);
   background: var(--admin-surface);
@@ -1571,6 +1663,59 @@ html[data-admin-theme='escuro'] .settings-msg {
 
 html[data-admin-theme='escuro'] .settings-fields code {
   background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .aparencia-grupo {
+  border: 0;
+}
+
+html[data-admin-theme='escuro'] .aparencia-opcao {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+html[data-admin-theme='escuro'] .aparencia-opcao:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+}
+
+html[data-admin-theme='escuro'] .aparencia-opcao.is-escolhida {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+html[data-admin-theme='escuro'] .aparencia-opcao:has(input:focus-visible) {
+  outline: 2px solid var(--color-primary);
+}
+
+html[data-admin-theme='escuro'] .aparencia-nome {
+  color: var(--color-text);
+}
+
+html[data-admin-theme='escuro'] .aparencia-num {
+  background: var(--color-bg-alt);
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .aparencia-opcao.is-escolhida .aparencia-num {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+
+html[data-admin-theme='escuro'] .aparencia-check {
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .aparencia-resumo {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .aparencia-selo {
+  background: var(--color-primary-light);
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .aparencia-ver {
+  color: var(--admin-primary-text);
 }
 
 html[data-admin-theme='escuro'] .rotation-list li {

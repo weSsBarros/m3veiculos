@@ -308,7 +308,6 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
   const hasCredit = covers(credits?.price)
   const hasDocCredit = covers(credits?.docPrice)
   const paid = [features.placa && 'placa', features.fotoDocumento && 'foto'].filter(Boolean)
-  const anyCredit = (features.placa && hasCredit) || (features.fotoDocumento && hasDocCredit)
   const prices = credits
     ? [
         features.placa && `${queriesText(credits.queries)} de placa (${moneyBR(credits.price)} cada)`,
@@ -398,11 +397,7 @@ export default function VehicleAutofill({ car, defaults, knownBrands, onApply, o
                 ].filter(Boolean).join(' · ')})`}.
               </>
             )}{' '}
-            {credits?.admin ? (
-              <Link className="admin-link-btn" to="/admin/mensalidade#creditos">Comprar créditos</Link>
-            ) : (
-              !anyCredit && <span>Peça ao administrador da loja para comprar créditos.</span>
-            )}
+            {credits && <Link className="admin-link-btn" to="/admin/creditos">Comprar créditos</Link>}
           </p>
           {features.placa && (
             <div className="autofill-plate">

@@ -34,8 +34,9 @@ function emptyExpense() {
 
 export default function AdminCarExpenses() {
   const { confirm, confirmDialog } = useConfirm()
-  // Gerente (sem canSeeCosts) só lança gastos: não vê a lista, os valores nem os totais
-  const { isAdmin, canSeeCosts: roleSeesCosts } = useAuth()
+  // Gerente sem "Gasto em manutenção" (seção 89) só lança gastos: não vê a lista,
+  // os valores nem os totais. Editar e excluir: só o admin.
+  const { isAdmin, canSeeExpenses: roleSeesCosts } = useAuth()
   const { id } = useParams()
   const [car, setCar] = useState(null)
   // Carro com o cadeado de outro sócio (seção 73): o admin só lança, como o gerente
@@ -373,9 +374,11 @@ export default function AdminCarExpenses() {
                     </td>
                     <td>
                       <div className="admin-action-group">
-                          <button type="button" className="admin-action-btn" onClick={() => startEdit(expense)}>
-                            <Pencil size={15} /> Editar
-                          </button>
+                          {isAdmin && (
+                            <button type="button" className="admin-action-btn" onClick={() => startEdit(expense)}>
+                              <Pencil size={15} /> Editar
+                            </button>
+                          )}
                           {isAdmin && (
                             <button type="button" className="admin-action-btn admin-action-danger" onClick={() => handleDelete(expense)}>
                               <Trash2 size={15} /> Excluir
@@ -432,9 +435,11 @@ export default function AdminCarExpenses() {
                 )}
 
                 <div className="admin-card-actions">
-                  <button type="button" onClick={() => startEdit(expense)}>
-                    <Pencil size={14} /> Editar
-                  </button>
+                  {isAdmin && (
+                    <button type="button" onClick={() => startEdit(expense)}>
+                      <Pencil size={14} /> Editar
+                    </button>
+                  )}
                   {isAdmin && (
                     <button type="button" className="admin-icon-btn-danger" onClick={() => handleDelete(expense)}>
                       <Trash2 size={14} /> Excluir

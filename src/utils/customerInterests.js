@@ -4,6 +4,9 @@
 // versão", ano mínimo, preço máximo, km máximo e câmbio. Sem acento e sem
 // diferença de maiúsculas.
 
+// Campos em branco do "carro que ele procura" (aba Interesses e Novo cliente)
+export const EMPTY_SEARCH = { brand: '', model: '', category: '', yearMin: '', priceMax: '', kmMax: '', transmission: '', notes: '' }
+
 export function normText(value) {
   return String(value || '')
     .normalize('NFD')

@@ -461,10 +461,12 @@ export async function fetchTermsReceipt(companyId = null) {
   return run(supabase.rpc('terms_receipt', companyId ? { p_company: companyId } : {}))
 }
 
-// "Já paguei": comprovante (opcional) no bucket privado payment-receipts
-export async function uploadPaymentReceipt(file) {
+// "Já paguei": comprovante (opcional) no bucket privado payment-receipts.
+// folder 'creditos': compra de créditos (a equipe toda envia, seção 86);
+// sem pasta: mensalidade (só o admin)
+export async function uploadPaymentReceipt(file, folder = '') {
   const ext = (file.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '') || 'pdf'
-  const path = `${COMPANY_ID}/${crypto.randomUUID()}.${ext}`
+  const path = `${COMPANY_ID}/${folder ? `${folder}/` : ''}${crypto.randomUUID()}.${ext}`
   const { error } = await supabase.storage.from('payment-receipts').upload(path, file, { cacheControl: '3600', upsert: false })
   if (error) throw error
   return { path, name: file.name, type: file.type }
@@ -655,8 +657,9 @@ export async function fetchSuspendedAccount(companyId = COMPANY_ID) {
   }
 }
 
+// Pública (site sem login): bloqueio, nome e a aparência escolhida pela loja (seção 84)
 export async function fetchCompanyStatus(companyId = COMPANY_ID) {
   const { data, error } = await publicSupabase.rpc('company_status', { p_company: companyId })
-  if (error) return { blocked: false, name: '' }
-  return { blocked: Boolean(data?.blocked), name: data?.name || '' }
+  if (error || !data) return { ok: false, blocked: false, name: '', modelo: 'atual', painel: 'atual' }
+  return { ok: true, blocked: Boolean(data.blocked), name: data.name || '', modelo: data.modelo || 'atual', painel: data.painel || 'atual' }
 }

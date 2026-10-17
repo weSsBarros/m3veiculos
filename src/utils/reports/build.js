@@ -720,3 +720,99 @@ export function buildInstallmentsReport({ financings = [], customersById = new M
     ],
   }
 }
+
+// Descontos dados nas vendas (seção 87): as vendas do período com desconto (valor
+// antes, desconto, % e valor final, quem vendeu e quem deu) e o resumo por vendedor
+// (quantas vendas tiveram desconto, total e o desconto médio sobre o valor antes).
+export function buildDiscountReport({ sales, cars, sellers = [], customers = [], range }) {
+  const carsById = byId(cars)
+  const sellersById = byId(sellers)
+  const customersById = byId(customers)
+  const sellerName = (id) => (id ? sellersById[id]?.name || '—' : 'Venda direta')
+  const pct = (discount, before) => (before ? `${((discount / before) * 100).toFixed(1).replace('.', ',')}%` : '')
+
+  const periodSales = sales.filter((s) => inRange(s.saleDate, range)).sort((a, b) => (a.saleDate < b.saleDate ? -1 : 1))
+  const withDiscount = periodSales.filter((s) => (Number(s.discount) || 0) > 0)
+  const rows = withDiscount.map((s) => {
+    const car = carsById[s.carId]
+    const before = s.salePrice + s.discount
+    return {
+      date: s.saleDate,
+      car: carName(car),
+      plate: car?.plate ? car.plate.toUpperCase() : '',
+      customer: car?.customerId ? customersById[car.customerId]?.name || '' : '',
+      seller: sellerName(s.sellerId),
+      givenBy: s.discountByName || '',
+      before,
+      discount: s.discount,
+      pct: pct(s.discount, before),
+      final: s.salePrice,
+    }
+  })
+
+  const bySeller = {}
+  for (const s of periodSales) {
+    const key = s.sellerId || 'loja'
+    if (!bySeller[key]) bySeller[key] = { seller: s.sellerId ? sellersById[s.sellerId]?.name || '—' : 'Loja (sem vendedor)', count: 0, withDiscount: 0, before: 0, discount: 0 }
+    const row = bySeller[key]
+    row.count += 1
+    if ((Number(s.discount) || 0) > 0) {
+      row.withDiscount += 1
+      row.before += s.salePrice + s.discount
+      row.discount += s.discount
+    }
+  }
+  const summaryRows = Object.values(bySeller)
+    .map((r) => ({ ...r, avg: pct(r.discount, r.before) }))
+    .sort((a, b) => b.discount - a.discount)
+  const totalBefore = sum(rows, 'before')
+  const totalDiscount = sum(rows, 'discount')
+
+  return {
+    title: 'Descontos nas vendas',
+    subtitle: periodSubtitle(range),
+    sections: [
+      {
+        title: 'Vendas com desconto',
+        columns: [
+          { key: 'date', label: 'Data', type: 'date' },
+          { key: 'car', label: 'Carro', type: 'text' },
+          { key: 'plate', label: 'Placa', type: 'text' },
+          { key: 'customer', label: 'Cliente', type: 'text' },
+          { key: 'seller', label: 'Vendedor', type: 'text' },
+          { key: 'givenBy', label: 'Desconto dado por', type: 'text' },
+          { key: 'before', label: 'Valor antes', type: 'money' },
+          { key: 'discount', label: 'Desconto', type: 'money' },
+          { key: 'pct', label: '%', type: 'text' },
+          { key: 'final', label: 'Valor final', type: 'money' },
+        ],
+        rows,
+        totals: {
+          date: count(rows.length, 'venda', 'vendas'),
+          before: totalBefore,
+          discount: totalDiscount,
+          pct: pct(totalDiscount, totalBefore),
+          final: sum(rows, 'final'),
+        },
+      },
+      {
+        title: 'Resumo por vendedor',
+        columns: [
+          { key: 'seller', label: 'Vendedor', type: 'text' },
+          { key: 'count', label: 'Vendas', type: 'int' },
+          { key: 'withDiscount', label: 'Com desconto', type: 'int' },
+          { key: 'discount', label: 'Total de desconto', type: 'money' },
+          { key: 'avg', label: 'Desconto médio', type: 'text' },
+        ],
+        rows: summaryRows,
+        totals: {
+          seller: 'Total',
+          count: sum(summaryRows, 'count'),
+          withDiscount: sum(summaryRows, 'withDiscount'),
+          discount: totalDiscount,
+          avg: pct(totalDiscount, totalBefore),
+        },
+      },
+    ],
+  }
+}

@@ -99,7 +99,7 @@ const EMPTY_CAR = {
 
 export default function AdminCarForm() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, isStaff, isSeller, seller: me, canSeeCosts } = useAuth()
+  const { isAdmin, isStaff, isSeller, seller: me, canSeeCosts, canSeeExpenses } = useAuth()
   const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
   // Documentos escolhidos antes de o carro existir: sobem logo após o cadastro
   const [pendingDocs, setPendingDocs] = useState([])
@@ -146,6 +146,8 @@ export default function AdminCarForm() {
   const [car, setCar] = useState(EMPTY_CAR)
   // Carro com o cadeado de outro sócio: sem custo, gastos nem margem (seção 73)
   const seeCosts = canSeeCosts && !car.valuesHidden
+  // Gerente com "Gasto em manutenção" (seção 89) vê a lista de gastos do carro
+  const seeExpenses = canSeeExpenses && !car.valuesHidden
   const [originalStatus, setOriginalStatus] = useState(null)
   const [highlightsText, setHighlightsText] = useState('')
   const [loading, setLoading] = useState(isEditing)
@@ -606,6 +608,9 @@ export default function AdminCarForm() {
   // Gerente informa o custo só no cadastro; na edição o campo nem aparece.
   // O vendedor não informa custo.
   const showPurchase = seeCosts || (isStaff && !isEditing)
+  // Gerente com "Custo de compra, margem e lucro" (seção 89) vê o custo na edição,
+  // mas só o admin altera o custo já informado (regra do banco)
+  const purchaseReadOnly = showPurchase && isEditing && !isAdmin
   // Status que o vendedor não pode mudar
   const statusLocked = !isStaff && (originalStatus === 'vendido' || originalStatus === 'reservado')
 
@@ -620,7 +625,7 @@ export default function AdminCarForm() {
         {isEditing && (
           <div className="admin-row-actions">
             <Link to={`/admin/carros/${id}/gastos`} className="btn btn-outline">
-              <Receipt size={15} /> {seeCosts ? 'Ver gastos' : 'Lançar gasto'}
+              <Receipt size={15} /> {seeExpenses ? 'Ver gastos' : 'Lançar gasto'}
             </Link>
             {isAdmin && !car.valuesHidden && (
               <button type="button" className="btn btn-outline admin-delete-btn" onClick={handleDelete} disabled={saving}>
@@ -1095,13 +1100,27 @@ export default function AdminCarForm() {
           )}
           {showPurchase && (
             <p className="admin-form-hint">
-              {seeCosts
-                ? 'Usado para calcular o custo total e a margem do carro (junto com os gastos cadastrados em "Ver gastos"). Não aparece no site público.'
-                : 'Informe quanto a loja pagou pelo carro. Depois de cadastrar, só o administrador vê e altera esse valor.'}
+              {purchaseReadOnly
+                ? 'Usado para calcular o custo total e a margem do carro. Só o administrador altera o custo depois do cadastro.'
+                : seeCosts
+                  ? 'Usado para calcular o custo total e a margem do carro (junto com os gastos cadastrados em "Ver gastos"). Não aparece no site público.'
+                  : 'Informe quanto a loja pagou pelo carro. Depois de cadastrar, só o administrador altera esse valor.'}
             </p>
           )}
+          {purchaseReadOnly && (
+            <div className="admin-detail-grid">
+              <div>
+                <span>{car.entryType === 'consignado' ? 'Valor que vai para o dono' : 'Preço de compra'}</span>
+                <strong>{car.purchasePrice ? formatCurrency(parseIntBR(String(car.purchasePrice))) : '—'}</strong>
+              </div>
+              <div>
+                <span>{car.entryType === 'consignado' ? 'Data de entrada' : 'Data da compra'}</span>
+                <strong>{car.purchaseDate ? car.purchaseDate.split('-').reverse().join('/') : '—'}</strong>
+              </div>
+            </div>
+          )}
           <div className="admin-form-grid">
-            {showPurchase && (
+            {showPurchase && !purchaseReadOnly && (
               <label>
                 {car.entryType === 'consignado' ? 'Valor que vai para o dono' : 'Preço de compra'}
                 <MoneyInput
@@ -1111,7 +1130,7 @@ export default function AdminCarForm() {
                 />
               </label>
             )}
-            {showPurchase && (
+            {showPurchase && !purchaseReadOnly && (
               <label>
                 {car.entryType === 'consignado' ? 'Data de entrada' : 'Data da compra'}
                 <DateInputBR value={car.purchaseDate || ''} onChange={(iso) => update('purchaseDate', iso)} />

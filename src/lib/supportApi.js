@@ -81,9 +81,14 @@ export async function openSupportTicket({ subject, kind, body, attachments = [] 
   return ticket
 }
 
+// asWbdev: quem escreve ou lê é o painel WB.Dev (seção 92). Sem isso, o dono da
+// plataforma nos chamados da própria WB.AUTO contava como a loja e o aviso da
+// WB.Dev não sumia. Só vai quando é verdade (o banco antigo não tem o parâmetro).
+const wbdevParam = (asWbdev) => (asWbdev ? { p_as_wbdev: true } : {})
+
 // Nova mensagem. notify: avisa a WB.Dev (mensagem da loja)
-export async function postSupportMessage(ticketId, body, attachments = [], { notify = true } = {}) {
-  const message = messageFromRow(await run(supabase.rpc('post_support_message', { p_ticket: ticketId, p_body: body, p_attachments: attachments })))
+export async function postSupportMessage(ticketId, body, attachments = [], { notify = true, asWbdev = false } = {}) {
+  const message = messageFromRow(await run(supabase.rpc('post_support_message', { p_ticket: ticketId, p_body: body, p_attachments: attachments, ...wbdevParam(asWbdev) })))
   if (notify && message.authorKind === 'loja') notifyWbdev('chamado', message.id)
   return message
 }
@@ -92,8 +97,8 @@ export async function setSupportTicketStatus(ticketId, status) {
   await run(supabase.rpc('set_support_ticket_status', { p_ticket: ticketId, p_status: status }))
 }
 
-export async function markSupportTicketRead(ticketId) {
-  await run(supabase.rpc('mark_support_ticket_read', { p_ticket: ticketId }))
+export async function markSupportTicketRead(ticketId, { asWbdev = false } = {}) {
+  await run(supabase.rpc('mark_support_ticket_read', { p_ticket: ticketId, ...wbdevParam(asWbdev) }))
 }
 
 // Anexos (prints): bucket privado support-files, pasta da loja

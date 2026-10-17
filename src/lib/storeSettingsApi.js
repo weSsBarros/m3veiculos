@@ -23,6 +23,9 @@ export async function fetchStoreSettings() {
     whatsappLastEntry: row.whatsapp_last_entry || null,
     templates: normalizeTemplates(row.whatsapp_templates),
     panel: normalizePanelSettings(row.panel_settings),
+    // Aparência (seção 84); antes dela as colunas não existem e fica o padrão
+    siteModelo: row.site_modelo || 'atual',
+    painelVisual: row.painel_visual || 'atual',
   }
 }
 
@@ -32,9 +35,11 @@ const SETTINGS_KEYS = {
   whatsappStickyDays: 'whatsapp_sticky_days',
   templates: 'whatsapp_templates',
   panel: 'panel_settings',
+  siteModelo: 'site_modelo',
+  painelVisual: 'painel_visual',
 }
 
-// patch: só o que mudou ({ whatsappMode, whatsappMain, whatsappStickyDays, templates, panel })
+// patch: só o que mudou ({ whatsappMode, whatsappMain, whatsappStickyDays, templates, panel, siteModelo, painelVisual })
 export async function saveStoreSettings(patch) {
   requireSupabase()
   const payload = {}

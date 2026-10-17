@@ -17,6 +17,8 @@ import {
   RotateCcw,
   Eye,
   Landmark,
+  Palette,
+  Coins,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import {
@@ -32,6 +34,8 @@ import {
 import { fetchSellers } from '../lib/sellersApi.js'
 import CustomRolesSettings from './CustomRolesSettings.jsx'
 import FiscalSettings from './FiscalSettings.jsx'
+import AppearanceSettings from './AppearanceSettings.jsx'
+import PlateCredits from './PlateCredits.jsx'
 import { applyStockAlertToAll, fetchCompanySettings, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import {
   PANEL_TABS,
@@ -321,7 +325,7 @@ export default function AdminSettings() {
       <div className="admin-page-head">
         <div>
           <h1>Configurações</h1>
-          <p>Painel, WhatsApp do site, mensagens prontas, opções e dados fiscais da loja</p>
+          <p>Aparência, painel, WhatsApp do site, mensagens prontas, opções, dados fiscais e créditos da loja</p>
         </div>
         <button type="button" className="btn btn-outline" onClick={load}>
           <RefreshCcw size={15} /> Atualizar
@@ -331,6 +335,7 @@ export default function AdminSettings() {
       {error && <p className="admin-error">{error}</p>}
 
       <nav className="settings-jump" aria-label="Seções">
+        <a href="#aparencia">Aparência</a>
         <a href="#painel">Painel</a>
         <a href="#whatsapp">WhatsApp do site</a>
         <a href="#mensagens">Mensagens prontas</a>
@@ -338,7 +343,20 @@ export default function AdminSettings() {
         <a href="#vendas">Vendas</a>
         <a href="#financeiro">Financeiro</a>
         <a href="#fiscal">Dados fiscais</a>
+        <a href="#creditos">Créditos</a>
       </nav>
+
+      <div id="aparencia">
+        <Section icon={Palette} title="Aparência" description="O modelo do site e o visual do painel. Um não depende do outro.">
+          {store && (
+            <AppearanceSettings
+              siteModelo={store.siteModelo}
+              painelVisual={store.painelVisual}
+              onSaved={(values) => setStore((prev) => ({ ...prev, ...values }))}
+            />
+          )}
+        </Section>
+      </div>
 
       <div id="painel">
         <Section icon={LayoutDashboard} title="Painel" description="Esconda as abas que a loja não usa — para todos ou só para o gerente ou o vendedor —, crie cargos com abas próprias e escolha os blocos do Dashboard.">
@@ -662,6 +680,16 @@ export default function AdminSettings() {
               onSaved={(fiscal) => setCompany((prev) => ({ ...prev, fiscal }))}
             />
           )}
+        </Section>
+      </div>
+
+      <div id="creditos">
+        <Section
+          icon={Coins}
+          title="Créditos"
+          description="Consulta por placa, foto do documento e assinatura digital usam o mesmo saldo. Gerente e vendedor também compram, pelo link do cadastro do carro."
+        >
+          <PlateCredits payment={null} storeName={company?.name || 'a loja'} embedded />
         </Section>
       </div>
 

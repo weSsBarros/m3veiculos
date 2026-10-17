@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { BadgePercent, X } from 'lucide-react'
 import DateInputBR from '../components/DateInputBR.jsx'
-import { formatCurrencyCents, parseIntBR, todayISO } from '../utils/carFormat.js'
+import { formatCurrency, formatCurrencyCents, formatDateBR, parseIntBR, todayISO } from '../utils/carFormat.js'
+import { discountError, discountPercent, discountToCloseGap, finalSalePrice, percentText, priceBeforeDiscount } from '../utils/saleDiscount.js'
 import { describeCommission } from '../lib/sellersApi.js'
 import { fetchCommissionTiers, tierCommission, fetchCommissionBands } from '../lib/commissionTiersApi.js'
 import { bandFor, bandCommission, bandRangeLabel } from '../utils/commissionBands.js'
@@ -17,8 +18,11 @@ import { parseAnoModelo } from '../utils/anoModelo.js'
 import { salePayment } from '../utils/salePayments.js'
 import '../components/ConfirmDialog.css'
 
+const thousands = (value) => String(value ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+
 // Janela aberta ao marcar um carro como "Vendido": vendedor, cliente
-// comprador (opcional), valor final negociado, data, forma de pagamento,
+// comprador (opcional), valor da venda e desconto (seção 87: o valor final é o
+// que fica gravado e vale para comissão e contrato), data, forma de pagamento,
 // carro recebido na troca e o checklist de itens entregues (já preenchido com
 // o que veio com o carro no cadastro). A comissão mostrada é só uma prévia —
 // o valor oficial é calculado e gravado pelo banco.
@@ -49,8 +53,11 @@ export default function SaleDialog({
   const [tradeIn, setTradeIn] = useState(EMPTY_TRADE_IN)
   const [customerId, setCustomerId] = useState(car.customerId || '')
   const [price, setPrice] = useState(
-    String(initialSale?.salePrice ?? car.price ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+    thousands(initialSale ? priceBeforeDiscount(initialSale) : car.price ?? '')
   )
+  // Desconto (seção 87): quem registra a venda dá; o valor final é o que fica gravado
+  const [discountOpen, setDiscountOpen] = useState(Boolean(initialSale?.discount))
+  const [discount, setDiscount] = useState(initialSale?.discount ? thousands(initialSale.discount) : '')
   const [date, setDate] = useState(() => {
     if (initialSale?.saleDate) return initialSale.saleDate
     if (car.status === 'vendido' && car.soldAt) {
@@ -74,7 +81,11 @@ export default function SaleDialog({
   }, [showCommission])
 
   const seller = activeSellers.find((s) => s.id === sellerId)
-  const priceValue = parseIntBR(price)
+  const listValue = parseIntBR(price)
+  const discountValue = discountOpen ? parseIntBR(discount) || 0 : 0
+  // Valor final (com o desconto): comissão, pagamentos e o que fica gravado
+  const priceValue = listValue ? finalSalePrice(listValue, discountValue) : listValue
+  const discountProblem = discountError(listValue, discountValue)
   let commissionPreview = null
   if (seller && priceValue) {
     if (seller.commissionType === 'percent') commissionPreview = Math.round(priceValue * seller.commissionValue) / 100
@@ -86,8 +97,12 @@ export default function SaleDialog({
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!priceValue) {
-      setError('Informe o valor final da venda.')
+    if (!listValue) {
+      setError('Informe o valor da venda.')
+      return
+    }
+    if (discountProblem) {
+      setError(discountProblem)
       return
     }
     if (!date) {
@@ -131,6 +146,7 @@ export default function SaleDialog({
       sellerId: sellerId || null,
       customerId: customerId || null,
       salePrice: priceValue,
+      discount: discountValue,
       saleDate: date,
       checklist,
       generateTerm,
@@ -171,7 +187,7 @@ export default function SaleDialog({
           />
 
           <label>
-            Valor final da venda
+            Valor da venda
             <MoneyInput
               value={price}
               onChange={(v) => setPrice(v)}
@@ -179,6 +195,46 @@ export default function SaleDialog({
               required
             />
           </label>
+
+          {discountOpen ? (
+            <div className="sale-discount">
+              <div className="sale-discount-row">
+                <label>
+                  Desconto
+                  <MoneyInput value={discount} onChange={setDiscount} placeholder="Ex: 2.000" disabled={saving} />
+                </label>
+                <button
+                  type="button"
+                  className="admin-link-btn"
+                  onClick={() => {
+                    setDiscountOpen(false)
+                    setDiscount('')
+                  }}
+                  disabled={saving}
+                >
+                  Tirar o desconto
+                </button>
+              </div>
+              {discountProblem ? (
+                <span className="sale-discount-error">{discountProblem}</span>
+              ) : (
+                <p className="sale-discount-final">
+                  Valor final <strong>{listValue ? formatCurrency(priceValue) : '—'}</strong>
+                  {discountValue > 0 && listValue ? <span> · {percentText(discountPercent(listValue, discountValue))} de desconto</span> : null}
+                </p>
+              )}
+              {initialSale?.discount > 0 && initialSale.discountByName && discountValue === initialSale.discount && (
+                <span className="sale-dialog-note sale-discount-who">
+                  Desconto dado por {initialSale.discountByName}
+                  {initialSale.discountAt ? ` em ${formatDateBR(initialSale.discountAt.slice(0, 10))}` : ''}.
+                </span>
+              )}
+            </div>
+          ) : (
+            <button type="button" className="admin-link-btn sale-discount-add" onClick={() => setDiscountOpen(true)} disabled={saving}>
+              <BadgePercent size={15} aria-hidden="true" /> Dar desconto
+            </button>
+          )}
 
           <label>
             Data da venda
@@ -211,6 +267,10 @@ export default function SaleDialog({
               disabled={saving}
               salePrice={priceValue}
               tradeInValue={tradeIn.enabled ? parseIntBR(tradeIn.value) || 0 : initialSale?.tradeInValue || 0}
+              onCloseGap={(gap) => {
+                setDiscountOpen(true)
+                setDiscount(thousands(discountValue + discountToCloseGap(gap)))
+              }}
             />
           </div>
 

@@ -177,12 +177,7 @@ export default function SignatureDialog({ kind = 'venda', contractId, carId, def
         {cost.text && (
           <p className={cost.canSend ? 'admin-form-note' : 'admin-error'}>
             {cost.text}{' '}
-            {!cost.canSend &&
-              (credits?.admin ? (
-                <Link className="admin-link-btn" to="/admin/mensalidade#creditos">Comprar créditos</Link>
-              ) : (
-                'Peça ao administrador da loja para comprar créditos.'
-              ))}
+            {!cost.canSend && <Link className="admin-link-btn" to="/admin/creditos">Comprar créditos</Link>}
           </p>
         )}
         {error && <p className="admin-error">{error}</p>}

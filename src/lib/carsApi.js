@@ -93,9 +93,33 @@ let staffTable = 'cars'
 
 let canSetPurchase = true
 
-export function setCarsAccess(role) {
+// Gerente com "Custo de compra, margem e lucro" (seção 89): o custo vem da
+// função car_costs() e entra nas linhas da staff_cars
+let managerCosts = false
+
+export function setCarsAccess(role, { costs = false } = {}) {
   staffTable = role === 'admin' ? 'cars' : 'staff_cars'
   canSetPurchase = role === 'admin' || role === 'manager'
+  managerCosts = role === 'manager' && costs === true
+}
+
+// { car_id: { purchase_price, purchase_date, expenses_total } } dos carros
+// cujos valores o gerente vê (os trancados por um sócio não vêm)
+export async function fetchCarCosts() {
+  const { data, error } = await supabase.rpc('car_costs')
+  if (error) throw error
+  return new Map((Array.isArray(data) ? data : []).map((c) => [c.car_id, c]))
+}
+
+// Linhas da staff_cars com o custo de compra do gerente liberado; carro sem
+// custo à vista (cadeado de um sócio) vem marcado como valuesHidden
+async function withManagerCosts(rows) {
+  if (!managerCosts || !rows.length) return rows
+  const costs = await fetchCarCosts()
+  return rows.map((r) => {
+    const c = costs.get(r.id)
+    return c ? { ...r, purchase_price: c.purchase_price, purchase_date: c.purchase_date } : { ...r, values_hidden: true }
+  })
 }
 
 // Valores privados (seção 73): o admin lê pela tabela "cars" só os carros cujos
@@ -279,7 +303,7 @@ export async function fetchAllCarsAdmin() {
     .eq('company_id', COMPANY_ID)
     .order('created_at', { ascending: false })
   if (error) throw error
-  return scopeCars(data.map(fromRow))
+  return scopeCars((await withManagerCosts(data)).map(fromRow))
 }
 
 // Estoque visto pelo vendedor: o mesmo da equipe (view "staff_cars", sem
@@ -296,7 +320,7 @@ export async function fetchCarById(id) {
   }
   const { data, error } = await supabase.from(staffTable).select('*').eq('id', id).eq('company_id', COMPANY_ID).maybeSingle()
   if (error) throw error
-  return data ? scopeCars([fromRow(data)])[0] : null
+  return data ? scopeCars([fromRow((await withManagerCosts([data]))[0])])[0] : null
 }
 
 async function uniqueSlug(base, ignoreId) {

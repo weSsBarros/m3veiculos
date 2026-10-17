@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCcw, AlertTriangle, Clock, Wallet, ImageOff, FileWarning, ClipboardList, Landmark, HandCoins, Bookmark, BellRing, CircleDollarSign, Megaphone, Receipt, Lock } from 'lucide-react'
+import { RefreshCcw, AlertTriangle, Clock, Wallet, ImageOff, FileWarning, ClipboardList, Landmark, HandCoins, Bookmark, CircleDollarSign, Megaphone, Receipt, Lock } from 'lucide-react'
 import { fetchOverdueInstallments, fetchUpcomingInstallments } from '../lib/financingApi.js'
 import { fetchContractsAdmin } from '../lib/contractsApi.js'
 import { fetchCustomerDocuments } from '../lib/customerDocumentsApi.js'
@@ -8,6 +8,7 @@ import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
 import { fetchReservations } from '../lib/reservationsApi.js'
 import { stockGaps, saleGaps, externalGaps, unpaidCommissions, reservationGaps, RECENT_SALES_DAYS } from '../utils/dashboardAlerts.js'
 import { renaveGaps } from '../utils/renave.js'
+import { salesWithoutInvoice } from '../utils/nfse.js'
 import { fetchOlxAccount, fetchOlxAds } from '../lib/olxApi.js'
 import { olxCarState, olxSellerPhones } from '../utils/olxStatus.js'
 import { fetchWebmotorsAccount, fetchWebmotorsAds } from '../lib/webmotorsApi.js'
@@ -28,6 +29,8 @@ import DonutChart from '../components/charts/DonutChart.jsx'
 import HBarChart from '../components/charts/HBarChart.jsx'
 import PeriodFilter from './PeriodFilter.jsx'
 import PendencyList from './PendencyList.jsx'
+import UpcomingInstallments from './UpcomingInstallments.jsx'
+import { fetchCompanySettings } from '../lib/companyApi.js'
 import useCustomerPendencies from './useCustomerPendencies.js'
 import { PENDENCY_TABS } from '../utils/panelSettings.js'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -41,7 +44,7 @@ const CATEGORY_COLORS = ['#0ea0db', '#1c9b56', '#f5a623', '#e0392c', '#7b61ff', 
 // valores das vendas (faturamento, comissões) só se o admin liberou — senão
 // o Dashboard dele mostra só quantidades.
 export default function AdminDashboard() {
-  const { isAdmin, canSeeCosts, canSeeSaleValues, canManageCustomerFinance, isTabHidden, isBlockHidden } = useAuth()
+  const { isAdmin, isStaff, canSeeCosts, canSeeExpenses, canSeeSaleValues, canManageCustomerFinance, isTabHidden, isBlockHidden } = useAuth()
   const show = (block) => !isBlockHidden(block)
   const [cars, setCars] = useState([])
   const [expenses, setExpenses] = useState([])
@@ -65,6 +68,7 @@ export default function AdminDashboard() {
   const [olx, setOlx] = useState({ account: null, ads: [] })
   const [wm, setWm] = useState({ account: null, ads: [] })
   const [upcomingInstallments, setUpcomingInstallments] = useState([])
+  const [companyName, setCompanyName] = useState('')
   const [companyExpenses, setCompanyExpenses] = useState([])
 
   async function load() {
@@ -73,8 +77,8 @@ export default function AdminDashboard() {
     try {
       const [carsData, expensesData, suppliersData, salesData, sellersData] = await Promise.all([
         fetchAllCarsAdmin(),
-        canSeeCosts ? fetchAllExpensesAdmin() : Promise.resolve([]),
-        canSeeCosts ? fetchAllSuppliers() : Promise.resolve([]),
+        canSeeCosts || canSeeExpenses ? fetchAllExpensesAdmin() : Promise.resolve([]),
+        canSeeExpenses ? fetchAllSuppliers() : Promise.resolve([]),
         fetchSales(),
         fetchSellers(),
       ])
@@ -88,6 +92,8 @@ export default function AdminDashboard() {
       if (canManageCustomerFinance) {
         fetchOverdueInstallments().then(setOverdueInstallments).catch(() => setOverdueInstallments([]))
         fetchUpcomingInstallments(7).then(setUpcomingInstallments).catch(() => setUpcomingInstallments([]))
+        // Nome da loja no lembrete do WhatsApp
+        fetchCompanySettings().then((s) => setCompanyName(s.name || '')).catch(() => {})
       }
       fetchContractsAdmin().then(setContracts).catch(() => setContracts([]))
       fetchCustomerDocuments().then(setCustomerDocs).catch(() => setCustomerDocs([]))
@@ -311,6 +317,7 @@ export default function AdminDashboard() {
     const res = reservationGaps(reservations)
     const renave = renaveGaps(cars)
     const bills = companyExpensePendency(companyExpenses, todayISO())
+    const noInvoice = salesWithoutInvoice(sales).length
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
     const items = [
       { key: 'res-exp', count: res.expired, danger: true, icon: Bookmark, to: '/admin/vendas', cta: 'Resolver', text: `${plural(res.expired, 'reserva passou', 'reservas passaram')} do prazo — converta em venda ou cancele.` },
@@ -320,7 +327,6 @@ export default function AdminDashboard() {
       { key: 'company-bills', count: bills.count, danger: bills.overdue > 0, icon: Receipt, to: bills.overdue ? '/admin/financeiro/despesas?filtro=atrasadas' : '/admin/financeiro/despesas?filtro=a_pagar', cta: 'Ver', text: bills.overdue ? `${plural(bills.count, 'conta da empresa', 'contas da empresa')} para pagar (${formatCurrencyCents(bills.total)}): ${plural(bills.overdue, 'atrasada', 'atrasadas')}.` : `${plural(bills.count, 'conta da empresa vence', 'contas da empresa vencem')} em até ${COMPANY_EXPENSE_ALERT_DAYS} dias (${formatCurrencyCents(bills.total)}).` },
       { key: 'renave-entry', count: renave.entry, icon: FileWarning, to: '/admin/estoque?renave=pendente', cta: 'Registrar', text: `${plural(renave.entry, 'carro está', 'carros estão')} sem a entrada registrada no RENAVE.` },
       { key: 'res-soon', count: res.dueSoon, icon: Bookmark, to: '/admin/vendas', cta: 'Ver', text: `${plural(res.dueSoon, 'reserva vence', 'reservas vencem')} em até 2 dias.` },
-      { key: 'inst-soon', count: upcomingInstallments.length, icon: BellRing, to: '/admin/financeiro/clientes', cta: 'Lembrar', text: `${plural(upcomingInstallments.length, 'parcela de cliente vence', 'parcelas de clientes vencem')} nos próximos 7 dias.` },
       { key: 'ext-stale', count: ext.staleAnalysis, icon: Landmark, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.staleAnalysis, 'financiamento externo está', 'financiamentos externos estão')} em análise há mais de 7 dias.` },
       { key: 'ext-approved', count: ext.approvedUnpaid, icon: CircleDollarSign, to: '/admin/financiamentos-externos', cta: 'Ver', text: `${plural(ext.approvedUnpaid, 'financiamento externo aprovado aguarda', 'financiamentos externos aprovados aguardam')} o pagamento do banco.` },
       { key: 'commissions', count: isAdmin ? unpaid.count : 0, icon: HandCoins, to: '/admin/equipe', cta: 'Pagar', text: `Comissões a pagar: ${formatCurrencyCents(unpaid.amount)} (${plural(unpaid.count, 'venda ou financiamento', 'vendas ou financiamentos')}).` },
@@ -328,6 +334,7 @@ export default function AdminDashboard() {
       { key: 'sale-customer', count: salesGap.noCustomer, icon: ClipboardList, to: '/admin/vendas', cta: 'Completar', text: `${plural(salesGap.noCustomer, 'venda', 'vendas')} dos últimos ${RECENT_SALES_DAYS} dias sem cliente vinculado.` },
       { key: 'sale-contract', count: salesGap.noContract, icon: FileWarning, to: '/admin/vendas', cta: 'Completar', text: `${plural(salesGap.noContract, 'venda', 'vendas')} dos últimos ${RECENT_SALES_DAYS} dias sem contrato ou documento anexado.` },
       { key: 'sale-checklist', count: salesGap.checklistIncomplete, icon: ClipboardList, to: '/admin/vendas', cta: 'Conferir', text: `${plural(salesGap.checklistIncomplete, 'venda', 'vendas')} com checklist de entrega incompleto.` },
+      { key: 'sale-nfse', count: isStaff ? noInvoice : 0, icon: Receipt, to: '/admin/vendas?filtro=sem_nota', cta: 'Emitir', text: `${plural(noInvoice, 'venda', 'vendas')} sem nota fiscal (NFS-e) e sem a marca "Não precisa de nota".` },
       { key: 'car-photo', count: stock.noPhoto, icon: ImageOff, to: '/admin/estoque', cta: 'Completar', text: `${plural(stock.noPhoto, 'carro em estoque', 'carros em estoque')} sem foto.` },
       { key: 'car-price', count: stock.noPrice, icon: CircleDollarSign, to: '/admin/estoque', cta: 'Ver', text: `${plural(stock.noPrice, 'carro em estoque', 'carros em estoque')} sem preço (aparece "Consulte o valor").` },
       { key: 'car-docs', count: stock.noDocs, icon: FileWarning, to: '/admin/estoque', cta: 'Anexar', text: `${plural(stock.noDocs, 'carro em estoque', 'carros em estoque')} sem documento anexado (CRLV, laudo).` },
@@ -342,7 +349,7 @@ export default function AdminDashboard() {
       <div className="admin-page-head">
         <div>
           <h1>Dashboard</h1>
-          <p>{canSeeCosts ? 'Visão geral de vendas, estoque e gastos' : 'Visão geral de vendas e estoque'}</p>
+          <p>{canSeeExpenses ? 'Visão geral de vendas, estoque e gastos' : 'Visão geral de vendas e estoque'}</p>
         </div>
         <div className="admin-row-actions">
           <PeriodFilter
@@ -397,6 +404,10 @@ export default function AdminDashboard() {
 
       {show('pendencies') && <PendencyList items={pendencies} />}
 
+      {show('installmentsDue') && canManageCustomerFinance && (
+        <UpcomingInstallments items={upcomingInstallments} days={7} companyName={companyName} />
+      )}
+
       {show('stats') && (
       <div className="expense-summary">
         {canSeeSaleValues && (
@@ -415,7 +426,7 @@ export default function AdminDashboard() {
             <strong>{formatCurrencyCents(periodCommission)}</strong>
           </div>
         )}
-        {canSeeCosts && (
+        {canSeeExpenses && (
           <div className="expense-summary-card">
             <span>Gastos no período</span>
             <strong>{formatCurrency(periodExpensesTotal)}</strong>
@@ -478,7 +489,7 @@ export default function AdminDashboard() {
             />
           </div>
         )}
-        {show('expensesByCategory') && canSeeCosts && (
+        {show('expensesByCategory') && canSeeExpenses && (
           <div className="chart-card">
             <h3>Gastos por categoria (período)</h3>
             {byCategory.length ? (
@@ -488,7 +499,7 @@ export default function AdminDashboard() {
             )}
           </div>
         )}
-        {show('expensesBySupplier') && canSeeCosts && (
+        {show('expensesBySupplier') && canSeeExpenses && (
           <div className="chart-card chart-card-wide">
             <h3>Gastos por fornecedor (período)</h3>
             <HBarChart data={bySupplier} formatValue={formatCurrency} color="#f5a623" emptyLabel="Nenhum gasto com fornecedor no período." />

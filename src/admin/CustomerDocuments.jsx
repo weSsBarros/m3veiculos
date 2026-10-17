@@ -19,10 +19,12 @@ const EMPTY_META = { docType: 'compra', title: '', signedOn: '', carId: '', note
 
 // Contratos e documentos anexados a um cliente (vários por cliente: compra,
 // entrega, pós-venda, garantia...). Com carId, mostra e anexa só os daquele
-// carro. Não usa <form> para poder ficar dentro de outros formulários.
+// carro; com externalFinancingId, os daquele financiamento externo (que também
+// aparecem na ficha do cliente). Não usa <form> para poder ficar dentro de
+// outros formulários.
 // cars: carros do cliente [{ id, label }], para escolher a qual se refere.
 // CNH, RG e comprovantes ficam em "Documentos pessoais" (PersonalDocuments.jsx).
-export default function CustomerDocuments({ customerId, carId, cars = [], canDelete, onCountChange }) {
+export default function CustomerDocuments({ customerId, carId, externalFinancingId = null, defaultDocType = 'compra', cars = [], canDelete, onCountChange }) {
   const { confirm, confirmDialog } = useConfirm()
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -36,7 +38,8 @@ export default function CustomerDocuments({ customerId, carId, cars = [], canDel
 
   useEffect(() => {
     let cancelled = false
-    fetchCustomerDocuments({ customerId, carId })
+    // Do financiamento: todos os dele, mesmo se o cliente do financiamento mudou depois
+    fetchCustomerDocuments(externalFinancingId ? { externalFinancingId } : { customerId, carId })
       .then((data) => {
         if (!cancelled) setDocs(data.filter((d) => !isPersonalDocType(d.docType)))
       })
@@ -49,7 +52,7 @@ export default function CustomerDocuments({ customerId, carId, cars = [], canDel
     return () => {
       cancelled = true
     }
-  }, [customerId, carId])
+  }, [customerId, carId, externalFinancingId])
 
   function applyDocs(next) {
     setDocs(next)
@@ -66,7 +69,7 @@ export default function CustomerDocuments({ customerId, carId, cars = [], canDel
 
   function openNew() {
     setEditingId(null)
-    setMeta({ ...EMPTY_META, carId: carId || (cars.length === 1 ? cars[0].id : '') })
+    setMeta({ ...EMPTY_META, docType: defaultDocType, carId: carId || (cars.length === 1 ? cars[0].id : '') })
     setFiles([])
     setError('')
     setFormOpen(true)
@@ -101,7 +104,7 @@ export default function CustomerDocuments({ customerId, carId, cars = [], canDel
           return
         }
         const uploaded = []
-        for (const file of files) uploaded.push(await uploadCustomerDocument(customerId, file, meta))
+        for (const file of files) uploaded.push(await uploadCustomerDocument(customerId, file, { ...meta, externalFinancingId }))
         applyDocs([...uploaded, ...docs])
       }
       closeForm()
@@ -144,13 +147,16 @@ export default function CustomerDocuments({ customerId, carId, cars = [], canDel
       {loading ? (
         <p className="admin-muted">Carregando documentos…</p>
       ) : docs.length === 0 ? (
-        <p className="admin-muted">Nenhum documento anexado{carId ? ' para este carro' : ''} ainda.</p>
+        <p className="admin-muted">
+          Nenhum documento anexado{externalFinancingId ? ' a este financiamento' : carId ? ' para este carro' : ''} ainda.
+        </p>
       ) : (
         <ul className="doc-list">
           {docs.map((doc) => (
             <li key={doc.id}>
               <div className="doc-list-main">
                 <span className="admin-pill is-info">{customerDocTypeLabel(doc.docType)}</span>
+                {!externalFinancingId && doc.externalFinancingId && <span className="admin-pill">Financiamento externo</span>}
                 <strong>{doc.title || doc.fileName}</strong>
                 <span className="admin-table-sub">
                   {[

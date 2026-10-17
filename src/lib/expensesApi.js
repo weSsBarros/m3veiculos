@@ -50,8 +50,38 @@ export async function fetchExpensesByCar(carId) {
   return scopeExpenses(data.map(fromRow))
 }
 
+// O que quem está logado lê dos gastos (seção 89): 'full' (admin ou gerente com
+// "Gasto em manutenção"), 'totals' (gerente só com "Custo de compra, margem e
+// lucro": um total por carro, para a margem) ou 'none'. O AuthContext define.
+let expenseMode = 'full'
+
+export function setExpensesAccess(mode) {
+  expenseMode = ['full', 'totals', 'none'].includes(mode) ? mode : 'none'
+}
+
+// Um "gasto" por carro com o total (sem a lista, que o gerente não vê)
+async function expenseTotalsAsEntries() {
+  const { data, error } = await supabase.rpc('car_costs')
+  if (error) throw error
+  return (Array.isArray(data) ? data : [])
+    .filter((c) => Number(c.expenses_total) > 0)
+    .map((c) => ({
+      id: `total-${c.car_id}`,
+      carId: c.car_id,
+      category: 'outros',
+      description: 'Total dos gastos',
+      amount: Number(c.expenses_total),
+      expenseDate: null,
+      attachments: [],
+      supplierId: null,
+      isTotal: true,
+    }))
+}
+
 export async function fetchAllExpensesAdmin() {
   requireSupabase()
+  if (expenseMode === 'totals') return scopeExpenses(await expenseTotalsAsEntries())
+  if (expenseMode === 'none') return []
   const { data, error } = await supabase
     .from('car_expenses')
     .select('*')

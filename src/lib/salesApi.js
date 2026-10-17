@@ -7,6 +7,11 @@ function fromRow(row) {
     carId: row.car_id,
     sellerId: row.seller_id,
     salePrice: row.sale_price,
+    // Desconto dado na venda (seção 87): salePrice já é o valor final, com o
+    // desconto; quem deu e quando vêm do banco
+    discount: Number(row.discount) || 0,
+    discountByName: row.discount_by_name || '',
+    discountAt: row.discount_at || null,
     saleDate: row.sale_date,
     commissionType: row.commission_type,
     commissionValue: row.commission_value != null ? Number(row.commission_value) : null,
@@ -29,6 +34,11 @@ function fromRow(row) {
     tradeInCarId: row.trade_in_car_id || null,
     tradeInValue: row.trade_in_value != null ? Number(row.trade_in_value) : null,
     commissionPaidOn: row.commission_paid_on || null,
+    // Nota fiscal de serviço (seção 88): emitida no Emissor Nacional e guardada aqui
+    nfseStatus: row.nfse_status || 'pendente',
+    nfseNumber: row.nfse_number || '',
+    nfseIssuedOn: row.nfse_issued_on || null,
+    nfseFile: row.nfse_file || null,
     createdAt: row.created_at,
   }
 }
@@ -61,7 +71,9 @@ export async function fetchSaleByCar(carId) {
 // pelo formulário do carro não mexe no checklist nem na transferência).
 // insertOnly: o vendedor só registra venda nova (editar é do admin/gerente),
 // e o banco só deixa ele inserir venda no nome dele.
-export async function saveSaleForCar(carId, { sellerId, salePrice, saleDate, checklist, payment, tradeIn, insertOnly = false }) {
+// discount: desconto em reais (salePrice já vem com ele descontado); sem ele, o
+// desconto gravado continua como está.
+export async function saveSaleForCar(carId, { sellerId, salePrice, saleDate, checklist, payment, tradeIn, discount, insertOnly = false }) {
   requireSupabase()
   const row = {
     car_id: carId,
@@ -70,6 +82,7 @@ export async function saveSaleForCar(carId, { sellerId, salePrice, saleDate, che
     sale_price: salePrice,
     sale_date: saleDate,
   }
+  if (discount !== undefined) row.discount = Math.max(0, Math.round(Number(discount) || 0))
   if (checklist !== undefined) row.checklist = checklist
   // payment: { parts, method, bank, downPayment, financedAmount } (utils/salePayments.js)
   if (payment !== undefined) {
@@ -114,6 +127,20 @@ export async function updateSaleTransfer(saleId, { status, responsible, dueDate,
       transfer_done_on: status === 'concluida' ? doneOn || null : null,
       transfer_notes: notes || '',
     })
+    .eq('id', saleId)
+    .eq('company_id', COMPANY_ID)
+    .select()
+    .single()
+  if (error) throw error
+  return fromRow(data)
+}
+
+// NFS-e da venda (admin e gerente): situação, número, data e o PDF ({ path, name, type })
+export async function updateSaleNfse(saleId, { status, number = '', issuedOn = null, file = null }) {
+  requireSupabase()
+  const { data, error } = await supabase
+    .from('sales')
+    .update({ nfse_status: status, nfse_number: number || '', nfse_issued_on: issuedOn || null, nfse_file: file || null })
     .eq('id', saleId)
     .eq('company_id', COMPANY_ID)
     .select()

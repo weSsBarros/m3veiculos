@@ -5,6 +5,8 @@ import { todayISO, formatCurrencyCents } from '../utils/carFormat.js'
 import { parseMoneyBR, formatMoneyInput } from '../utils/financing.js'
 import { EXTERNAL_STATUSES, computeExternalCommission, describeExternalCommission } from '../utils/externalFinancing.js'
 import CustomerPicker from './CustomerPicker.jsx'
+import CustomerDocuments from './CustomerDocuments.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import BankSelect from './BankSelect.jsx'
 import { MoneyInput } from '../components/NumberInputs.jsx'
 import '../components/ConfirmDialog.css'
@@ -29,6 +31,7 @@ export default function ExternalFinancingDialog({
   onClose,
   saving,
 }) {
+  const { isAdmin, viewAs } = useAuth()
   const [form, setForm] = useState(() => ({
     customerId: initial?.customerId || '',
     vehicleLabel: initial?.vehicleLabel || '',
@@ -206,6 +209,21 @@ export default function ExternalFinancingDialog({
           Observações
           <textarea rows={2} value={form.notes} onChange={(e) => update('notes', e.target.value)} />
         </label>
+
+        {/* Contratos do banco, ficha da proposta, carnê: também na ficha do cliente */}
+        <div className="sale-dialog-section">
+          <span className="admin-field-label">Contratos e documentos</span>
+          {initial?.id && initial.customerId ? (
+            <CustomerDocuments
+              customerId={initial.customerId}
+              externalFinancingId={initial.id}
+              defaultDocType="financiamento"
+              canDelete={isAdmin && !viewAs}
+            />
+          ) : (
+            <p className="admin-muted">Cadastre o financiamento para anexar os contratos (abra de novo pela lista).</p>
+          )}
+        </div>
 
         {error && <p className="admin-error">{error}</p>}
 

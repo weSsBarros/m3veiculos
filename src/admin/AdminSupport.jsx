@@ -64,7 +64,7 @@ export function SupportThread({ ticket, wbdev = false, onChanged }) {
       .then((list) => !cancelled && setMessages(list))
       .catch((err) => !cancelled && setError(err.message))
     const unread = wbdev ? ticket.wbdevUnread : ticket.storeUnread
-    if (unread) markSupportTicketRead(ticket.id).then(() => onChanged?.({ read: true })).catch(() => {})
+    if (unread) markSupportTicketRead(ticket.id, { asWbdev: wbdev }).then(() => onChanged?.({ read: true })).catch(() => {})
     return () => {
       cancelled = true
     }
@@ -78,11 +78,12 @@ export function SupportThread({ ticket, wbdev = false, onChanged }) {
     setError('')
     try {
       const attachments = await uploadAll(files, ticket.companyId)
-      const message = await postSupportMessage(ticket.id, reply.trim(), attachments)
+      const message = await postSupportMessage(ticket.id, reply.trim(), attachments, { asWbdev: wbdev })
       setMessages((prev) => [...(prev || []), message])
       setReply('')
       setFiles([])
-      onChanged?.({ status: wbdev ? 'respondido' : 'aberto' })
+      // A WB.Dev respondeu: o chamado deixa de ter mensagem nova para ela (o menu conta de novo)
+      onChanged?.({ status: wbdev ? 'respondido' : 'aberto', ...(wbdev ? { read: true } : {}) })
     } catch (err) {
       setError('Não foi possível enviar: ' + err.message)
     } finally {

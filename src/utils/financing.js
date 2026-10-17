@@ -1,4 +1,4 @@
-import { daysBetweenISO, todayISO } from './carFormat.js'
+import { daysBetweenISO, todayISO, formatCurrencyCents, formatDateBR } from './carFormat.js'
 import { inRange } from './period.js'
 
 // Financiamento próprio da loja (carnê): cálculo de parcela, multa e juros por
@@ -124,6 +124,25 @@ export const FINANCING_STATUS_LABELS = {
 export function isDueSoon(installment, today = todayISO(), days = 7) {
   if (isInstallmentPaid(installment) || installment.dueDate < today) return false
   return daysBetweenISO(today, installment.dueDate) <= days
+}
+
+// "vence hoje", "vence amanhã", "vence em 5 dias" (lista do início)
+export function dueInText(dueDate, today = todayISO()) {
+  const days = daysBetweenISO(today, dueDate)
+  if (days <= 0) return 'vence hoje'
+  if (days === 1) return 'vence amanhã'
+  return `vence em ${days} dias`
+}
+
+// Lembrete no WhatsApp do cliente antes do vencimento (ficha do financiamento e
+// lista de parcelas a vencer do início)
+export function installmentReminderText({ customerName, number, count, vehicleLabel, dueDate, amount, companyName }) {
+  const firstName = String(customerName || '').trim().split(/\s+/)[0]
+  return [
+    `Olá${firstName ? `, ${firstName}` : ''}! Aqui é da ${companyName || 'loja'}.`,
+    `Passando para lembrar que a parcela ${number}/${count} do financiamento do ${vehicleLabel || 'seu veículo'} vence em ${formatDateBR(dueDate)}, no valor de ${formatCurrencyCents(amount)}.`,
+    'Qualquer dúvida, é só chamar!',
+  ].join('\n')
 }
 
 // Parcelas de um financiamento num período (Financeiro dos clientes): as que

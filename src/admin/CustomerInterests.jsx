@@ -2,17 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, Trash2, Pause, Play, Sparkles, MessageCircle, X, AlertTriangle } from 'lucide-react'
 import { fetchInterests, createInterest, updateInterest, deleteInterest, fetchMatches, setMatchStatus, MATCH_STATUS_LABELS } from '../lib/customerCrmApi.js'
-import { CATEGORIES, BRANDS, TRANSMISSIONS, CAR_STATUSES, formatCurrency, formatDateBR, parseIntBR } from '../utils/carFormat.js'
-import { describeInterest, matchingStockCars, likedCarGone, hasCriteria } from '../utils/customerInterests.js'
+import { CATEGORIES, CAR_STATUSES, formatCurrency, formatDateBR, parseIntBR } from '../utils/carFormat.js'
+import { describeInterest, matchingStockCars, likedCarGone, hasCriteria, EMPTY_SEARCH } from '../utils/customerInterests.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import useConfirm from '../components/useConfirm.jsx'
-import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
+import InterestSearchFields from './InterestSearchFields.jsx'
 
 const categoryLabel = (slug) => CATEGORIES.find((c) => c.slug === slug)?.label || slug
 const statusLabel = (value) => CAR_STATUSES.find((s) => s.value === value)?.label || value
 const carName = (car) => (car ? `${car.brand} ${car.model} ${car.version} · ${car.modelYear}` : 'Carro removido')
 
-const EMPTY = { kind: 'procura', carId: '', brand: '', model: '', category: '', yearMin: '', priceMax: '', kmMax: '', transmission: '', notes: '' }
+const EMPTY = { kind: 'procura', carId: '', ...EMPTY_SEARCH }
 
 // Aba "Interesses" da ficha do cliente: carros do estoque de que ele gostou e
 // carros que ele procura. Cada busca mostra o que já combina no estoque e os
@@ -270,47 +270,7 @@ export default function CustomerInterests({ customer, cars, onNotify, onChanged 
           ) : (
             <>
               <p className="admin-form-hint">Preencha só o que importa para ele; o resto vale "qualquer um".</p>
-              <div className="admin-form-grid">
-                <label>
-                  Marca
-                  <input list="crm-brands" value={form.brand} onChange={(e) => update('brand', e.target.value)} placeholder="Ex: Toyota" />
-                  <datalist id="crm-brands">
-                    {BRANDS.map((b) => <option key={b} value={b} />)}
-                  </datalist>
-                </label>
-                <label>
-                  Modelo
-                  <input value={form.model} onChange={(e) => update('model', e.target.value)} placeholder="Ex: Corolla" />
-                </label>
-                <label>
-                  Categoria
-                  <select value={form.category} onChange={(e) => update('category', e.target.value)}>
-                    <option value="">Qualquer</option>
-                    {CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
-                  </select>
-                </label>
-                <label>
-                  Ano a partir de
-                  <input inputMode="numeric" value={form.yearMin} onChange={(e) => update('yearMin', e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="Ex: 2019" />
-                </label>
-                <label>
-                  Preço até
-                  <MoneyInput value={form.priceMax} onChange={(v) => update('priceMax', v)} placeholder="Ex: 120.000" />
-                </label>
-                <label>
-                  Km até
-                  <KmInput value={form.kmMax} onChange={(v) => update('kmMax', v)} placeholder="Ex: 60.000" />
-                </label>
-                <label>
-                  Câmbio
-                  <select value={form.transmission} onChange={(e) => update('transmission', e.target.value)}>
-                    <option value="">Qualquer</option>
-                    <option value="Manual">Manual</option>
-                    <option value="Automático">Automático</option>
-                    {TRANSMISSIONS.filter((t) => !['Manual', 'Automático'].includes(t)).map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </label>
-              </div>
+              <InterestSearchFields form={form} onChange={update} />
             </>
           )}
           <label>

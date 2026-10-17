@@ -747,9 +747,9 @@ set role anon;
 select test.check('anon: não vê planos, contas, pagamentos nem avisos',
   test.count('select * from plans') <= 0 and test.count('select * from client_accounts') <= 0
   and test.count('select * from client_payments') <= 0 and test.count('select * from client_notices') <= 0);
-select test.check('anon: vê só se a loja está bloqueada e o nome (para o site)',
+select test.check('anon: vê só se a loja está bloqueada, o nome e a aparência (para o site)',
   (company_status(test.company_a()) ->> 'blocked')::boolean = false
-  and (select array_agg(k order by k) from jsonb_object_keys(company_status(test.company_a())) k) = array['blocked', 'name']);
+  and (select array_agg(k order by k) from jsonb_object_keys(company_status(test.company_a())) k) = array['blocked', 'modelo', 'name', 'painel']);
 select test.check('anon: não usa a lista de clientes nem a conta da loja',
   test.denied($$select platform_clients()$$) and test.denied($$select my_account()$$)
   and test.denied($$select client_billing('00000000-0000-0000-0000-000000000000', null)$$));
@@ -2074,15 +2074,14 @@ reset role;
 
 select test.login('aaaaaaaa-0000-0000-0000-000000000004');
 set role authenticated;
-select test.check('vendedor: vê o saldo e os preços (placa e foto do documento), mas não o extrato, os pedidos nem compra créditos',
+select test.check('vendedor: vê o saldo, os preços e os pedidos da loja, mas não o extrato (compra créditos desde a seção 86)',
   (my_plate_credits() ->> 'price')::numeric = 0.40
   and (my_plate_credits() ->> 'doc_price')::numeric = 0.20
   and not (my_plate_credits() ->> 'admin')::boolean
-  and jsonb_array_length(my_plate_credits() -> 'orders') = 0
+  and jsonb_array_length(my_plate_credits() -> 'orders') = 1
   and jsonb_array_length(my_plate_credits() -> 'ledger') = 0
-  and test.count('select * from plate_credit_orders') <= 0
-  and test.count('select * from plate_credit_ledger') <= 0
-  and test.denied($$select request_plate_credit(20, (now() at time zone 'America/Fortaleza')::date)$$));
+  and test.count('select * from plate_credit_orders') = 1
+  and test.count('select * from plate_credit_ledger') <= 0);
 reset role;
 
 set role anon;
@@ -2625,6 +2624,252 @@ select test.check('sem a faixa "acima", venda maior que a última fica sem comis
 delete from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1';
 update public.sellers set commission_type = 'percent', commission_value = 0 where id = '5e000000-0000-0000-0000-000000000004';
 delete from public.commission_price_bands where company_id = test.company_a();
+
+-- ======================================== 84) aparência: modelo do site e visual do painel
+select test.check('loja começa com o visual próprio no site e o painel padrão',
+  (select site_modelo = 'atual' and painel_visual = 'atual' from public.companies where id = test.company_a()));
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: escolhe o modelo do site e o visual do painel, um sem o outro',
+  test.allowed($$select save_store_settings('{"site_modelo": "vitrine"}')$$)
+  and test.allowed($$select save_store_settings('{"painel_visual": "escuro"}')$$));
+select test.check('admin A: modelo ou visual que não existe é recusado',
+  test.denied($$select save_store_settings('{"site_modelo": "neon"}')$$)
+  and test.denied($$select save_store_settings('{"painel_visual": "rosa"}')$$));
+select test.check('admin A: não grava as colunas direto (só pela função)',
+  test.denied($$update companies set site_modelo = 'bairro'$$)
+  and test.denied($$update companies set painel_visual = 'cor'$$));
+reset role;
+select test.check('admin A: as duas escolhas ficaram gravadas, cada uma na sua',
+  (select site_modelo = 'vitrine' and painel_visual = 'escuro' from public.companies where id = test.company_a()));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: não troca o modelo do site nem o visual do painel',
+  test.denied($$select save_store_settings('{"site_modelo": "bairro"}')$$)
+  and test.denied($$select save_store_settings('{"painel_visual": "cor"}')$$));
+select test.check('vendedor A: lê o visual do painel da loja (vale para toda a equipe)',
+  company_status(current_company_id()) ->> 'painel' = 'escuro');
+reset role;
+
+select test.login(null);
+set role anon;
+select test.check('anon: o site lê o modelo escolhido pela loja',
+  company_status(test.company_a()) ->> 'modelo' = 'vitrine');
+reset role;
+select test.check('loja B continua com o visual próprio e o painel padrão',
+  (select site_modelo = 'atual' and painel_visual = 'atual' from public.companies where id = 'bbbbbbbb-0000-0000-0000-00000000000b'));
+update public.companies set site_modelo = 'atual', painel_visual = 'atual' where id = test.company_a();
+
+-- ======================================== 86) créditos comprados pela equipe toda
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: vê o PIX da WB.Dev e informa a compra de um pacote, com o comprovante na pasta dos créditos',
+  my_plate_credits() -> 'pix' ? 'pix_key'
+  and test.allowed($$insert into storage.objects (bucket_id, name) select 'payment-receipts', current_company_id() || '/creditos/comprovante.pdf'$$)
+  and test.allowed($$select request_plate_credit(20, (now() at time zone 'America/Fortaleza')::date, jsonb_build_object('path', current_company_id()::text || '/creditos/comprovante.pdf'))$$));
+select test.check('vendedor A: comprovante fora da pasta dos créditos é recusado (o arquivo e o pedido)',
+  test.denied($$insert into storage.objects (bucket_id, name) select 'payment-receipts', current_company_id() || '/outro.pdf'$$)
+  and test.denied($$select request_plate_credit(100, (now() at time zone 'America/Fortaleza')::date, jsonb_build_object('path', current_company_id()::text || '/outro.pdf'))$$));
+select test.check('vendedor A: vê o próprio pedido e o comprovante dos créditos, mas não o extrato nem a mensalidade',
+  exists (select 1 from jsonb_array_elements(my_plate_credits() -> 'orders') o where (o ->> 'amount')::numeric = 20 and o ->> 'status' = 'pendente')
+  and jsonb_array_length(my_plate_credits() -> 'ledger') = 0
+  and test.count($$select * from storage.objects where bucket_id = 'payment-receipts'$$) = 1
+  and my_account() -> 'payment' = 'null'::jsonb);
+reset role;
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê os pedidos nem o comprovante dos créditos da loja A',
+  test.count($$select * from plate_credit_orders where company_id = test.company_a()$$) = 0
+  and test.count($$select * from storage.objects where bucket_id = 'payment-receipts' and name like '%/creditos/%'$$) = 0);
+reset role;
+
+-- ======================================== 87) desconto na venda
+update public.sellers set commission_type = 'percent', commission_value = 1 where id = '5e000000-0000-0000-0000-000000000004';
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: registra a venda dele com desconto',
+  test.allowed($$insert into sales (company_id, car_id, seller_id, sale_price, sale_date, discount, discount_by_name)
+    values (current_company_id(), 'ca000000-0000-0000-0000-0000000000a1', '5e000000-0000-0000-0000-000000000004', 93000, current_date, 2000, 'Outra pessoa')$$));
+reset role;
+select test.check('desconto guardado com quem deu (pelo login, não pelo que a tela manda) e quando',
+  (select discount = 2000 and discount_by = 'aaaaaaaa-0000-0000-0000-000000000004' and discount_by_name = 'Vendedor A' and discount_at is not null
+   from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+select test.check('comissão pelo valor final (1% de R$ 93.000)',
+  (select commission_amount = 930 from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.try($$update sales set transfer_notes = 'conferido' where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$);
+reset role;
+select test.check('edição sem mexer no desconto: continua o de quem deu',
+  (select discount_by = 'aaaaaaaa-0000-0000-0000-000000000004' and discount_by_name = 'Vendedor A' from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+set role authenticated;
+select test.try($$update sales set discount = 3000, sale_price = 92000 where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$);
+reset role;
+select test.check('admin A aumenta o desconto: passa a ser dele, e a comissão acompanha',
+  (select discount = 3000 and discount_by = 'aaaaaaaa-0000-0000-0000-000000000001' and discount_by_name in ('Admin A', 'admin@loja-a') and commission_amount = 920
+   from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+set role authenticated;
+select test.check('desconto negativo é recusado', test.denied($$update sales set discount = -1 where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+select test.try($$update sales set discount = 0, sale_price = 95000 where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$);
+reset role;
+select test.check('sem desconto: some quem deu',
+  (select discount = 0 and discount_by is null and discount_by_name = '' and discount_at is null from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vê nem mexe no desconto da venda da loja A',
+  test.count($$select * from sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$) = 0
+  and test.denied($$update sales set discount = 1 where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+select test.login(null);
+delete from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1';
+update public.sellers set commission_type = 'percent', commission_value = 0 where id = '5e000000-0000-0000-0000-000000000004';
+
+-- ======================================== 88) NFS-e na venda
+insert into public.sales (company_id, car_id, seller_id, sale_price, sale_date)
+values (test.company_a(), 'ca000000-0000-0000-0000-0000000000a1', '5e000000-0000-0000-0000-000000000004', 50000, current_date);
+select test.check('venda nova começa sem nota (pendente)',
+  (select nfse_status = 'pendente' and nfse_number = '' and nfse_file is null from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: guarda a nota com o número, a data e o PDF na pasta da loja',
+  test.allowed($$update sales set nfse_status = 'emitida', nfse_number = '  123  ', nfse_issued_on = current_date,
+    nfse_file = jsonb_build_object('path', current_company_id()::text || '/ca000000-0000-0000-0000-0000000000a1/nota.pdf', 'name', 'nota.pdf')
+    where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+select test.check('admin A: PDF da nota na pasta de outra loja é recusado; situação inventada também',
+  test.denied($$update sales set nfse_file = jsonb_build_object('path', 'bbbbbbbb-0000-0000-0000-00000000000b/x/nota.pdf') where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$)
+  and test.denied($$update sales set nfse_status = 'talvez' where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+select test.check('nota guardada (número sem espaços nas pontas)',
+  (select nfse_status = 'emitida' and nfse_number = '123' and nfse_issued_on is not null from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: vê a nota da venda dele, mas não muda',
+  test.count($$select * from sales where car_id = 'ca000000-0000-0000-0000-0000000000a1' and nfse_number = '123'$$) = 1
+  and test.denied($$update sales set nfse_status = 'nao_precisa' where car_id = 'ca000000-0000-0000-0000-0000000000a1'$$));
+reset role;
+select test.login(null);
+delete from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a1';
+
+-- ======================================== 89) gerente: gastos e custos por pessoa
+-- O Corolla (a9) fica trancado pelo admin A; um gasto e um anexo no carro a1 e uma
+-- conta da empresa (pasta "empresa")
+insert into public.car_private_values (car_id, company_id, owner_id, viewers)
+values ('ca000000-0000-0000-0000-0000000000a9', test.company_a(), 'aaaaaaaa-0000-0000-0000-000000000001', '{}')
+on conflict (car_id) do update set owner_id = excluded.owner_id, viewers = '{}';
+insert into public.car_expenses (company_id, car_id, category, description, amount)
+values (test.company_a(), 'ca000000-0000-0000-0000-0000000000a1', 'outros', 'teste 89', 77);
+insert into storage.objects (bucket_id, name) values
+  ('expense-attachments', test.company_a() || '/ca000000-0000-0000-0000-0000000000a1/recibo-89.pdf'),
+  ('expense-attachments', test.company_a() || '/empresa/conta-89.pdf');
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente V sem as caixas: não lê gastos nem custos e não se libera sozinho',
+  test.count('select * from car_expenses') = 0
+  and test.denied($$select car_costs()$$)
+  and test.denied($$update sellers set can_see_expenses = true, can_see_costs = true where user_id = 'aaaaaaaa-0000-0000-0000-000000000002'$$));
+reset role;
+
+update public.sellers set can_see_expenses = true where user_id = 'aaaaaaaa-0000-0000-0000-000000000002' and company_id = test.company_a();
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente V com "Gasto em manutenção": lê os gastos e anexos dos carros, mas não os do carro trancado nem as contas da empresa',
+  test.count($$select * from car_expenses where car_id = 'ca000000-0000-0000-0000-0000000000a1' and description = 'teste 89'$$) = 1
+  and test.count($$select * from car_expenses where car_id = 'ca000000-0000-0000-0000-0000000000a9'$$) = 0
+  and test.count($$select * from storage.objects where bucket_id = 'expense-attachments' and name like '%/recibo-89.pdf'$$) = 1
+  and test.count($$select * from storage.objects where bucket_id = 'expense-attachments' and name like '%/empresa/%'$$) = 0);
+select test.check('gerente V com "Gasto em manutenção": não edita nem exclui gasto e não vê o custo',
+  test.denied($$update car_expenses set amount = 1 where description = 'teste 89'$$)
+  and test.denied($$delete from car_expenses where description = 'teste 89'$$)
+  and test.denied($$select car_costs()$$));
+reset role;
+
+update public.sellers set can_see_expenses = false, can_see_costs = true where user_id = 'aaaaaaaa-0000-0000-0000-000000000002' and company_id = test.company_a();
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente V com "Custo de compra, margem e lucro": custo e total dos gastos pela car_costs(), sem o carro trancado e sem a lista',
+  exists (select 1 from jsonb_array_elements(car_costs()) c
+          where c ->> 'car_id' = 'ca000000-0000-0000-0000-0000000000a1' and (c ->> 'expenses_total')::numeric >= 77)
+  and not exists (select 1 from jsonb_array_elements(car_costs()) c where c ->> 'car_id' = 'ca000000-0000-0000-0000-0000000000a9')
+  and test.count('select * from car_expenses') = 0);
+reset role;
+
+update public.sellers set can_see_expenses = true, can_see_costs = true where id = '5e000000-0000-0000-0000-000000000004';
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A com as caixas marcadas: continua sem gastos e custos (só vale para gerente)',
+  test.count('select * from car_expenses') = 0 and test.denied($$select car_costs()$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: a car_costs() só traz os carros da loja B',
+  not exists (select 1 from jsonb_array_elements(car_costs()) c where c ->> 'car_id' like 'ca000000-0000-0000-0000-0000000000a%'));
+reset role;
+select test.login(null);
+update public.sellers set can_see_expenses = false, can_see_costs = false where company_id = test.company_a();
+delete from storage.objects where name like '%-89.pdf';
+delete from public.car_expenses where description = 'teste 89';
+
+-- ======================================== 90) simulador: taxas dos bancos
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente: salva as taxas dos bancos da loja',
+  test.allowed($$update companies set bank_rates = '[{"bank": "Banco Teste", "rate": 1.89}]' where id = current_company_id()$$));
+select test.check('gerente: taxas que não são uma lista são recusadas',
+  test.denied($$update companies set bank_rates = '{"bank": "x"}' where id = current_company_id()$$));
+reset role;
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: lê as taxas, mas não muda',
+  (select bank_rates -> 0 ->> 'bank' from companies where id = current_company_id()) = 'Banco Teste'
+  and test.denied($$update companies set bank_rates = '[]' where id = current_company_id()$$));
+reset role;
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não muda as taxas da loja A',
+  test.denied($$update companies set bank_rates = '[]' where id = (select id from companies where slug = 'dom-motors')$$));
+reset role;
+select test.login(null);
+select test.check('as taxas da loja A continuam as do gerente',
+  (select bank_rates -> 0 ->> 'rate' from public.companies where id = test.company_a()) = '1.89');
+update public.companies set bank_rates = '[]' where id = test.company_a();
+
+-- ======================================== 92) suporte: o painel WB.Dev fala como WB.Dev
+-- O dono da plataforma também é admin da loja A (como o Wesley na WB.AUTO) e abre um chamado nela
+insert into public.user_company (user_id, company_id, role) values ('cccccccc-0000-0000-0000-000000000001', test.company_a(), 'admin');
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select (open_support_ticket('Teste 92', 'duvida', 'Chamado da própria loja')).id as chamado;
+select test.check('dono da plataforma na própria loja: pela tela da loja, ler não apaga o aviso da WB.Dev',
+  test.try($$select mark_support_ticket_read((select id from support_tickets where subject = 'Teste 92'))$$) like 'ok%'
+  and test.count($$select * from support_tickets where subject = 'Teste 92' and wbdev_unread$$) = 1);
+select test.check('pelo painel WB.Dev: ler apaga o aviso da WB.Dev',
+  test.try($$select mark_support_ticket_read((select id from support_tickets where subject = 'Teste 92'), true)$$) like 'ok%'
+  and test.count($$select * from support_tickets where subject = 'Teste 92' and wbdev_unread$$) = 0);
+select test.check('pelo painel WB.Dev: a resposta sai como WB.Dev, fica "respondido" e a loja tem a mensagem nova',
+  (post_support_message((select id from support_tickets where subject = 'Teste 92'), 'Respondido pela WB.Dev', '[]'::jsonb, true)).author_kind = 'wbdev'
+  and test.count($$select * from support_tickets where subject = 'Teste 92' and status = 'respondido' and store_unread and not wbdev_unread$$) = 1);
+select test.check('pela tela da loja: a mensagem continua saindo como a loja',
+  (post_support_message((select id from support_tickets where subject = 'Teste 92'), 'Escrito pela loja')).author_kind = 'loja');
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A (não é dono da plataforma): mandar p_as_wbdev não vira WB.Dev nem apaga o aviso da WB.Dev',
+  (post_support_message((select id from support_tickets where subject = 'Teste 92'), 'Tentativa', '[]'::jsonb, true)).author_kind = 'loja'
+  and test.try($$select mark_support_ticket_read((select id from support_tickets where subject = 'Teste 92'), true)$$) like 'ok%'
+  and test.count($$select * from support_tickets where subject = 'Teste 92' and wbdev_unread$$) = 1);
+reset role;
+select test.login(null);
+delete from public.support_messages where ticket_id in (select id from public.support_tickets where subject = 'Teste 92');
+delete from public.support_tickets where subject = 'Teste 92';
+delete from public.user_company where user_id = 'cccccccc-0000-0000-0000-000000000001';
 
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe

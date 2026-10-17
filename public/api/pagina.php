@@ -21,9 +21,20 @@ try {
     $path = rawurldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/');
     $page = seo_for_path('/' . trim($path, '/'), $config);
     if (!empty($page['status'])) http_response_code($page['status']);
-    echo seo_inject($html, $page);
+    echo seo_inject(site_modelo_inject($html, $config), $page);
 } catch (Throwable $e) {
     echo $html;
+}
+
+// Modelo do site escolhido pela loja (Configurações → Aparência, seção 84): já vem no
+// <html>, para a página abrir no modelo certo, sem trocar depois. Sem resposta do
+// banco, o <html> fica como está e o site pergunta sozinho (src/modelos/siteModelo.js).
+function site_modelo_inject($html, $config)
+{
+    $status = supabase_public_get($config, 'rpc/company_status', ['p_company' => $config['company_id']], 2);
+    $modelo = is_array($status) ? (string) ($status['modelo'] ?? '') : '';
+    if (!in_array($modelo, ['atual', 'estoque', 'vitrine', 'bairro'], true)) return $html;
+    return preg_replace('#<html\b#i', '<html data-modelo="' . $modelo . '"', $html, 1);
 }
 
 // Endereço canônico: sempre https e sem "www."

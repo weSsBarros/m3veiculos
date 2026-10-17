@@ -1,0 +1,39 @@
+/* Miniaturas da Aparência (Configurações): desenho fixo nas cores da loja, igual nos
+   dois temas do painel, como uma foto. Fica fora do admin.css de propósito: o tema
+   escuro (scripts/tema-escuro.mjs) não mexe nele. */
+.aparencia-mini {
+  --mi-papel: #ffffff;
+  --mi-fundo: #f1f3f7;
+  --mi-linha: #e2e6ed;
+  --mi-texto: #c9d0da;
+  --mi-texto-forte: #7d8796;
+  --mi-tinta: var(--color-black, #0e1117);
+  --mi-cor: var(--color-primary, #2446c8);
+  --mi-sobre: var(--m-sobre-cor, #ffffff);
+  --mi-zap: #1faa59;
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--mi-papel);
+}
+
+.aparencia-mini .mi-papel { fill: var(--mi-papel); }
+.aparencia-mini .mi-fundo { fill: var(--mi-fundo); }
+.aparencia-mini .mi-linha { fill: var(--mi-linha); }
+.aparencia-mini .mi-foto { fill: var(--mi-linha); }
+.aparencia-mini .mi-texto { fill: var(--mi-texto); }
+.aparencia-mini .mi-texto-forte { fill: var(--mi-texto-forte); }
+.aparencia-mini .mi-tinta { fill: var(--mi-tinta); }
+.aparencia-mini .mi-cor { fill: var(--mi-cor); }
+.aparencia-mini .mi-cor-claro { fill: color-mix(in srgb, var(--mi-cor) 18%, var(--mi-papel)); }
+.aparencia-mini .mi-sobre { fill: var(--mi-sobre); }
+.aparencia-mini .mi-sobre-claro { fill: var(--mi-papel); }
+.aparencia-mini .mi-claro { fill: var(--mi-papel); opacity: 0.55; }
+.aparencia-mini .mi-zap { fill: var(--mi-zap); }
+.aparencia-mini .mi-carro { fill: color-mix(in srgb, var(--mi-papel) 26%, var(--mi-tinta)); }
+.aparencia-mini .mi-campo { fill: var(--mi-papel); stroke: var(--mi-linha); stroke-width: 1; }
+.aparencia-mini .mi-traco { fill: none; stroke: var(--mi-texto-forte); stroke-width: 1; }
+.aparencia-mini .mi-borda { stroke: var(--mi-linha); stroke-width: 0.8; }
+.aparencia-mini .is-fraco { opacity: 0.6; }

@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { categoryCounts, brandCounts, sortCars, filterCars, stockLink, showcaseCars, photosFirst, mapsLink, priceText } from '../src/modelos/comum.js'
-import { modeloFromParam } from '../src/modelos/siteModelo.js'
+import { modeloFromParam, modeloInicial } from '../src/modelos/siteModelo.js'
+import { painelFromValue, PAINEIS } from '../src/modelos/painelVisual.js'
 
 // Modelos de site (src/modelos, 15/10/2026): contas sobre o estoque e a prévia ?modelo=
 
@@ -22,6 +23,32 @@ test('prévia: aceita o número ou o nome do modelo; o resto não vale', () => {
   assert.equal(modeloFromParam('9'), null)
   assert.equal(modeloFromParam(''), null)
   assert.equal(modeloFromParam(null), null)
+})
+
+test('aparência: a prévia vence a escolha da loja; a escolha vem do <html> ou da última visita', () => {
+  // sem nada: o visual próprio da loja
+  assert.deepEqual(modeloInicial({}), { modelo: 'atual', previa: false, loja: 'atual' })
+  // a loja escolheu a Vitrine (o pagina.php pôs no <html>)
+  assert.deepEqual(modeloInicial({ doHtml: 'vitrine' }), { modelo: 'vitrine', previa: false, loja: 'vitrine' })
+  // o <html> vale mais que a última visita guardada no navegador
+  assert.deepEqual(modeloInicial({ doHtml: 'atual', guardadoDaLoja: 'bairro' }), { modelo: 'atual', previa: false, loja: 'atual' })
+  // sem o <html> (painel ou banco fora do ar): a última visita
+  assert.deepEqual(modeloInicial({ guardadoDaLoja: 'bairro' }), { modelo: 'bairro', previa: false, loja: 'bairro' })
+  // prévia pelo endereço (até ?modelo=0, o visual próprio) e a guardada nesta aba
+  assert.deepEqual(modeloInicial({ daUrl: '0', doHtml: 'vitrine' }), { modelo: 'atual', previa: true, loja: 'vitrine' })
+  assert.deepEqual(modeloInicial({ previaGuardada: 'estoque', doHtml: 'vitrine' }), { modelo: 'estoque', previa: true, loja: 'vitrine' })
+  assert.deepEqual(modeloInicial({ daUrl: '3', previaGuardada: 'estoque' }), { modelo: 'bairro', previa: true, loja: 'atual' })
+  // valor estranho não vale
+  assert.deepEqual(modeloInicial({ daUrl: 'neon', doHtml: '<script>' }), { modelo: 'atual', previa: false, loja: 'atual' })
+})
+
+test('aparência: visual do painel só aceita os quatro que existem', () => {
+  assert.deepEqual(PAINEIS.map((p) => p.id), ['atual', 'compacto', 'escuro', 'cor'])
+  assert.equal(painelFromValue(' Escuro '), 'escuro')
+  assert.equal(painelFromValue('cor'), 'cor')
+  assert.equal(painelFromValue('vitrine'), null)
+  assert.equal(painelFromValue(''), null)
+  assert.equal(painelFromValue(null), null)
 })
 
 test('categorias da loja na ordem do site, só as que têm carro, com a contagem', () => {

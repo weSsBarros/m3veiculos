@@ -34,8 +34,10 @@ const AdminCustomerFinance = lazy(() => import('./admin/AdminCustomerFinance.jsx
 const AdminCompanyExpenses = lazy(() => import('./admin/AdminCompanyExpenses.jsx'))
 const AdminBilling = lazy(() => import('./admin/AdminBilling.jsx'))
 const AdminSupport = lazy(() => import('./admin/AdminSupport.jsx'))
+const AdminCredits = lazy(() => import('./admin/AdminCredits.jsx'))
 const AdminSales = lazy(() => import('./admin/AdminSales.jsx'))
 const AdminExternalFinance = lazy(() => import('./admin/AdminExternalFinance.jsx'))
+const AdminSimulator = lazy(() => import('./admin/AdminSimulator.jsx'))
 const AdminReports = lazy(() => import('./admin/AdminReports.jsx'))
 const AdminContracts = lazy(() => import('./admin/AdminContracts.jsx'))
 const AdminContractTemplates = lazy(() => import('./admin/AdminContractTemplates.jsx'))
@@ -206,6 +208,7 @@ export default function App() {
           <Route path="clientes" element={<AdminCustomers />} />
           <Route path="vendas" element={<AdminSales />} />
           <Route path="financiamentos-externos" element={<AdminExternalFinance />} />
+          <Route path="financiamentos-externos/simulador" element={<AdminSimulator />} />
           <Route path="relatorios" element={<AdminReports />} />
           <Route path="carros/novo" element={<AdminCarForm />} />
           <Route path="carros/novo/fotos" element={<AdminQuickPhotos />} />
@@ -215,6 +218,7 @@ export default function App() {
           <Route path="carros/:id" element={<AdminCarForm />} />
           <Route path="carros/:id/gastos" element={<AdminCarExpenses />} />
           <Route path="suporte" element={<AdminSupport />} />
+          <Route path="creditos" element={<AdminCredits />} />
           <Route element={<StaffOnly><Outlet /></StaffOnly>}>
             <Route path="fornecedores" element={<AdminSuppliers />} />
             <Route path="equipe" element={<AdminSellers />} />

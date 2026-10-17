@@ -36,6 +36,7 @@ export async function fetchCompanySettings() {
     intakeChecklist: DEFAULT_INTAKE_CHECKLIST,
     inspectionChecklist: DEFAULT_INSPECTION_CHECKLIST,
     fiscal: {},
+    bankRates: [],
   }
   if (!supabase) return defaults
   const { data, error } = await supabase.from('companies').select('*').eq('id', COMPANY_ID).maybeSingle()
@@ -51,7 +52,16 @@ export async function fetchCompanySettings() {
     inspectionChecklist: Array.isArray(data.inspection_checklist) ? data.inspection_checklist : DEFAULT_INSPECTION_CHECKLIST,
     // Seção 57: razão social, CNPJ, IE, regime e endereço (os documentos usam)
     fiscal: rememberCompanyFiscal(data.fiscal, data.name),
+    // Seção 90: taxas dos bancos do simulador ([{ bank, rate }], % ao mês)
+    bankRates: Array.isArray(data.bank_rates) ? data.bank_rates : [],
   }
+}
+
+// Taxas dos bancos do simulador (admin e gerente, como a lista de bancos)
+export async function saveBankRates(rates) {
+  if (!supabase) throw new Error('Supabase não configurado.')
+  const { error } = await supabase.from('companies').update({ bank_rates: rates }).eq('id', COMPANY_ID)
+  if (error) throw error
 }
 
 // Dados fiscais da loja (só o admin; o banco confere CNPJ, CEP, UF e IBGE)

@@ -7,6 +7,7 @@ import {
   FINANCING_STATUS_LABELS,
   PAYMENT_METHODS,
   formatMoneyInput,
+  installmentReminderText,
   installmentStatus,
   isDueSoon,
   lateCharges,
@@ -231,14 +232,17 @@ function whatsappMessage({ financing, installment, customer, companyName }) {
   ].join('\n')
 }
 
-// Lembrete antes do vencimento
+// Lembrete antes do vencimento (o mesmo texto da lista de parcelas a vencer do início)
 function reminderMessage({ financing, installment, customer, companyName }) {
-  const firstName = (customer?.name || financing.customerName).split(' ')[0]
-  return [
-    `Olá, ${firstName}! Aqui é da ${companyName || 'loja'}.`,
-    `Passando para lembrar que a parcela ${installment.number}/${financing.installmentsCount} do financiamento do ${financing.vehicleLabel || 'seu veículo'} vence em ${formatDateBR(installment.dueDate)}, no valor de ${formatCurrencyCents(installment.amount)}.`,
-    'Qualquer dúvida, é só chamar!',
-  ].join('\n')
+  return installmentReminderText({
+    customerName: customer?.name || financing.customerName,
+    number: installment.number,
+    count: financing.installmentsCount,
+    vehicleLabel: financing.vehicleLabel,
+    dueDate: installment.dueDate,
+    amount: installment.amount,
+    companyName,
+  })
 }
 
 function InstallmentAmount({ row }) {

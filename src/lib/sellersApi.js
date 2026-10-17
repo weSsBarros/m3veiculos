@@ -23,6 +23,10 @@ function fromRow(row) {
     active: row.active,
     // Gerente: 'values' (vê valores das vendas) ou 'counts' (só quantidades)
     financeAccess: row.finance_access || 'counts',
+    // Gerente (seção 89): vê os gastos de cada carro ("Gasto em manutenção") e o
+    // custo de compra, a margem e o lucro ("Custo de compra, margem e lucro")
+    canSeeExpenses: row.can_see_expenses === true,
+    canSeeCosts: row.can_see_costs === true,
     // Comissão de financiamento externo: 'none', 'percent_financed',
     // 'percent_return' ou 'fixed'
     extCommissionType: row.ext_commission_type || 'none',
@@ -73,6 +77,8 @@ export async function updateSeller(id, seller) {
       commission_value: seller.commissionValue,
       active: seller.active,
       finance_access: seller.financeAccess === 'values' ? 'values' : 'counts',
+      ...(seller.canSeeExpenses !== undefined ? { can_see_expenses: seller.canSeeExpenses === true } : {}),
+      ...(seller.canSeeCosts !== undefined ? { can_see_costs: seller.canSeeCosts === true } : {}),
       ...(seller.extCommissionType !== undefined
         ? { ext_commission_type: seller.extCommissionType || 'none', ext_commission_value: seller.extCommissionValue || 0 }
         : {}),
@@ -134,10 +140,16 @@ export async function createSeller(seller) {
   // criado com o nível do cargo)
   const hasCustomRole = Boolean(seller.customRoleId)
   const hasOwnMenu = Array.isArray(seller.panelTabs)
-  if (financeAccess !== created.financeAccess || hasExtCommission || hasCustomRole || hasOwnMenu) {
+  // Gastos e custos do gerente (seção 89): a função cria sem nenhum dos dois
+  const isManager = created.role === 'manager'
+  const canSeeExpenses = isManager && seller.canSeeExpenses === true
+  const canSeeCosts = isManager && seller.canSeeCosts === true
+  if (financeAccess !== created.financeAccess || hasExtCommission || hasCustomRole || hasOwnMenu || canSeeExpenses || canSeeCosts) {
     return updateSeller(created.id, {
       ...created,
       financeAccess,
+      canSeeExpenses,
+      canSeeCosts,
       extCommissionType: seller.extCommissionType || 'none',
       extCommissionValue: seller.extCommissionValue || 0,
       customRoleId: seller.customRoleId || null,
@@ -205,4 +217,13 @@ export async function addAdminToTeam(userId, name, phone) {
 
 export function financeAccessLabel(access) {
   return access === 'values' ? 'Vê valores das vendas' : 'Vê só quantidades'
+}
+
+// "Vê valores das vendas · gastos · custo e margem" (gerente, na lista da Equipe)
+export function managerAccessText(seller) {
+  return [
+    financeAccessLabel(seller.financeAccess),
+    seller.canSeeExpenses ? 'gastos' : '',
+    seller.canSeeCosts && seller.financeAccess === 'values' ? 'custo e margem' : '',
+  ].filter(Boolean).join(' · ')
 }

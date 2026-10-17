@@ -179,7 +179,8 @@ export async function fetchOverdueInstallments() {
   return scopeCustomerFinance(data.map((row) => ({ id: row.id, dueDate: row.due_date, amount: Number(row.amount) })))
 }
 
-// Parcelas em aberto que vencem nos próximos `days` dias (aviso no Dashboard)
+// Parcelas em aberto que vencem nos próximos `days` dias (lista do Dashboard):
+// quem, o carro, qual parcela, quando e quanto, com o telefone para o lembrete
 export async function fetchUpcomingInstallments(days = 7) {
   requireSupabase()
   const today = todayISO()
@@ -188,12 +189,28 @@ export async function fetchUpcomingInstallments(days = 7) {
   const untilISO = `${until.getFullYear()}-${String(until.getMonth() + 1).padStart(2, '0')}-${String(until.getDate()).padStart(2, '0')}`
   const { data, error } = await supabase
     .from('financing_installments')
-    .select('id, due_date, amount, customer_financings!inner(status)')
+    .select('id, number, due_date, amount, financing_id, customer_financings!inner(status, customer_name, vehicle_label, installments_count, customers(name, phone))')
     .eq('company_id', COMPANY_ID)
     .is('paid_on', null)
     .gte('due_date', today)
     .lte('due_date', untilISO)
     .eq('customer_financings.status', 'ativo')
+    .order('due_date', { ascending: true })
   if (error) throw error
-  return scopeCustomerFinance(data.map((row) => ({ id: row.id, dueDate: row.due_date, amount: Number(row.amount) })))
+  return scopeCustomerFinance(
+    data.map((row) => {
+      const financing = row.customer_financings || {}
+      return {
+        id: row.id,
+        number: row.number,
+        dueDate: row.due_date,
+        amount: Number(row.amount),
+        financingId: row.financing_id,
+        customerName: financing.customers?.name || financing.customer_name || '',
+        customerPhone: financing.customers?.phone || '',
+        vehicleLabel: financing.vehicle_label || '',
+        installmentsCount: financing.installments_count || 0,
+      }
+    })
+  )
 }

@@ -5,12 +5,14 @@ import { X, Handshake, FolderOpen, FileDown } from 'lucide-react'
 import { updateSaleTransfer, updateSaleChecklist } from '../lib/salesApi.js'
 import { formatCurrency, formatDateBR, todayISO } from '../utils/carFormat.js'
 import { buildChecklist } from '../utils/saleChecklist.js'
+import { discountPercent, percentText, priceBeforeDiscount } from '../utils/saleDiscount.js'
 import { TRANSFER_STATUSES, TRANSFER_RESPONSIBLES, TRANSFER_DEFAULT_DAYS, transferDueDate } from '../utils/transfer.js'
 import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import SaleChecklist from './SaleChecklist.jsx'
 import CustomerDocuments from './CustomerDocuments.jsx'
 import GeneratedContractsList from './GeneratedContractsList.jsx'
+import NfseSection from './NfseSection.jsx'
 import TransferPill from './TransferPill.jsx'
 import '../components/ConfirmDialog.css'
 
@@ -140,6 +142,19 @@ export default function SaleDetailsDialog({
             <div>
               <span>Valor da venda</span>
               <strong>{price != null ? formatCurrency(price) : '—'}</strong>
+            </div>
+          )}
+          {canSeeSaleValues && sale?.discount > 0 && (
+            <div>
+              <span>Desconto</span>
+              <strong>
+                {formatCurrency(sale.discount)} ({percentText(discountPercent(priceBeforeDiscount(sale), sale.discount))})
+              </strong>
+              {sale.discountByName && (
+                <span className="admin-table-sub">
+                  por {sale.discountByName}{sale.discountAt ? ` em ${formatDateBR(sale.discountAt.slice(0, 10))}` : ''}
+                </span>
+              )}
             </div>
           )}
           {canSeeCosts && (
@@ -313,6 +328,8 @@ export default function SaleDetailsDialog({
                 "Termo de entrega".
               </p>
             </section>
+
+            <NfseSection sale={sale} car={car} customer={customer} canEdit={canEdit} showValue={canSeeSaleValues} onSaleUpdated={onSaleUpdated} />
           </>
         )}
 
