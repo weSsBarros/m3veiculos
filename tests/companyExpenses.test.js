@@ -10,7 +10,9 @@ import {
   monthsToGenerate,
   nextRecurrenceDue,
   matchesCompanyExpenseSearch,
+  companyExpenseVisible,
 } from '../src/utils/companyExpenses.js'
+import { duePeriodRange } from '../src/utils/period.js'
 
 const today = '2026-10-07'
 const e = (dueOn, amount, extra = {}) => ({ category: 'outros', description: '', amount, dueOn, paidOn: null, notes: '', ...extra })
@@ -87,4 +89,20 @@ test('despesas da empresa: busca por descrição, categoria, fornecedor, observa
   assert.equal(matchesCompanyExpenseSearch(e('2026-10-05', 289.9), '289,90'), true)
   assert.equal(matchesCompanyExpenseSearch(x, 'energia'), false)
   assert.equal(matchesCompanyExpenseSearch(x, '120'), false)
+})
+
+test('despesas da empresa: a despesa salva aparece na lista com o período e o filtro da tela?', () => {
+  const thisMonth = duePeriodRange('mes', '', '', today)
+  const view = (extra = {}) => ({ range: thisMonth, filter: 'todas', search: '', today, ...extra })
+  // Vence neste mês: aparece
+  assert.equal(companyExpenseVisible(e('2026-10-20', 3900), view()), true)
+  // Aluguel do mês que vem (ou conta de setembro já paga): salva, mas fora de "Este mês"
+  assert.equal(companyExpenseVisible(e('2026-11-05', 3900), view()), false)
+  assert.equal(companyExpenseVisible(e('2026-09-14', 1340, { paidOn: '2026-09-14' }), view()), false)
+  assert.equal(companyExpenseVisible(e('2026-11-05', 3900), view({ range: duePeriodRange('tudo', '', '', today) })), true)
+  // Filtro e busca também escondem
+  assert.equal(companyExpenseVisible(e('2026-10-20', 3900, { paidOn: '2026-10-07' }), view({ filter: 'a_pagar' })), false)
+  assert.equal(companyExpenseVisible(e('2026-10-20', 3900, { category: 'aluguel' }), view({ search: 'energia' })), false)
+  // Atrasada de outro mês aparece no filtro "Atrasadas"
+  assert.equal(companyExpenseVisible(e('2026-09-20', 120), view({ filter: 'atrasadas' })), true)
 })

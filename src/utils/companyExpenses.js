@@ -1,6 +1,7 @@
 // Despesas da empresa (Financeiro → Despesas da empresa): contas da loja que não
 // são de um carro. Situação, totais, repetição mensal e a pendência do início.
 // Testado em tests/companyExpenses.test.js.
+import { inRange } from './period.js'
 
 export const COMPANY_EXPENSE_CATEGORIES = [
   { slug: 'aluguel', label: 'Aluguel' },
@@ -151,4 +152,11 @@ export function matchesCompanyExpenseSearch(expense, query, supplierName = '') {
   const digits = q.replace(/[^\d,]/g, '').replace(',', '.')
   if (!digits) return false
   return String(expense.amount).includes(digits) || Number(digits) === Number(expense.amount)
+}
+
+// A despesa aparece na lista com o período, o filtro e a busca da tela? As
+// atrasadas aparecem no filtro "Atrasadas" mesmo fora do período.
+export function companyExpenseVisible(expense, { range, filter = 'todas', search = '', supplierName = '', today }) {
+  const inPeriod = inRange(expense.dueOn, range) || (filter === 'atrasadas' && companyExpenseStatus(expense, today) === 'atrasada')
+  return inPeriod && matchesCompanyExpenseFilter(expense, filter, today) && matchesCompanyExpenseSearch(expense, search, supplierName)
 }

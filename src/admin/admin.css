@@ -2274,7 +2274,27 @@ a.admin-form-note {
   gap: 14px;
   max-width: 440px;
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   overflow-y: auto;
+}
+
+/* Celular: a janela rola junto com a tela (não por dentro) e sobra espaço no
+   fim. Antes, no iPhone, o pé da janela (botão de salvar e o aviso de erro)
+   podia ficar embaixo da barra do Safari, que pega o toque. */
+@media (max-width: 640px) {
+  .confirm-dialog-overlay:has(> .sale-dialog) {
+    display: block;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 12px calc(140px + env(safe-area-inset-bottom));
+  }
+
+  .confirm-dialog-overlay:has(> .sale-dialog) > .sale-dialog {
+    margin: 0 auto;
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 .sale-dialog h2,
@@ -7123,6 +7143,18 @@ span.car-plate {
 
 .company-expense-dialog .admin-checkbox small {
   font-weight: 500;
+}
+
+.company-expense-saved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-bottom: 16px;
+}
+
+.company-expense-saved .admin-link-btn {
+  margin-top: 0;
 }
 
 .company-recurrence-list {

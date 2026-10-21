@@ -2,10 +2,17 @@ import { useRef, useState } from 'react'
 import { X, Upload, Paperclip } from 'lucide-react'
 import { uploadExpenseAttachment, deleteExpenseAttachment } from '../lib/expensesApi.js'
 
-export default function ExpenseAttachmentUploader({ carId, attachments, onChange }) {
-  const [uploading, setUploading] = useState(false)
+// onUploadingChange(true/false): a tela segura o "Salvar" enquanto o arquivo
+// sobe (salvar antes deixava a despesa sem o comprovante)
+export default function ExpenseAttachmentUploader({ carId, attachments, onChange, onUploadingChange }) {
+  const [uploading, setUploadingState] = useState(false)
   const [error, setError] = useState('')
   const inputRef = useRef(null)
+
+  function setUploading(value) {
+    setUploadingState(value)
+    onUploadingChange?.(value)
+  }
 
   async function handleFiles(e) {
     const files = Array.from(e.target.files || [])

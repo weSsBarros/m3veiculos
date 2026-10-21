@@ -18,8 +18,8 @@ import {
   companyExpenseStatus,
   companyExpenseTotals,
   companyExpensesByCategory,
+  companyExpenseVisible,
   matchesCompanyExpenseFilter,
-  matchesCompanyExpenseSearch,
   nextRecurrenceDue,
 } from '../utils/companyExpenses.js'
 import { DUE_PERIODS, duePeriodRange, inRange } from '../utils/period.js'
@@ -56,6 +56,8 @@ export default function AdminCompanyExpenses() {
   const [editing, setEditing] = useState(null) // null | 'nova' | despesa
   const [paying, setPaying] = useState(null) // despesa sendo marcada como paga
   const [paidOn, setPaidOn] = useState(todayISO())
+  // "Despesa salva", com o aviso quando o período ou o filtro a escondem
+  const [savedNotice, setSavedNotice] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -102,13 +104,15 @@ export default function AdminCompanyExpenses() {
     return result
   }, [inPeriod, today])
 
+  const view = useMemo(() => ({ range, filter, search, today }), [range, filter, search, today])
+  const isVisible = (e) => companyExpenseVisible(e, { ...view, supplierName: suppliersById.get(e.supplierId)?.name || '' })
+
   const visible = useMemo(
     () =>
-      inPeriod
-        .filter((e) => matchesCompanyExpenseFilter(e, filter, today))
-        .filter((e) => matchesCompanyExpenseSearch(e, search, suppliersById.get(e.supplierId)?.name || ''))
+      expenses
+        .filter((e) => companyExpenseVisible(e, { ...view, supplierName: suppliersById.get(e.supplierId)?.name || '' }))
         .sort((a, b) => a.dueOn.localeCompare(b.dueOn)),
-    [inPeriod, filter, search, today, suppliersById]
+    [expenses, view, suppliersById]
   )
 
   function changeFilter(value) {
@@ -120,10 +124,29 @@ export default function AdminCompanyExpenses() {
   }
 
   function applySaved(saved, { recurrence, repeated }) {
+    const isNew = editing === 'nova'
     setExpenses((prev) => (prev.some((e) => e.id === saved.id) ? prev.map((e) => (e.id === saved.id ? saved : e)) : [saved, ...prev]))
     if (recurrence) setRecurrences((prev) => prev.map((r) => (r.id === recurrence.id ? recurrence : r)))
     setEditing(null)
+    // Sem mensagem, a despesa que vence fora do período escolhido sumia da lista e
+    // parecia que não tinha salvado
+    setSavedNotice({
+      text: `${isNew ? 'Despesa salva' : 'Despesa atualizada'}: ${saved.description || companyExpenseCategoryLabel(saved.category)}, ${formatCurrencyCents(saved.amount)}, vence em ${formatDateBR(saved.dueOn)}.`,
+      hidden: !isVisible(saved),
+    })
     if (repeated) load()
+  }
+
+  function showSaved() {
+    setPeriod('tudo')
+    changeFilter('todas')
+    setSearch('')
+    setSavedNotice((prev) => prev && { ...prev, hidden: false })
+  }
+
+  function openNew() {
+    setSavedNotice(null)
+    setEditing('nova')
   }
 
   async function confirmPaid(e) {
@@ -246,7 +269,7 @@ export default function AdminCompanyExpenses() {
           <p>Contas da loja que não são de um carro: aluguel, água, energia, salários, contador…</p>
         </div>
         <div className="admin-row-actions">
-          <button type="button" className="btn btn-primary" onClick={() => setEditing('nova')}>
+          <button type="button" className="btn btn-primary" onClick={openNew}>
             <PlusCircle size={15} /> Nova despesa
           </button>
           <button type="button" className="btn btn-outline" onClick={handleExport}>
@@ -259,6 +282,20 @@ export default function AdminCompanyExpenses() {
       </div>
 
       {error && <p className="admin-error">{error}</p>}
+
+      {savedNotice && (
+        <div className="admin-success company-expense-saved" role="status">
+          <span>
+            {savedNotice.text}
+            {savedNotice.hidden && ' Ela não aparece na lista com o período e o filtro escolhidos.'}
+          </span>
+          {savedNotice.hidden && (
+            <button type="button" className="admin-link-btn" onClick={showSaved}>
+              Mostrar todas as despesas
+            </button>
+          )}
+        </div>
+      )}
 
       <PeriodFilter
         periods={DUE_PERIODS}
@@ -335,7 +372,7 @@ export default function AdminCompanyExpenses() {
       {expenses.length === 0 ? (
         <div className="admin-empty">
           <p>Nenhuma despesa cadastrada. Lance aqui as contas da loja (aluguel, água, energia, salários) para acompanhar o que vence e entrar no lucro do mês.</p>
-          <button type="button" className="btn btn-primary" onClick={() => setEditing('nova')}>
+          <button type="button" className="btn btn-primary" onClick={openNew}>
             <PlusCircle size={15} /> Nova despesa
           </button>
         </div>

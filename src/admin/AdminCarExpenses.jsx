@@ -48,6 +48,7 @@ export default function AdminCarExpenses() {
   const [form, setForm] = useState(emptyExpense)
   const [editingId, setEditingId] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [success, setSuccess] = useState('')
 
   async function load() {
@@ -301,7 +302,12 @@ export default function AdminCarExpenses() {
         </label>
         <label className="expense-form-attachments-label">
           Anexos (fotos, notas fiscais em PDF)
-          <ExpenseAttachmentUploader carId={id} attachments={form.attachments} onChange={(a) => update('attachments', a)} />
+          <ExpenseAttachmentUploader
+            carId={id}
+            attachments={form.attachments}
+            onChange={(a) => update('attachments', a)}
+            onUploadingChange={setUploading}
+          />
         </label>
         {success && <p className="admin-success">{success}</p>}
         <div className="admin-form-actions">
@@ -310,8 +316,8 @@ export default function AdminCarExpenses() {
               Cancelar edição
             </button>
           )}
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Salvando…' : editingId ? 'Salvar alterações' : canSeeCosts ? 'Adicionar gasto' : 'Lançar gasto'}
+          <button type="submit" className="btn btn-primary" disabled={saving || uploading}>
+            {saving ? 'Salvando…' : uploading ? 'Enviando o anexo…' : editingId ? 'Salvar alterações' : canSeeCosts ? 'Adicionar gasto' : 'Lançar gasto'}
           </button>
         </div>
       </form>
