@@ -7684,6 +7684,20 @@ a.support-contact:hover {
   font-size: 13.5px;
 }
 
+/* Painel WB.Dev: confirmar o PIX copiado sem "Já paguei" (seção 94) */
+.pix-intent-confirm label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.pix-intent-confirm label input {
+  flex: none;
+  width: 130px;
+  min-width: 0;
+}
+
 .support-ticket-client {
   margin: 0;
   padding: 10px 14px 0;

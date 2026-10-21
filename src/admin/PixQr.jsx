@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Copy, Check } from 'lucide-react'
 
 // QR code do PIX ("copia e cola" do BR Code), desenhado em SVG pela biblioteca
-// qrcode (carregada só aqui), com os botões de copiar o código e a chave
-export default function PixQr({ payload, pixKey }) {
+// qrcode (carregada só aqui), com os botões de copiar o código e a chave.
+// onCopy(what): a pessoa copiou ('codigo' ou 'chave') e vai pagar no app do banco.
+export default function PixQr({ payload, pixKey, onCopy }) {
   const [svg, setSvg] = useState('')
   const [copied, setCopied] = useState('')
 
@@ -30,6 +31,7 @@ export default function PixQr({ payload, pixKey }) {
     } catch {
       window.prompt('Copie o texto abaixo:', text)
     }
+    onCopy?.(what)
   }
 
   return (

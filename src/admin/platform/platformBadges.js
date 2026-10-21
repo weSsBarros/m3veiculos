@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { countPendingClaims } from '../../lib/clientsApi.js'
 import { countWbdevUnread } from '../../lib/supportApi.js'
 import { countPendingPlateOrders } from '../../lib/plateCreditsApi.js'
+import { countOpenPixIntents } from '../../lib/pixIntentsApi.js'
 
 // Números do menu do painel WB.Dev (pagamentos a conferir e chamados com mensagem
 // nova), também somados na troca de painel da loja. Quem muda um deles avisa o
@@ -25,11 +26,16 @@ export function usePlatformBadges(enabled = true, pathname = '') {
     if (!enabled) return undefined
     let active = true
     function load() {
-      // "claims": mensalidades informadas; "credits": compras de créditos a conferir (aba Créditos)
-      Promise.all([countPendingClaims().catch(() => 0), countPendingPlateOrders().catch(() => 0), countWbdevUnread().catch(() => 0)])
-        .then(([claims, credits, unread]) => {
-          if (active) setBadges({ claims, credits, unread })
-        })
+      // "claims": mensalidades informadas; "credits": compras de créditos a conferir (aba Créditos).
+      // Os dois somam o PIX copiado sem o "Já paguei" (seção 94).
+      Promise.all([
+        countPendingClaims().catch(() => 0),
+        countPendingPlateOrders().catch(() => 0),
+        countWbdevUnread().catch(() => 0),
+        countOpenPixIntents().catch(() => ({ creditos: 0, mensalidade: 0 })),
+      ]).then(([claims, credits, unread, pix]) => {
+        if (active) setBadges({ claims: claims + pix.mensalidade, credits: credits + pix.creditos, unread })
+      })
     }
     load()
     const stop = onPlatformBadgesChange(load)

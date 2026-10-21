@@ -2871,6 +2871,67 @@ delete from public.support_messages where ticket_id in (select id from public.su
 delete from public.support_tickets where subject = 'Teste 92';
 delete from public.user_company where user_id = 'cccccccc-0000-0000-0000-000000000001';
 
+-- ======================================== 94) PIX gerado sem o "Já paguei"
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: registra a cópia do PIX dos créditos (pacote de 20)',
+  test.allowed($$select register_pix_copy('creditos', 20)$$));
+select test.check('vendedor A: copiar de novo o mesmo PIX não cria outro registro',
+  test.allowed($$select register_pix_copy('creditos', 20)$$));
+select test.check('vendedor A: valor fora dos pacotes, tipo desconhecido e a mensalidade são recusados',
+  test.denied($$select register_pix_copy('creditos', 35)$$)
+  and test.denied($$select register_pix_copy('outro', 20)$$)
+  and test.denied($$select register_pix_copy('mensalidade', 150, array['2027-09-01'::date])$$));
+select test.check('vendedor A: não lê os PIX gerados, não grava direto e não confirma',
+  test.count('select * from pix_intents') = 0
+  and test.denied($$insert into pix_intents (company_id, kind, amount) values (current_company_id(), 'creditos', 20)$$)
+  and test.denied($$select platform_resolve_pix_intent(gen_random_uuid(), true)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: registra o PIX da mensalidade com os meses e o dos créditos de 100',
+  test.allowed($$select register_pix_copy('mensalidade', 150, array['2027-09-01'::date, '2027-10-15'::date])$$)
+  and test.allowed($$select register_pix_copy('creditos', 100)$$));
+select test.check('admin A: o "Já paguei" dos créditos de 100 tira esse PIX da lista da WB.Dev',
+  test.allowed($$select request_plate_credit(100, (now() at time zone 'America/Fortaleza')::date, null, 'teste 94')$$));
+reset role;
+
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: o PIX gerado fica na loja B (a loja A não vê nada da B)',
+  test.allowed($$select register_pix_copy('creditos', 40)$$)
+  and test.count('select * from pix_intents') = 0);
+reset role;
+select test.login(null);
+select test.check('loja A: 1 registro do pacote de 20 com 2 cópias, a mensalidade com os meses no dia 1 e o de 100 informado',
+  (select copies from public.pix_intents where company_id = test.company_a() and kind = 'creditos' and amount = 20 and status = 'aberto') = 2
+  and (select months from public.pix_intents where company_id = test.company_a() and kind = 'mensalidade') = array['2027-09-01'::date, '2027-10-01'::date]
+  and (select status from public.pix_intents where company_id = test.company_a() and kind = 'creditos' and amount = 100) = 'informado');
+
+select test.login('cccccccc-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('WB.Dev: vê os PIX gerados das lojas A e B',
+  test.count($$select * from pix_intents where status = 'aberto'$$) = 3);
+select test.check('WB.Dev: confirma o PIX dos créditos de 20 e o crédito entra no saldo da loja A',
+  (platform_resolve_pix_intent((select id from pix_intents where company_id = test.company_a() and kind = 'creditos' and amount = 20), true)) ->> 'status' = 'confirmado'
+  and test.count($$select * from plate_credit_orders where company_id = test.company_a() and amount = 20 and status = 'confirmado' and note like 'PIX conferido pela WB.Dev%'$$) = 1
+  and test.count($$select * from plate_credit_ledger l join plate_credit_orders o on o.id = l.order_id where o.note like 'PIX conferido pela WB.Dev%' and l.kind = 'recarga' and l.amount = 20$$) = 1);
+select test.check('WB.Dev: confirma o PIX da mensalidade e os dois meses ficam pagos',
+  (platform_resolve_pix_intent((select id from pix_intents where company_id = test.company_a() and kind = 'mensalidade'), true, '2026-08-20')) ->> 'status' = 'confirmado'
+  and test.count($$select * from client_payments where company_id = test.company_a() and reference_month in ('2027-09-01', '2027-10-01') and paid_on = '2026-08-20'$$) = 2);
+select test.check('WB.Dev: descarta o PIX da loja B e não confere de novo um PIX já resolvido',
+  (platform_resolve_pix_intent((select id from pix_intents where company_id <> test.company_a()), false)) ->> 'status' = 'descartado'
+  and test.denied($$select platform_resolve_pix_intent((select id from pix_intents where company_id <> test.company_a()), true)$$)
+  and test.count($$select * from pix_intents where status = 'aberto'$$) = 0);
+reset role;
+select test.login(null);
+delete from public.client_payments where company_id = test.company_a() and reference_month in ('2027-09-01', '2027-10-01');
+delete from public.client_payment_claims where note like 'PIX conferido pela WB.Dev%';
+delete from public.plate_credit_ledger where order_id in (select id from public.plate_credit_orders where note like 'PIX conferido pela WB.Dev%' or note = 'teste 94');
+delete from public.plate_credit_orders where note like 'PIX conferido pela WB.Dev%' or note = 'teste 94';
+delete from public.pix_intents;
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;

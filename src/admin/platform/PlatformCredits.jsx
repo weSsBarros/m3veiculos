@@ -8,6 +8,7 @@ import { moneyBR, creditUsage, CREDIT_USAGE } from '../../utils/plateCredits.js'
 import { parseMoneyBR } from '../../utils/financing.js'
 import { MoneyInput } from '../../components/NumberInputs.jsx'
 import { refreshPlatformBadges } from './platformBadges.js'
+import PixIntentsPanel from './PixIntentsPanel.jsx'
 import '../admin.css'
 
 const ORDER_STATUS = {
@@ -198,6 +199,8 @@ export default function PlatformCredits() {
               <small>{totals.empty ? `${plural(totals.empty, 'loja', 'lojas')} sem saldo` : 'nenhuma sem saldo'}</small>
             </div>
           </div>
+
+          <PixIntentsPanel kind="creditos" clients={clients} onConfirmed={load} />
 
           <section className="admin-form-section payment-claims">
             <h2>Compras {pendingCount > 0 && <span className="admin-nav-badge">{pendingCount}</span>}</h2>

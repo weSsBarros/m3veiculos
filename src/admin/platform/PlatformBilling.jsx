@@ -7,6 +7,7 @@ import { recentMonths, monthLabel } from '../../utils/platform.js'
 import BarChart from '../../components/charts/BarChart.jsx'
 import { BillingPill } from './ClientParts.jsx'
 import PaymentClaimsPanel from './PaymentClaimsPanel.jsx'
+import PixIntentsPanel from './PixIntentsPanel.jsx'
 import PlatformPaymentSettings from './PlatformPaymentSettings.jsx'
 import '../admin.css'
 
@@ -122,6 +123,7 @@ export default function PlatformBilling() {
             </div>
           </div>
 
+          <PixIntentsPanel kind="mensalidade" clients={clients} onConfirmed={load} />
           <PaymentClaimsPanel clients={clients} onConfirmed={load} />
 
           <div className="chart-card platform-billing-chart">

@@ -10629,7 +10629,181 @@ end $$;
 revoke execute on function public.mark_support_ticket_read(uuid, boolean) from anon, public;
 grant execute on function public.mark_support_ticket_read(uuid, boolean) to authenticated;
 
--- 93) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 93) Conferência: passou para a seção 95, no fim do arquivo (precisa ser a última
+-- consulta para o resultado aparecer no SQL Editor).
+
+-- 94) PIX gerado sem o "Já paguei" (pedido do Wesley em 20/10/2026) --------------
+-- As lojas compravam créditos (e pagavam a mensalidade) pelo PIX e não clicavam em
+-- "Já paguei", e a WB.Dev não ficava sabendo. Agora, quando alguém da loja copia o
+-- código ou a chave do PIX, o painel registra o PIX gerado (valor, meses da
+-- mensalidade e quem copiou). O "Já paguei" marca como informado. O que fica em
+-- aberto aparece no painel WB.Dev (Créditos e Cobrança): conferido no extrato, a WB.Dev
+-- confirma dali (vira a compra ou o pagamento de sempre, já confirmado) ou descarta.
+create table if not exists public.pix_intents (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  kind text not null check (kind in ('creditos', 'mensalidade')),
+  amount numeric(10, 2) not null check (amount > 0 and amount <= 100000),
+  months date[] not null default '{}' check (cardinality(months) <= 24),
+  copies integer not null default 1 check (copies > 0),
+  status text not null default 'aberto' check (status in ('aberto', 'informado', 'confirmado', 'descartado')),
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  created_by_email text not null default '',
+  created_at timestamptz not null default now(),
+  last_copied_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+create index if not exists pix_intents_company_idx on public.pix_intents (company_id, created_at desc);
+create index if not exists pix_intents_open_idx on public.pix_intents (last_copied_at) where status = 'aberto';
+alter table public.pix_intents enable row level security;
+revoke all on public.pix_intents from anon;
+revoke insert, update, delete on public.pix_intents from authenticated;
+
+-- Só a WB.Dev lê; a loja registra pela função abaixo
+drop policy if exists "Platform reads pix intents" on public.pix_intents;
+create policy "Platform reads pix intents"
+on public.pix_intents for select
+to authenticated
+using (public.is_platform_admin());
+
+-- A loja copiou o código ou a chave do PIX. Créditos: qualquer pessoa da equipe (o
+-- valor tem que ser um dos pacotes). Mensalidade: só o admin, com os meses marcados.
+-- Copiar de novo o mesmo valor ainda em aberto (nos últimos 2 dias) só conta a cópia.
+create or replace function public.register_pix_copy(p_kind text, p_amount numeric, p_months date[] default '{}')
+returns uuid
+language plpgsql security definer set search_path = public, auth
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_packages numeric[];
+  v_months date[] := '{}';
+  v_id uuid;
+begin
+  if v_company is null then
+    raise exception 'Acesso restrito à equipe da loja' using errcode = '42501';
+  end if;
+  if p_kind is null or p_kind not in ('creditos', 'mensalidade') then
+    raise exception 'Tipo de PIX desconhecido' using errcode = '22023';
+  end if;
+  if p_amount is null or p_amount <= 0 or p_amount > 100000 then
+    raise exception 'Valor do PIX inválido' using errcode = '22023';
+  end if;
+  if p_kind = 'creditos' then
+    select plate_packages into v_packages from public.platform_settings where id = 1;
+    if not (p_amount = any (coalesce(v_packages, '{20,40,100}'::numeric[]))) then
+      raise exception 'Escolha um dos pacotes de crédito' using errcode = '22023';
+    end if;
+  else
+    if not public.is_company_admin() then
+      raise exception 'Só o administrador da loja paga a mensalidade' using errcode = '42501';
+    end if;
+    select coalesce(array_agg(distinct date_trunc('month', m)::date order by date_trunc('month', m)::date), '{}')
+    into v_months
+    from unnest(coalesce(p_months, '{}')) m where m is not null;
+    if cardinality(v_months) > 24 then
+      raise exception 'Meses demais' using errcode = '22023';
+    end if;
+  end if;
+  update public.pix_intents
+  set copies = copies + 1, last_copied_at = now(), months = v_months
+  where id = (select i.id from public.pix_intents i
+              where i.company_id = v_company and i.kind = p_kind and i.status = 'aberto'
+                and i.amount = p_amount and i.last_copied_at > now() - interval '2 days'
+              order by i.last_copied_at desc limit 1)
+  returning id into v_id;
+  if v_id is null then
+    insert into public.pix_intents (company_id, kind, amount, months, created_by_email)
+    values (v_company, p_kind, p_amount, v_months, coalesce((select u.email from auth.users u where u.id = auth.uid()), ''))
+    returning id into v_id;
+  end if;
+  return v_id;
+end $$;
+revoke execute on function public.register_pix_copy(text, numeric, date[]) from anon, public;
+grant execute on function public.register_pix_copy(text, numeric, date[]) to authenticated;
+
+-- "Já paguei" informado: o PIX gerado sai da lista da WB.Dev (créditos: o do mesmo valor;
+-- mensalidade: os da loja em aberto)
+create or replace function public.pix_intents_informed()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if tg_table_name = 'plate_credit_orders' then
+    update public.pix_intents set status = 'informado', resolved_at = now()
+    where company_id = new.company_id and kind = 'creditos' and status = 'aberto' and amount = new.amount;
+  else
+    update public.pix_intents set status = 'informado', resolved_at = now()
+    where company_id = new.company_id and kind = 'mensalidade' and status = 'aberto';
+  end if;
+  return new;
+end $$;
+revoke execute on function public.pix_intents_informed() from anon, authenticated, public;
+
+drop trigger if exists plate_credit_orders_pix_informed on public.plate_credit_orders;
+create trigger plate_credit_orders_pix_informed
+after insert on public.plate_credit_orders
+for each row execute function public.pix_intents_informed();
+
+drop trigger if exists client_payment_claims_pix_informed on public.client_payment_claims;
+create trigger client_payment_claims_pix_informed
+after insert on public.client_payment_claims
+for each row execute function public.pix_intents_informed();
+
+-- A WB.Dev conferiu no extrato: confirma (vira a compra de créditos ou o pagamento dos
+-- meses, já confirmado, com a data do pagamento; sem ela, o dia em que a loja copiou o
+-- PIX) ou descarta (não pagou)
+create or replace function public.platform_resolve_pix_intent(p_id uuid, p_confirm boolean, p_paid_on date default null)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  i public.pix_intents;
+  v_paid date;
+  v_order public.plate_credit_orders;
+  v_claim public.client_payment_claims;
+  v_result jsonb;
+begin
+  if not public.is_platform_admin() then
+    raise exception 'Acesso restrito à plataforma' using errcode = '42501';
+  end if;
+  select * into i from public.pix_intents where id = p_id for update;
+  if not found then
+    raise exception 'PIX gerado não encontrado' using errcode = 'P0002';
+  end if;
+  if i.status <> 'aberto' then
+    raise exception 'Este PIX já foi conferido' using errcode = '22023';
+  end if;
+  if not p_confirm then
+    update public.pix_intents set status = 'descartado', resolved_at = now() where id = p_id;
+    return jsonb_build_object('status', 'descartado');
+  end if;
+  v_paid := coalesce(p_paid_on, (i.last_copied_at at time zone 'America/Fortaleza')::date);
+  if v_paid > (now() at time zone 'America/Fortaleza')::date + 1 then
+    raise exception 'Informe a data do pagamento' using errcode = '22023';
+  end if;
+  if i.kind = 'creditos' then
+    insert into public.plate_credit_orders (company_id, amount, paid_on, note, created_by, created_by_email)
+    values (i.company_id, i.amount, v_paid, 'PIX conferido pela WB.Dev (a loja não clicou em "Já paguei")',
+            i.created_by, i.created_by_email)
+    returning * into v_order;
+    v_result := public.platform_review_plate_credit(v_order.id, true, '');
+  else
+    if cardinality(i.months) = 0 then
+      raise exception 'Este PIX não tem os meses: lance o pagamento na ficha do cliente' using errcode = '22023';
+    end if;
+    insert into public.client_payment_claims (company_id, months, amount, paid_on, note, created_by, created_by_email)
+    values (i.company_id, i.months, i.amount, v_paid, 'PIX conferido pela WB.Dev (a loja não clicou em "Já paguei")',
+            i.created_by, i.created_by_email)
+    returning * into v_claim;
+    v_result := public.platform_review_payment_claim(v_claim.id, true, '');
+  end if;
+  update public.pix_intents set status = 'confirmado', resolved_at = now() where id = p_id;
+  return v_result || jsonb_build_object('status', 'confirmado');
+end $$;
+revoke execute on function public.platform_resolve_pix_intent(uuid, boolean, date) from anon, public;
+grant execute on function public.platform_resolve_pix_intent(uuid, boolean, date) to authenticated;
+
+-- 95) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

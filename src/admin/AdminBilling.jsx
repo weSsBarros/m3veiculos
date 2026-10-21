@@ -8,7 +8,9 @@ import { COMPANY_ID } from '../lib/supabaseClient.js'
 import { money, dateBR, monthName, monthsText, payableMonths } from '../utils/billing.js'
 import { pixPayload, pixTxid } from '../utils/pix.js'
 import { exportTermsReceiptPdf } from '../utils/termsPdf.js'
+import { registerPixCopy } from '../lib/pixIntentsApi.js'
 import PixQr from './PixQr.jsx'
+import PixPaidPrompt, { usePixReturnPrompt } from './PixPaidPrompt.jsx'
 import PaymentClaimDialog from './PaymentClaimDialog.jsx'
 import PlateCredits from './PlateCredits.jsx'
 import './admin.css'
@@ -43,6 +45,8 @@ export default function AdminBilling() {
   const [claiming, setClaiming] = useState(searchParams.get('pago') === '1')
   const [error, setError] = useState('')
   const [downloading, setDownloading] = useState(false)
+  // Copiou o PIX e voltou do banco: "Você já fez o PIX?" (seção 94)
+  const pixPrompt = usePixReturnPrompt('mensalidade')
 
   async function load() {
     setError('')
@@ -74,6 +78,25 @@ export default function AdminBilling() {
     if (next.has(month)) next.delete(month)
     else next.add(month)
     setChosen(next)
+  }
+
+  // A WB.Dev passa a ver o PIX gerado mesmo se ninguém clicar em "Já paguei"
+  function copiedPix() {
+    if (!(total > 0)) return
+    const months = selectedOptions.map((o) => o.month)
+    registerPixCopy({ kind: 'mensalidade', amount: total, months }).catch(() => {})
+    pixPrompt.arm({ amount: total, months })
+  }
+
+  function startClaim() {
+    pixPrompt.close()
+    setClaiming(true)
+  }
+
+  function answeredYes() {
+    const months = (pixPrompt.asking?.months || []).filter((m) => options.some((o) => o.month === m))
+    if (months.length) setChosen(new Set(months))
+    startClaim()
   }
 
   function closeClaim() {
@@ -155,7 +178,7 @@ export default function AdminBilling() {
             </p>
             {payment?.pixKey ? (
               <>
-                <PixQr payload={total > 0 ? payload : ''} pixKey={payment.pixKey} />
+                <PixQr payload={total > 0 ? payload : ''} pixKey={payment.pixKey} onCopy={copiedPix} />
                 <p className="admin-form-note">
                   Abra o app do seu banco, escolha PIX → ler QR code ou "copia e cola". Confira o nome {payment.pixName ? `(${payment.pixName})` : ''} e o valor antes de pagar.
                 </p>
@@ -163,7 +186,7 @@ export default function AdminBilling() {
             ) : (
               <p className="admin-muted">A WB.Dev ainda não cadastrou os dados do PIX. Fale com o suporte para pagar.</p>
             )}
-            <button type="button" className="btn btn-primary billing-paid-btn" onClick={() => setClaiming(true)}>
+            <button type="button" className="btn btn-primary billing-paid-btn" onClick={startClaim}>
               <Receipt size={15} /> Já paguei
             </button>
           </div>
@@ -237,6 +260,8 @@ export default function AdminBilling() {
           </div>
         </>
       )}
+
+      {pixPrompt.asking && !claiming && options.length > 0 && <PixPaidPrompt entry={pixPrompt.asking} onYes={answeredYes} onNo={pixPrompt.close} />}
 
       {claiming && options.length > 0 && (
         <PaymentClaimDialog

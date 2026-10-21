@@ -46,7 +46,7 @@ const NAV = [
 ]
 
 const BADGE_TEXT = {
-  claims: (n) => `${n} ${n === 1 ? 'pagamento informado' : 'pagamentos informados'} para conferir`,
+  claims: (n) => `${n} ${n === 1 ? 'pagamento da mensalidade' : 'pagamentos da mensalidade'} para conferir`,
   credits: (n) => `${n} ${n === 1 ? 'compra de créditos' : 'compras de créditos'} para conferir`,
   unread: (n) => `${n} ${n === 1 ? 'chamado com mensagem nova' : 'chamados com mensagem nova'}`,
 }

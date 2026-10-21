@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, MessageCircle, Paperclip, Receipt, ScanSearch, Upload, X } from 'lucide-react'
 import { fetchMyPlateCredits, requestPlateCredit } from '../lib/plateCreditsApi.js'
 import { notifyWbdev, uploadPaymentReceipt } from '../lib/clientsApi.js'
+import { registerPixCopy } from '../lib/pixIntentsApi.js'
 import { COMPANY_ID } from '../lib/supabaseClient.js'
 import { ledgerText, moneyBR, queriesText, readsText } from '../utils/plateCredits.js'
 import { dateBR } from '../utils/billing.js'
@@ -10,6 +11,7 @@ import { todayISO } from '../utils/carFormat.js'
 import { supportMessageLink } from '../utils/support.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import PixQr from './PixQr.jsx'
+import PixPaidPrompt, { usePixReturnPrompt } from './PixPaidPrompt.jsx'
 import '../components/ConfirmDialog.css'
 
 const ORDER_STATUS = {
@@ -116,6 +118,8 @@ export default function PlateCredits({ payment, storeName, embedded = false }) {
   const [chosen, setChosen] = useState(null)
   const [claiming, setClaiming] = useState(false)
   const [allLedger, setAllLedger] = useState(false)
+  // Copiou o PIX e voltou do banco: "Você já fez o PIX?" (seção 94)
+  const pixPrompt = usePixReturnPrompt('creditos')
 
   async function load() {
     try {
@@ -150,6 +154,24 @@ export default function PlateCredits({ payment, storeName, embedded = false }) {
   const pending = credits.orders.filter((o) => o.status === 'pendente')
   const reviewed = credits.orders.filter((o) => o.status !== 'pendente').slice(0, 6)
   const ledger = allLedger ? credits.ledger : credits.ledger.slice(0, 8)
+
+  // A WB.Dev passa a ver o PIX gerado mesmo se ninguém clicar em "Já paguei"
+  function copiedPix() {
+    if (!pack) return
+    registerPixCopy({ kind: 'creditos', amount: pack.amount }).catch(() => {})
+    pixPrompt.arm({ amount: pack.amount })
+  }
+
+  function startClaim() {
+    pixPrompt.close()
+    setClaiming(true)
+  }
+
+  function answeredYes() {
+    const amount = pixPrompt.asking?.amount
+    if (credits.packages.some((p) => p.amount === amount)) setChosen(amount)
+    startClaim()
+  }
 
   return (
     <section className="plate-credits" id={embedded ? undefined : 'creditos'}>
@@ -196,7 +218,7 @@ export default function PlateCredits({ payment, storeName, embedded = false }) {
         </div>
         {pix?.pixKey ? (
           <>
-            <PixQr payload={payload} pixKey={pix.pixKey} />
+            <PixQr payload={payload} pixKey={pix.pixKey} onCopy={copiedPix} />
             <p className="admin-form-note">
               Pague o valor do pacote pelo PIX {pix.pixName ? `(${pix.pixName})` : ''} e clique em "Já paguei". O crédito entra quando a WB.Dev confirmar.
             </p>
@@ -204,7 +226,7 @@ export default function PlateCredits({ payment, storeName, embedded = false }) {
         ) : (
           <p className="admin-muted">A WB.Dev ainda não cadastrou os dados do PIX. Fale com o suporte para comprar créditos.</p>
         )}
-        <button type="button" className="btn btn-primary billing-paid-btn" onClick={() => setClaiming(true)} disabled={!pack}>
+        <button type="button" className="btn btn-primary billing-paid-btn" onClick={startClaim} disabled={!pack}>
           <Receipt size={15} /> Já paguei
         </button>
       </div>
@@ -253,6 +275,8 @@ export default function PlateCredits({ payment, storeName, embedded = false }) {
           )}
         </div>
       )}
+
+      {pixPrompt.asking && !claiming && <PixPaidPrompt entry={pixPrompt.asking} onYes={answeredYes} onNo={pixPrompt.close} />}
 
       {claiming && pack && (
         <PlateCreditDialog
