@@ -4,6 +4,7 @@ import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchAllExpensesAdmin } from '../lib/expensesApi.js'
 import { fetchSales, soldEntriesFrom } from '../lib/salesApi.js'
 import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExpensesApi.js'
+import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
 import { storeResult, monthRange } from '../utils/storeResult.js'
 import { formatCurrencyCents } from '../utils/carFormat.js'
 import { privateNote } from '../utils/privateValues.js'
@@ -14,8 +15,8 @@ function currentMonth() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-// "Resultado do mês": vendas − custo dos vendidos − comissões pagas no mês −
-// despesas da empresa = lucro líquido. Só o admin (custos e despesas são dele).
+// "Resultado do mês": vendas − custo dos vendidos + retorno e plus dos bancos −
+// comissões pagas no mês − despesas da empresa = lucro líquido. Só o admin (custos e despesas são dele).
 // Sem os dados (data = null), carrega sozinho (aba Desempenho).
 export default function StoreResultCard({ data = null }) {
   const [month, setMonth] = useState(currentMonth)
@@ -30,9 +31,10 @@ export default function StoreResultCard({ data = null }) {
       fetchSales(),
       fetchAllExpensesAdmin(),
       generateCompanyExpenses().catch(() => {}).then(fetchCompanyExpenses).catch(() => []),
+      fetchExternalFinancings().catch(() => []),
     ])
-      .then(([cars, sales, carExpenses, companyExpenses]) => {
-        if (!cancelled) setLoaded({ cars, sales, carExpenses, companyExpenses })
+      .then(([cars, sales, carExpenses, companyExpenses, externalFinancings]) => {
+        if (!cancelled) setLoaded({ cars, sales, carExpenses, companyExpenses, externalFinancings })
       })
       .catch((err) => !cancelled && setError(err.message || 'Não foi possível calcular o resultado.'))
     return () => {
@@ -47,6 +49,7 @@ export default function StoreResultCard({ data = null }) {
       soldEntries: soldEntriesFrom(source.cars, source.sales),
       carExpenses: source.carExpenses,
       companyExpenses: source.companyExpenses,
+      externalFinancings: source.externalFinancings || [],
       range: monthRange(month),
     })
   }, [source, month])
@@ -75,6 +78,15 @@ export default function StoreResultCard({ data = null }) {
               <span>Margem bruta</span>
               <strong>{formatCurrencyCents(result.grossMargin)}</strong>
             </div>
+            {(result.bankIncome.total > 0 || result.bankIncome.plusOpen > 0) && (
+              <div className="expense-summary-card">
+                <span>
+                  Retorno e plus dos bancos
+                  {result.bankIncome.plusOpen > 0 && ` (${formatCurrencyCents(result.bankIncome.plusOpen)} de plus a receber)`}
+                </span>
+                <strong>{formatCurrencyCents(result.bankIncome.total)}</strong>
+              </div>
+            )}
             <div className="expense-summary-card">
               <span>
                 Comissões pagas
@@ -95,8 +107,9 @@ export default function StoreResultCard({ data = null }) {
             </div>
           </div>
           <p className="admin-form-note">
-            Vendas pela data da venda; comissões pela data do pagamento (o "a pagar" são as das vendas do mês ainda não
-            pagas); despesas da empresa pelo vencimento (pagas ou não).
+            Vendas pela data da venda; retorno do banco pela data da venda (ou do pagamento do financiamento externo) e
+            plus pela data em que foi recebido; comissões (das vendas e dos financiamentos externos) pela data do pagamento
+            (o "a pagar" são as das vendas do mês ainda não pagas); despesas da empresa pelo vencimento (pagas ou não).
             {result.privateCount > 0 && ` ${privateNote(result.privateCount)}`}
           </p>
         </>

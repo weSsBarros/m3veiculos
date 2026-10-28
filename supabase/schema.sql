@@ -10803,7 +10803,358 @@ end $$;
 revoke execute on function public.platform_resolve_pix_intent(uuid, boolean, date) from anon, public;
 grant execute on function public.platform_resolve_pix_intent(uuid, boolean, date) to authenticated;
 
--- 95) Conferência (fica por último para aparecer no SQL Editor) -------------
+-- 95) Conferência: passou para a seção 98, no fim do arquivo (precisa ser a última
+-- consulta para o resultado aparecer no SQL Editor).
+
+-- 96) Senha dos logins guardada para o admin ver (pedido do Wesley em 27/10/2026) ----
+-- O Supabase guarda só o hash da senha, que não dá para desfazer. Para o admin da loja
+-- ver a senha de quem é da equipe, a senha passa a ser guardada cifrada no Vault quando
+-- é definida pelo painel: no cadastro do login, no "Nova senha" do admin e no "Minha
+-- conta" da própria pessoa. Senha definida antes disso ou por outro caminho não aparece.
+-- Só a Edge Function manage-sellers (chave de serviço) chama estas funções, e ela grava
+-- no histórico cada vez que alguém vê uma senha. Nunca guarda a senha da equipe WB.Dev,
+-- do dono da plataforma nem de login que entra em mais de uma loja.
+create table if not exists public.login_passwords (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  secret_id uuid not null,
+  origin text not null check (origin in ('cadastro', 'admin', 'propria')),
+  saved_by uuid,
+  saved_at timestamptz not null default now()
+);
+
+alter table public.login_passwords enable row level security;
+revoke all on public.login_passwords from anon, authenticated;
+
+-- Apagar a linha (ou o login, em cascata) apaga o segredo no Vault. Um erro aqui não
+-- pode impedir que o login seja apagado.
+create or replace function public.login_passwords_drop_secret()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  begin
+    delete from vault.secrets where id = old.secret_id;
+  exception when others then
+    begin
+      perform vault.update_secret(old.secret_id, '-');
+    exception when others then
+      null;
+    end;
+  end;
+  return old;
+end $$;
+revoke execute on function public.login_passwords_drop_secret() from anon, authenticated, public;
+
+drop trigger if exists login_passwords_drop_secret on public.login_passwords;
+create trigger login_passwords_drop_secret
+after delete on public.login_passwords
+for each row execute function public.login_passwords_drop_secret();
+
+-- A senha confere com a do login? null = não deu para conferir (hash em outro formato)
+create or replace function public.login_password_matches(p_user uuid, p_password text)
+returns boolean
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_hash text;
+begin
+  select encrypted_password into v_hash from auth.users where id = p_user;
+  if coalesce(v_hash, '') = '' or coalesce(p_password, '') = '' then
+    return false;
+  end if;
+  return extensions.crypt(p_password, v_hash) = v_hash;
+exception when others then
+  return null;
+end $$;
+revoke execute on function public.login_password_matches(uuid, text) from anon, authenticated, public;
+grant execute on function public.login_password_matches(uuid, text) to service_role;
+
+-- Guarda (ou troca) a senha do login. Devolve false quando o login não pode ter a
+-- senha guardada (WB.Dev, dono da plataforma ou mais de uma loja) e apaga a que houver.
+create or replace function public.login_password_save(p_user uuid, p_password text, p_origin text, p_by uuid default null)
+returns boolean
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_name text := 'login-' || p_user::text;
+  v_id uuid;
+begin
+  if p_user is null or coalesce(p_password, '') = '' then
+    raise exception 'Senha vazia' using errcode = '22023';
+  end if;
+  if p_origin is null or p_origin not in ('cadastro', 'admin', 'propria') then
+    raise exception 'Origem da senha desconhecida' using errcode = '22023';
+  end if;
+  if exists (select 1 from public.platform_team where user_id = p_user)
+     or exists (select 1 from public.platform_admins where user_id = p_user)
+     or (select count(distinct company_id) from public.user_company where user_id = p_user) <> 1 then
+    delete from public.login_passwords where user_id = p_user;
+    return false;
+  end if;
+  select secret_id into v_id from public.login_passwords where user_id = p_user;
+  if v_id is null then
+    select id into v_id from vault.secrets where name = v_name;
+  end if;
+  if v_id is null then
+    v_id := vault.create_secret(p_password, v_name, 'Senha do login guardada para o admin da loja');
+  else
+    perform vault.update_secret(v_id, p_password);
+  end if;
+  insert into public.login_passwords (user_id, secret_id, origin, saved_by, saved_at)
+  values (p_user, v_id, p_origin, p_by, now())
+  on conflict (user_id) do update
+    set secret_id = excluded.secret_id, origin = excluded.origin, saved_by = excluded.saved_by, saved_at = excluded.saved_at;
+  return true;
+end $$;
+revoke execute on function public.login_password_save(uuid, text, text, uuid) from anon, authenticated, public;
+grant execute on function public.login_password_save(uuid, text, text, uuid) to service_role;
+
+-- A senha guardada, quem guardou e se ainda é a senha do login (a pessoa pode ter
+-- trocado depois por outro caminho). null = nenhuma senha guardada.
+create or replace function public.login_password_read(p_user uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  r record;
+begin
+  select lp.origin, lp.saved_at, d.decrypted_secret as password, b.email as saved_by_email
+    into r
+  from public.login_passwords lp
+  join vault.decrypted_secrets d on d.id = lp.secret_id
+  left join auth.users b on b.id = lp.saved_by
+  where lp.user_id = p_user;
+  if not found or coalesce(r.password, '') in ('', '-') then
+    return null;
+  end if;
+  return jsonb_build_object(
+    'password', r.password,
+    'origin', r.origin,
+    'saved_at', r.saved_at,
+    'saved_by_email', r.saved_by_email,
+    'still_valid', public.login_password_matches(p_user, r.password));
+end $$;
+revoke execute on function public.login_password_read(uuid) from anon, authenticated, public;
+grant execute on function public.login_password_read(uuid) to service_role;
+
+create or replace function public.login_password_delete(p_user uuid)
+returns void
+language sql security definer set search_path = public
+as $$
+  delete from public.login_passwords where user_id = p_user
+$$;
+revoke execute on function public.login_password_delete(uuid) from anon, authenticated, public;
+grant execute on function public.login_password_delete(uuid) to service_role;
+
+-- Login que passa a entrar em outra loja ou na equipe WB.Dev perde a senha guardada
+create or replace function public.login_passwords_drop_on_new_access()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if tg_table_name <> 'user_company'
+     or (select count(distinct company_id) from public.user_company where user_id = new.user_id) > 1 then
+    delete from public.login_passwords where user_id = new.user_id;
+  end if;
+  return null;
+end $$;
+revoke execute on function public.login_passwords_drop_on_new_access() from anon, authenticated, public;
+
+drop trigger if exists user_company_drop_login_password on public.user_company;
+create trigger user_company_drop_login_password
+after insert or update of company_id on public.user_company
+for each row execute function public.login_passwords_drop_on_new_access();
+
+drop trigger if exists platform_team_drop_login_password on public.platform_team;
+create trigger platform_team_drop_login_password
+after insert on public.platform_team
+for each row execute function public.login_passwords_drop_on_new_access();
+
+drop trigger if exists platform_admins_drop_login_password on public.platform_admins;
+create trigger platform_admins_drop_login_password
+after insert on public.platform_admins
+for each row execute function public.login_passwords_drop_on_new_access();
+
+-- 97) Ajustes de 27/10/2026: categorias de fornecedor e editar o financiamento -----
+-- Fornecedor: mais categorias (oficina, elétrica, funilaria, lava jato, estética...).
+-- A lista é a mesma de SUPPLIER_CATEGORIES (src/utils/carFormat.js; o teste confere).
+alter table public.suppliers drop constraint if exists suppliers_category_check;
+alter table public.suppliers add constraint suppliers_category_check check (category in (
+  'servico', 'pecas', 'oficina', 'eletrica', 'funilaria', 'lava_jato', 'estetica', 'pneus',
+  'vidros', 'som', 'ar_condicionado', 'guincho', 'despachante', 'vistoria', 'outros'));
+
+-- Editar o financiamento depois de criado (um cliente errou o 1º vencimento e o número
+-- de parcelas). Muda todos os dados. Se o número de parcelas, o valor da parcela ou o 1º
+-- vencimento mudarem, as parcelas EM ABERTO são refeitas como na criação (vencimento
+-- todo mês a partir da 1ª); as pagas ficam como estão, e o número de parcelas não pode
+-- ficar abaixo da última parcela paga. Sem mudar esses três, as parcelas não mudam (os
+-- ajustes feitos parcela a parcela ficam). Roda como dona da tabela para apagar as
+-- parcelas que sobram mesmo quando quem edita é o gerente (a regra de excluir parcelas
+-- é só do admin); a permissão é conferida aqui, como na criação.
+create or replace function public.update_customer_financing(p_id uuid, p jsonb)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  f public.customer_financings;
+  v_count integer := (p->>'installments_count')::integer;
+  v_amount numeric(12, 2) := (p->>'installment_amount')::numeric;
+  v_first date := (p->>'first_due_date')::date;
+  v_last_paid integer;
+begin
+  if v_company is null or not public.can_manage_customer_finance() then
+    raise exception 'Sem permissão' using errcode = '42501';
+  end if;
+  select * into f from public.customer_financings where id = p_id and company_id = v_company for update;
+  if not found then
+    raise exception 'Financiamento não encontrado' using errcode = 'P0002';
+  end if;
+  if v_count is null or v_count < 1 or v_count > 240 then
+    raise exception 'Número de parcelas inválido (de 1 a 240)' using errcode = '22023';
+  end if;
+  if v_amount is null or v_amount <= 0 then
+    raise exception 'Informe o valor da parcela' using errcode = '22023';
+  end if;
+  if v_first is null then
+    raise exception 'Informe o vencimento da primeira parcela' using errcode = '22023';
+  end if;
+  select max(number) into v_last_paid
+  from public.financing_installments where financing_id = p_id and paid_on is not null;
+  if v_count < coalesce(v_last_paid, 0) then
+    raise exception 'A parcela % já foi paga: o financiamento precisa ter pelo menos % parcelas. Para diminuir, desfaça o pagamento dela.', v_last_paid, v_last_paid
+      using errcode = '22023';
+  end if;
+
+  update public.customer_financings set
+    customer_id = nullif(p->>'customer_id', '')::uuid,
+    car_id = nullif(p->>'car_id', '')::uuid,
+    customer_name = coalesce(nullif(trim(p->>'customer_name'), ''), 'Cliente'),
+    vehicle_label = coalesce(p->>'vehicle_label', ''),
+    vehicle_plate = coalesce(p->>'vehicle_plate', ''),
+    vehicle_price = coalesce((p->>'vehicle_price')::numeric, 0),
+    down_payment = coalesce((p->>'down_payment')::numeric, 0),
+    financed_amount = (p->>'financed_amount')::numeric,
+    installments_count = v_count,
+    installment_amount = v_amount,
+    interest_rate = nullif(p->>'interest_rate', '')::numeric,
+    first_due_date = v_first,
+    late_fee_percent = coalesce((p->>'late_fee_percent')::numeric, f.late_fee_percent),
+    late_interest_percent = coalesce((p->>'late_interest_percent')::numeric, f.late_interest_percent),
+    status = case when p->>'status' in ('ativo', 'cancelado') then p->>'status' else f.status end,
+    notes = coalesce(p->>'notes', '')
+  where id = p_id;
+
+  if v_count is distinct from f.installments_count or v_amount is distinct from f.installment_amount
+     or v_first is distinct from f.first_due_date then
+    -- O registro de atividades já tem a mudança no financiamento: as parcelas refeitas
+    -- não viram uma linha cada
+    perform set_config('app.skip_activity_log', '1', true);
+    insert into public.financing_installments (company_id, financing_id, number, due_date, amount)
+    select v_company, p_id, g, (v_first + make_interval(months => g - 1))::date, v_amount
+    from generate_series(1, v_count) g
+    on conflict (financing_id, number) do update
+      set due_date = excluded.due_date, amount = excluded.amount
+      where financing_installments.paid_on is null;
+    delete from public.financing_installments where financing_id = p_id and number > v_count and paid_on is null;
+    perform set_config('app.skip_activity_log', '', true);
+  end if;
+end $$;
+revoke execute on function public.update_customer_financing(uuid, jsonb) from anon, public;
+grant execute on function public.update_customer_financing(uuid, jsonb) to authenticated;
+
+-- Retorno e plus do financiamento bancário (um cliente recebe os dois). Retorno: o que
+-- o banco paga à loja pelo financiamento, um % do valor financiado (pela "tabela"
+-- escolhida, ex.: R4). Plus: um adicional do banco além do retorno (valor fixo por
+-- contrato ou %), que muitas vezes cai depois. Ficam na venda com parte financiada no
+-- banco e no financiamento externo, com os mesmos campos: store_return e store_plus em
+-- R$ (o que vale nas contas); return_percent e plus_percent quando foram informados em
+-- %; rate_table; plus_received_on (em branco = plus ainda não recebido). Entram no
+-- lucro líquido (decisão do Wesley); a comissão "% do retorno" continua só sobre o
+-- retorno. O vendedor não informa esses valores (como o retorno do externo).
+alter table public.sales add column if not exists store_return numeric(12, 2);
+alter table public.sales add column if not exists return_percent numeric(6, 3);
+alter table public.sales add column if not exists rate_table text not null default '';
+alter table public.sales add column if not exists store_plus numeric(12, 2);
+alter table public.sales add column if not exists plus_percent numeric(6, 3);
+alter table public.sales add column if not exists plus_received_on date;
+alter table public.sales drop constraint if exists sales_bank_income_check;
+alter table public.sales add constraint sales_bank_income_check check (
+  (store_return is null or store_return >= 0) and (store_plus is null or store_plus >= 0)
+  and (return_percent is null or return_percent between 0 and 100)
+  and (plus_percent is null or plus_percent between 0 and 100)
+  and char_length(rate_table) <= 20);
+
+alter table public.external_financings add column if not exists return_percent numeric(6, 3);
+alter table public.external_financings add column if not exists rate_table text not null default '';
+alter table public.external_financings add column if not exists store_plus numeric(12, 2);
+alter table public.external_financings add column if not exists plus_percent numeric(6, 3);
+alter table public.external_financings add column if not exists plus_received_on date;
+alter table public.external_financings drop constraint if exists external_financings_bank_income_check;
+alter table public.external_financings add constraint external_financings_bank_income_check check (
+  (store_plus is null or store_plus >= 0)
+  and (return_percent is null or return_percent between 0 and 100)
+  and (plus_percent is null or plus_percent between 0 and 100)
+  and char_length(rate_table) <= 20);
+
+-- Vendedor registra a venda sem o retorno e o plus (editar venda já é só do admin e
+-- do gerente, pela regra da sales)
+create or replace function public.sales_bank_income_guard()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null or public.is_company_staff() then
+    return new;
+  end if;
+  new.store_return := null;
+  new.return_percent := null;
+  new.store_plus := null;
+  new.plus_percent := null;
+  new.plus_received_on := null;
+  return new;
+end $$;
+revoke execute on function public.sales_bank_income_guard() from anon, authenticated, public;
+
+drop trigger if exists sales_bank_income_guard on public.sales;
+create trigger sales_bank_income_guard before insert or update on public.sales
+for each row execute function public.sales_bank_income_guard();
+
+-- Financiamento externo: a mesma trava do retorno vale para o plus
+create or replace function public.external_financings_guard()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null or public.is_company_staff() then return new; end if;
+  if tg_op = 'INSERT' then
+    new.seller_id := public.current_seller_id();
+    new.store_return := null;
+    new.return_percent := null;
+    new.store_plus := null;
+    new.plus_percent := null;
+    new.plus_received_on := null;
+    new.commission_paid_on := null;
+    new.paid_on := null;
+    if new.status = 'pago' then new.status := 'aprovado'; end if;
+    return new;
+  end if;
+  if old.status = 'pago'
+     or new.status = 'pago'
+     or new.seller_id is distinct from old.seller_id
+     or new.store_return is distinct from old.store_return
+     or new.return_percent is distinct from old.return_percent
+     or new.store_plus is distinct from old.store_plus
+     or new.plus_percent is distinct from old.plus_percent
+     or new.plus_received_on is distinct from old.plus_received_on
+     or new.commission_paid_on is distinct from old.commission_paid_on then
+    raise exception 'Só o administrador ou o gerente podem alterar isso';
+  end if;
+  return new;
+end;
+$$;
+
+-- 98) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom
 -- Motors de quem é da equipe de outra loja veio da falha antiga da seção 11 e

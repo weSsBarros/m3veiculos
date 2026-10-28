@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2, HandCoins, ShieldCheck } from 'lucide-react'
-import { fetchSellers, createSeller, updateSeller, resetSellerPassword, deleteSeller, describeCommission, roleLabel, managerAccessText, accessLabel, fetchAdminsOutsideTeam, addAdminToTeam } from '../lib/sellersApi.js'
+import { RefreshCcw, Pencil, KeyRound, UserX, UserCheck, ListChecks, UserPlus, Trash2, HandCoins, ShieldCheck, Eye } from 'lucide-react'
+import { fetchSellers, createSeller, updateSeller, updateSellerEmail, resetSellerPassword, deleteSeller, describeCommission, roleLabel, managerAccessText, accessLabel, fetchAdminsOutsideTeam, addAdminToTeam } from '../lib/sellersApi.js'
+import { emailChanged, isValidEmail } from '../utils/loginAccess.js'
+import LoginPasswordDialog from './LoginPasswordDialog.jsx'
 import { fetchCustomRoles } from '../lib/customRolesApi.js'
 import { tabsForRole } from '../utils/panelSettings.js'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -89,6 +91,8 @@ export default function AdminSellers() {
   const [resetPassword, setResetPassword] = useState('')
   const [resetError, setResetError] = useState('')
   const [resetSaving, setResetSaving] = useState(false)
+  // "Ver senha" (seção 96): pessoa cuja senha guardada está aberta
+  const [passwordFor, setPasswordFor] = useState(null)
   const [externals, setExternals] = useState([])
   const [commissionsFor, setCommissionsFor] = useState(null)
   const [savingCommissions, setSavingCommissions] = useState(false)
@@ -303,6 +307,12 @@ export default function AdminSellers() {
 
     // Troca de cargo: confirma dizendo o que muda no acesso
     const before = editingId ? sellers.find((s) => s.id === editingId) : null
+    // E-mail do login trocado na edição (seção 96): vai pela Edge Function
+    const emailMoved = Boolean(before?.userId) && emailChanged(before.email, form.email)
+    if (emailMoved && !isValidEmail(form.email)) {
+      setFormError('E-mail inválido.')
+      return
+    }
     if (before && cargoValue(before.role, before.customRoleId) !== cargoValue(form.role, form.customRoleId)) {
       const from = roleLabel(before.role, before.customRole)
       const to = roleLabel(form.role, formCustomRole)
@@ -322,9 +332,12 @@ export default function AdminSellers() {
     setSaving(true)
     try {
       if (editingId) {
+        const newEmail = emailMoved ? await updateSellerEmail(editingId, form.email) : null
         const saved = await updateSeller(editingId, { ...form, canSeeExpenses, canSeeCosts, commissionType, commissionValue, extCommissionType, extCommissionValue })
         setSellers((prev) => prev.map((s) => (s.id === editingId ? saved : s)))
-        setFormSuccess(`${roleLabel(saved.role, saved.customRole)} "${saved.name}" atualizado.`)
+        setFormSuccess(
+          `${roleLabel(saved.role, saved.customRole)} "${saved.name}" atualizado.${newEmail ? ` Agora entra no painel com o e-mail ${newEmail}.` : ''}`
+        )
         cancelEdit()
       } else {
         const created = await createSeller({ ...form, canSeeExpenses, canSeeCosts, commissionType, commissionValue, extCommissionType, extCommissionValue })
@@ -414,6 +427,14 @@ export default function AdminSellers() {
 
   // Ninguém muda o próprio nível (o banco também confere)
   const editingSelf = Boolean(editingId) && sellers.find((s) => s.id === editingId)?.userId === user?.id
+  // Na edição, o e-mail só muda para quem tem login (seção 96)
+  const editingHasLogin = Boolean(editingId) && Boolean(sellers.find((s) => s.id === editingId)?.userId)
+
+  function openPasswordAgain() {
+    const seller = passwordFor
+    setPasswordFor(null)
+    openReset(seller)
+  }
 
   const detailSeller = sellers.find((s) => s.id === detailId)
   const detailSales = periodSales.filter((s) => s.sellerId === detailId)
@@ -503,12 +524,13 @@ export default function AdminSellers() {
             E-mail (login)
             <input
               type="email"
-              required={!editingId}
-              disabled={Boolean(editingId)}
+              required={!editingId || editingHasLogin}
+              disabled={Boolean(editingId) && !editingHasLogin}
               value={form.email}
               onChange={(e) => update('email', e.target.value)}
               placeholder="nome@email.com"
             />
+            {editingHasLogin && <small className="admin-form-hint login-email-hint">Trocar o e-mail muda o login na hora: a pessoa passa a entrar com o e-mail novo.</small>}
           </label>
           <label>
             Telefone
@@ -817,6 +839,7 @@ export default function AdminSellers() {
                           seller={s}
                           onDetail={() => setDetailId(detailId === s.id ? null : s.id)}
                           onEdit={() => startEdit(s)}
+                          onViewPassword={() => setPasswordFor(s)}
                           onReset={() => openReset(s)}
                           onToggle={() => toggleActive(s)}
                           onDelete={() => handleDelete(s)}
@@ -884,6 +907,7 @@ export default function AdminSellers() {
                     seller={s}
                     onDetail={() => setDetailId(detailId === s.id ? null : s.id)}
                     onEdit={() => startEdit(s)}
+                    onViewPassword={() => setPasswordFor(s)}
                     onReset={() => openReset(s)}
                     onToggle={() => toggleActive(s)}
                     onDelete={() => handleDelete(s)}
@@ -955,7 +979,7 @@ export default function AdminSellers() {
         <div className="confirm-dialog-overlay" onClick={resetSaving ? undefined : () => setResetFor(null)}>
           <form className="confirm-dialog admin-form" onClick={(e) => e.stopPropagation()} onSubmit={submitResetPassword}>
             <h2>Nova senha</h2>
-            <p>Defina a nova senha de acesso de {resetFor.name}.</p>
+            <p>Defina a nova senha de acesso de {resetFor.name}. Ela fica guardada para os administradores da loja verem em Ver senha.</p>
             <label>
               Nova senha
               <input
@@ -978,6 +1002,9 @@ export default function AdminSellers() {
             </div>
           </form>
         </div>
+      )}
+      {passwordFor && (
+        <LoginPasswordDialog seller={passwordFor} onClose={() => setPasswordFor(null)} onNewPassword={openPasswordAgain} />
       )}
       {commissionsFor && (
         <CommissionsDialog
@@ -1013,7 +1040,7 @@ function StatusPill({ seller }) {
   return <span className={`admin-status-pill ${seller.active ? 'is-on' : 'is-off'}`}>{seller.active ? 'Ativo' : 'Inativo'}</span>
 }
 
-function SellerActions({ seller, onDetail, onEdit, onReset, onToggle, onDelete, detailOpen, canManage, isSelf }) {
+function SellerActions({ seller, onDetail, onEdit, onViewPassword, onReset, onToggle, onDelete, detailOpen, canManage, isSelf }) {
   return (
     <div className="admin-action-group">
       <button type="button" className={`admin-action-btn ${detailOpen ? 'is-active' : ''}`} onClick={onDetail}>
@@ -1024,6 +1051,11 @@ function SellerActions({ seller, onDetail, onEdit, onReset, onToggle, onDelete, 
       <button type="button" className="admin-action-btn" onClick={onEdit}>
         <Pencil size={15} /> Editar
       </button>
+      {seller.userId && (
+      <button type="button" className="admin-action-btn" onClick={onViewPassword}>
+        <Eye size={15} /> Ver senha
+      </button>
+      )}
       <button type="button" className="admin-action-btn" onClick={onReset}>
         <KeyRound size={15} /> Nova senha
       </button>

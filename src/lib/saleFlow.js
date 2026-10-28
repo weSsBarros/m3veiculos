@@ -11,7 +11,7 @@ import { closeReservation } from './reservationsApi.js'
 // insertOnly: o vendedor só registra venda nova.
 // Devolve { sale, car, tradeInCarId }.
 export async function registerSaleFromDialog(car, data, { reservation = null, insertOnly = false } = {}) {
-  const { sellerId, customerId, salePrice, discount, saleDate, checklist, payment, tradeIn } = data
+  const { sellerId, customerId, salePrice, discount, saleDate, checklist, payment, tradeIn, bankIncome } = data
   let tradeInCarId = null
   if (tradeIn) tradeInCarId = await registerTradeIn(tradeIn)
 
@@ -24,6 +24,8 @@ export async function registerSaleFromDialog(car, data, { reservation = null, in
       saleDate,
       checklist,
       payment,
+      // Retorno e plus do banco (seção 97): só vem de quem vê os valores da venda
+      ...(bankIncome !== undefined ? { bankIncome } : {}),
       ...(tradeInCarId ? { tradeIn: { carId: tradeInCarId, value: tradeIn.value } } : {}),
       insertOnly,
     })

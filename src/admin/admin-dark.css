@@ -183,6 +183,31 @@ html[data-admin-theme='escuro'] .panel-topbar-who span {
   color: var(--color-text-muted);
 }
 
+html[data-admin-theme='escuro'] button.panel-topbar-who {
+  border: 0;
+  background: none;
+  color: inherit;
+}
+
+html[data-admin-theme='escuro'] button.panel-topbar-who:focus-visible {
+  outline: 2px solid var(--color-primary);
+}
+
+html[data-admin-theme='escuro'] .login-password-email {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .login-password-box {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+}
+
+html[data-admin-theme='escuro'] .login-access-warning {
+  border: 1px solid #745e2f;
+  background: #41351b;
+  color: #f1c57e;
+}
+
 html[data-admin-theme='escuro'] .theme-switch {
   border: 1px solid var(--color-border);
   background: var(--color-bg-alt);
@@ -1375,6 +1400,24 @@ html[data-admin-theme='escuro'] .financing-preview {
 }
 
 html[data-admin-theme='escuro'] .financing-preview strong {
+  color: var(--admin-primary-text);
+}
+
+html[data-admin-theme='escuro'] .financing-redo-note {
+  border: 1px solid #745e2f;
+  background: #41351b;
+  color: #f1c57e;
+}
+
+html[data-admin-theme='escuro'] .bank-income-hint {
+  color: var(--color-text-muted);
+}
+
+html[data-admin-theme='escuro'] .bank-income-hint.is-error {
+  color: var(--admin-danger-text);
+}
+
+html[data-admin-theme='escuro'] .bank-income-total strong {
   color: var(--admin-primary-text);
 }
 

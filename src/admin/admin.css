@@ -440,6 +440,73 @@
   color: var(--color-text-muted);
 }
 
+/* O nome abre "Minha conta" (trocar o próprio e-mail e a senha) */
+button.panel-topbar-who {
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.panel-topbar-who:hover strong {
+  text-decoration: underline;
+}
+
+button.panel-topbar-who:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* "Ver senha" da Equipe e o e-mail do login (seção 96) */
+.login-password-email {
+  margin-top: -4px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.login-password-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-alt);
+}
+
+.login-password-box code {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 17px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.login-access-warning {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid #f0d9a8;
+  background: #fdf6e7;
+  color: #6b4508;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admin-form-hint.login-email-hint {
+  display: block;
+  margin: 4px 0 0;
+  font-weight: 500;
+}
+
 .panel-topbar-actions {
   display: flex;
   align-items: center;
@@ -3782,6 +3849,67 @@ span.car-plate {
 
 .financing-preview strong {
   color: var(--color-primary-dark);
+}
+
+/* Editar o financiamento (seção 97): as parcelas em aberto serão refeitas */
+.financing-redo-note {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid #f0d9a8;
+  background: #fdf6e7;
+  color: #6b4508;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Retorno e plus do banco (seção 97): venda financiada e financiamento externo */
+.bank-income {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bank-income-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bank-income-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-segmented.bank-income-mode button {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  font-size: 12.5px;
+}
+
+.bank-income-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.bank-income-hint.is-error {
+  color: var(--color-danger);
+}
+
+.bank-income-total {
+  font-size: 13.5px;
+}
+
+.bank-income-total strong {
+  color: var(--color-primary-dark);
+}
+
+/* Cliente: Pessoa física (CPF) | Pessoa jurídica (CNPJ) */
+.admin-segmented.customer-person-type {
+  max-width: 520px;
+  margin-bottom: 16px;
 }
 
 .admin-card.installment-card-overdue {

@@ -270,6 +270,7 @@ export function buildFinancingReport({ financings = [], externals = [], sellers 
       status: externalStatusLabel(e.status),
       seller: e.sellerId ? sellersById[e.sellerId]?.name || '—' : 'Loja',
       storeReturn: e.storeReturn ?? null,
+      storePlus: e.storePlus ?? null,
     }))
   const sections = []
   if (includeOwn) {
@@ -300,9 +301,15 @@ export function buildFinancingReport({ financings = [], externals = [], sellers 
       { key: 'status', label: 'Situação', type: 'text' },
       { key: 'seller', label: 'Vendedor', type: 'text' },
       { key: 'storeReturn', label: 'Retorno da loja', type: 'money' },
+      { key: 'storePlus', label: 'Plus', type: 'money' },
     ],
     rows: externalRows,
-    totals: { date: count(externalRows.length, 'financiamento', 'financiamentos'), financed: sum(externalRows, 'financed'), storeReturn: sum(externalRows, 'storeReturn') },
+    totals: {
+      date: count(externalRows.length, 'financiamento', 'financiamentos'),
+      financed: sum(externalRows, 'financed'),
+      storeReturn: sum(externalRows, 'storeReturn'),
+      storePlus: sum(externalRows, 'storePlus'),
+    },
   })
   return { title: 'Financiamentos', subtitle: periodSubtitle(range), sections }
 }
@@ -505,17 +512,22 @@ export function buildEntryTypeReport({ sales, cars, expenses = [], range }) {
 }
 
 // Resultado (lucro líquido): vendas do período menos o custo dos carros vendidos
-// (compra + gastos), as comissões pagas no período (pela data do pagamento) e as
-// despesas da empresa com vencimento no período. sellers: para o nome de quem
+// (compra + gastos), mais o retorno e o plus dos bancos (seção 97), menos as comissões
+// pagas no período (das vendas e dos financiamentos externos, pela data do pagamento)
+// e as despesas da empresa com vencimento no período. sellers: para o nome de quem
 // recebeu a comissão.
-export function buildResultReport({ soldEntries = [], carExpenses = [], companyExpenses = [], sellers = [], range, categoryLabel = (c) => c }) {
-  const r = storeResult({ soldEntries, carExpenses, companyExpenses, range })
+export function buildResultReport({ soldEntries = [], carExpenses = [], companyExpenses = [], externalFinancings = [], sellers = [], range, categoryLabel = (c) => c }) {
+  const r = storeResult({ soldEntries, carExpenses, companyExpenses, externalFinancings, range })
   const sellersById = byId(sellers)
   const summary = [
     { item: `Vendas (${count(r.soldCount, 'carro', 'carros')})`, value: r.revenue },
     { item: 'Custo dos carros vendidos (compra + gastos)', value: -r.carsCost },
     { item: 'Margem bruta', value: r.grossMargin },
-    { item: `Comissões pagas no período (${count(r.paidCommissions.length, 'comissão', 'comissões')})`, value: -r.commissions },
+    { item: 'Retorno e plus dos bancos', value: r.bankIncome.total },
+    {
+      item: `Comissões pagas no período (${count(r.paidCommissions.length + r.paidExtCommissions.length, 'comissão', 'comissões')})`,
+      value: -r.commissions,
+    },
     { item: 'Despesas da empresa', value: -r.companyExpenses },
     { item: 'Lucro líquido', value: r.net },
   ]
@@ -527,12 +539,28 @@ export function buildResultReport({ soldEntries = [], carExpenses = [], companyE
     cost: e.cost,
     margin: e.margin,
   }))
-  const commissionRows = r.paidCommissions.map((e) => ({
-    paidOn: e.paidOn,
-    seller: sellersById[e.sale?.sellerId]?.name || '',
-    car: carName(e.car),
-    soldOn: e.date || '',
-    amount: e.commission,
+  const commissionRows = [
+    ...r.paidCommissions.map((e) => ({
+      paidOn: e.paidOn,
+      seller: sellersById[e.sale?.sellerId]?.name || '',
+      car: carName(e.car),
+      soldOn: e.date || '',
+      amount: e.commission,
+    })),
+    ...r.paidExtCommissions.map((e) => ({
+      paidOn: e.paidOn,
+      seller: sellersById[e.financing.sellerId]?.name || '',
+      car: `Financ. externo: ${e.financing.customerName || 'cliente'}`,
+      soldOn: e.financing.paidOn || '',
+      amount: e.commission,
+    })),
+  ].sort((a, b) => (a.paidOn < b.paidOn ? -1 : 1))
+  const bankRows = r.bankIncome.items.map((i) => ({
+    date: i.date,
+    kind: i.kind === 'plus' ? 'Plus' : 'Retorno',
+    origin: i.label,
+    bank: i.bank,
+    amount: i.amount,
   }))
   const billRows = r.bills.map((e) => ({
     due: e.dueOn,
@@ -566,6 +594,18 @@ export function buildResultReport({ soldEntries = [], carExpenses = [], companyE
         ],
         rows: soldRows,
         totals: { date: count(soldRows.length, 'venda', 'vendas'), price: sum(soldRows, 'price'), cost: sum(soldRows, 'cost'), margin: sum(soldRows, 'margin') },
+      },
+      {
+        title: 'Retorno e plus dos bancos',
+        columns: [
+          { key: 'date', label: 'Data', type: 'date' },
+          { key: 'kind', label: 'Tipo', type: 'text' },
+          { key: 'origin', label: 'Venda ou financiamento', type: 'text' },
+          { key: 'bank', label: 'Banco', type: 'text' },
+          { key: 'amount', label: 'Valor', type: 'money' },
+        ],
+        rows: bankRows,
+        totals: { date: count(bankRows.length, 'lançamento', 'lançamentos'), amount: sum(bankRows, 'amount') },
       },
       {
         title: 'Comissões pagas no período',

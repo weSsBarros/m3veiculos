@@ -67,6 +67,8 @@ const ACTION_LABELS = {
   update: 'Alterou',
   delete: 'Excluiu',
   login: 'Entrou',
+  // "Ver senha" da Equipe (seção 96)
+  view: 'Viu',
 }
 
 export function entityLabel(entity) {

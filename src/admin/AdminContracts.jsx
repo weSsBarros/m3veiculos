@@ -280,7 +280,7 @@ export default function AdminContracts() {
 
   function validate() {
     if (!company.name || !company.document) return 'Preencha nome e CNPJ/CPF da empresa vendedora.'
-    if (!buyer.name || !buyer.document) return 'Preencha nome e CPF do comprador.'
+    if (!buyer.name || !buyer.document) return 'Preencha nome e CPF ou CNPJ do comprador.'
     if (!vehicle.brand || !vehicle.model) return 'Selecione ou preencha o veículo.'
     if (!sale.price || Number(sale.price) <= 0) return 'Informe o preço de venda.'
     if (!sale.city) return 'Informe a cidade para o contrato.'
@@ -513,11 +513,11 @@ export default function AdminContracts() {
           </div>
           <div className="admin-form-grid">
             <label>
-              Nome completo
+              Nome completo ou razão social
               <input value={buyer.name} onChange={(e) => updateBuyer('name', e.target.value)} required />
             </label>
             <label>
-              CPF
+              CPF ou CNPJ
               <input value={buyer.document} onChange={(e) => updateBuyer('document', e.target.value)} required />
             </label>
             <label>

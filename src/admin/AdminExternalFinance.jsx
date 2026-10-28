@@ -91,6 +91,9 @@ export default function AdminExternalFinance() {
       paid: paid.length,
       financed: visible.reduce((sum, it) => sum + (it.financedAmount || 0), 0),
       storeReturn: paid.reduce((sum, it) => sum + (it.storeReturn || 0), 0),
+      // Plus do banco (seção 97): recebido (com a data) e a receber dos pagos
+      plusReceived: visible.filter((it) => it.plusReceivedOn).reduce((sum, it) => sum + (it.storePlus || 0), 0),
+      plusOpen: paid.filter((it) => !it.plusReceivedOn).reduce((sum, it) => sum + (it.storePlus || 0), 0),
       commission: paid.reduce((sum, it) => sum + it.commissionAmount, 0),
     }
   }, [visible])
@@ -167,6 +170,12 @@ export default function AdminExternalFinance() {
           <div className="expense-summary-card">
             <span>Retorno recebido (pagos)</span>
             <strong>{formatCurrencyCents(totals.storeReturn)}</strong>
+          </div>
+        )}
+        {showValues && isStaff && (totals.plusReceived > 0 || totals.plusOpen > 0) && (
+          <div className="expense-summary-card">
+            <span>Plus recebido{totals.plusOpen > 0 ? ` (${formatCurrencyCents(totals.plusOpen)} a receber)` : ''}</span>
+            <strong>{formatCurrencyCents(totals.plusReceived)}</strong>
           </div>
         )}
         {showValues && (

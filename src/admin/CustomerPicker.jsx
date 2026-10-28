@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { UserPlus } from 'lucide-react'
 import { createCustomer } from '../lib/customersApi.js'
-import { maskCPF, maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
+import { maskCpfCnpj, maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
+import { customerDocumentError, personTypeOf } from '../utils/customerDocument.js'
 
 // Cliente comprador (opcional) na hora da venda: escolhe da lista ou cadastra
-// na hora (nome, CPF e telefone). Fica dentro de outros <form>, então o
+// na hora (nome, CPF ou CNPJ e telefone). Fica dentro de outros <form>, então o
 // cadastro rápido usa um <div> com botões, não um form próprio.
 export default function CustomerPicker({ customers, value, onChange, onCreated, disabled, label = 'Cliente comprador (opcional)' }) {
   const [creating, setCreating] = useState(false)
@@ -25,6 +26,12 @@ export default function CustomerPicker({ customers, value, onChange, onCreated, 
   async function saveCustomer() {
     if (!draft.name.trim()) {
       setError('Informe o nome do cliente.')
+      return
+    }
+    // Com 12 números ou mais é CNPJ: confere os dígitos
+    const documentProblem = customerDocumentError(personTypeOf(draft.document), draft.document)
+    if (documentProblem) {
+      setError(documentProblem)
       return
     }
     setSaving(true)
@@ -70,17 +77,17 @@ export default function CustomerPicker({ customers, value, onChange, onCreated, 
           <strong>Cadastro rápido de cliente</strong>
           <label>
             Nome
-            <input autoFocus value={draft.name} onChange={(e) => updateDraft('name', e.target.value)} onKeyDown={handleKeyDown} placeholder="Nome completo" />
+            <input autoFocus value={draft.name} onChange={(e) => updateDraft('name', e.target.value)} onKeyDown={handleKeyDown} placeholder="Nome completo ou razão social" />
           </label>
           <div className="customer-picker-row">
             <label>
-              CPF
+              CPF ou CNPJ
               <input
                 inputMode="numeric"
                 value={draft.document}
-                onChange={(e) => updateDraft('document', maskKeepingCaret(e, maskCPF))}
+                onChange={(e) => updateDraft('document', maskKeepingCaret(e, maskCpfCnpj))}
                 onKeyDown={handleKeyDown}
-                placeholder="000.000.000-00"
+                placeholder="CPF ou CNPJ"
               />
             </label>
             <label>

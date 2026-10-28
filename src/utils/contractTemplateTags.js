@@ -21,7 +21,7 @@ export const CONTRACT_TEMPLATE_TAGS = [
   { tag: 'loja_email', label: 'E-mail da loja' },
   { tag: 'loja_cidade', label: 'Cidade/UF da loja (foro)' },
   { tag: 'cliente_nome', label: 'Nome do cliente' },
-  { tag: 'cliente_cpf', label: 'CPF do cliente' },
+  { tag: 'cliente_cpf', label: 'CPF ou CNPJ do cliente' },
   { tag: 'cliente_rg', label: 'RG do cliente' },
   { tag: 'cliente_endereco', label: 'Endereço do cliente' },
   { tag: 'cliente_telefone', label: 'Telefone do cliente' },

@@ -44,6 +44,8 @@ export default function AdminCustomerFinance() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState(() => (FILTERS.some((f) => f.value === searchParams.get('filtro')) ? searchParams.get('filtro') : 'todos'))
   const [formOpen, setFormOpen] = useState(false)
+  // Financiamento aberto no formulário de edição (seção 97)
+  const [editingFinancing, setEditingFinancing] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Período: o que vence (a receber) e o que foi recebido; "Todo o período" = como antes
   const [period, setPeriod] = useState('tudo')
@@ -424,7 +426,7 @@ export default function AdminCustomerFinance() {
           customers={customers}
           onCustomerCreated={(created) => setCustomers((prev) => [...prev, created].sort((x, y) => x.name.localeCompare(y.name)))}
           defaults={settings}
-          onCreated={(created) => {
+          onSaved={(created) => {
             setFinancings((prev) => [created, ...prev])
             setFormOpen(false)
             openDetail(created)
@@ -440,11 +442,31 @@ export default function AdminCustomerFinance() {
           companyName={settings.name}
           isAdmin={isAdmin}
           onChanged={applyFinancing}
+          onEdit={() => setEditingFinancing(detail)}
           onDeleted={(id) => {
             setFinancings((prev) => prev.filter((f) => f.id !== id))
             closeDetail()
           }}
           onClose={closeDetail}
+        />
+      )}
+
+      {/* Editar tudo depois de criado (seção 97): o mesmo formulário, preenchido, por
+          cima dos detalhes */}
+      {editingFinancing && (
+        <FinancingFormDialog
+          financing={editingFinancing}
+          soldCars={soldCars}
+          salesByCar={salesByCar}
+          financedCarIds={financedCarIds}
+          customers={customers}
+          onCustomerCreated={(created) => setCustomers((prev) => [...prev, created].sort((x, y) => x.name.localeCompare(y.name)))}
+          defaults={settings}
+          onSaved={(updated) => {
+            applyFinancing(updated)
+            setEditingFinancing(null)
+          }}
+          onClose={() => setEditingFinancing(null)}
         />
       )}
 

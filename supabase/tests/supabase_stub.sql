@@ -9,7 +9,11 @@ begin
 end $$;
 
 create schema auth;
-create table auth.users (id uuid primary key default gen_random_uuid(), email text, last_sign_in_at timestamptz);
+create table auth.users (id uuid primary key default gen_random_uuid(), email text, last_sign_in_at timestamptz, encrypted_password text);
+
+-- No Supabase o pgcrypto fica no schema extensions (a seção 96 confere a senha com o crypt)
+create schema extensions;
+create extension pgcrypto schema extensions;
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
 $$;

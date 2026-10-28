@@ -1,5 +1,6 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
 import { scopeBySellerOrCreator } from './viewScope.js'
+import { bankIncomeRow } from './salesApi.js'
 
 // Financiamentos externos (tabela "external_financings"): o cliente achou o
 // carro fora da loja e só fez o financiamento por ela. O vendedor cadastra e
@@ -33,6 +34,12 @@ function fromRow(row) {
     paidOn: row.paid_on || null,
     closedOn: row.closed_on || null,
     storeReturn: num(row.store_return),
+    // Retorno em % (quando foi informado assim), tabela e o plus do banco (seção 97)
+    returnPercent: num(row.return_percent),
+    rateTable: row.rate_table || '',
+    storePlus: num(row.store_plus),
+    plusPercent: num(row.plus_percent),
+    plusReceivedOn: row.plus_received_on || null,
     commissionType: row.commission_type || null,
     commissionValue: num(row.commission_value),
     commissionAmount: Number(row.commission_amount) || 0,
@@ -64,7 +71,7 @@ function toRow(item) {
     approved_on: item.approvedOn || null,
     paid_on: item.paidOn || null,
     closed_on: item.closedOn || null,
-    store_return: item.storeReturn ?? null,
+    ...bankIncomeRow(item),
     notes: item.notes || '',
   }
 }

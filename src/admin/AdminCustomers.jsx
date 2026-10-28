@@ -7,7 +7,8 @@ import { fetchSales } from '../lib/salesApi.js'
 import { fetchSellers } from '../lib/sellersApi.js'
 import { removeCustomerDocumentFiles } from '../lib/customerDocumentsApi.js'
 import { useAuth } from '../context/AuthContext.jsx'
-import { maskCPF, maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
+import { maskCPF, maskCNPJ, maskPhoneBR, maskKeepingCaret } from '../utils/masks.js'
+import { PERSON_TYPES, personTypeOf, customerDocumentError } from '../utils/customerDocument.js'
 import { matchesCarSearch, parseIntBR, todayISO } from '../utils/carFormat.js'
 import { fetchTeamDirectory } from '../lib/storeSettingsApi.js'
 import { fetchMatches, fetchContacts, fetchInterests, createInterest } from '../lib/customerCrmApi.js'
@@ -23,6 +24,8 @@ import { hasAddress } from '../utils/fiscal.js'
 
 function emptyCustomer(responsibleSellerId = '') {
   return {
+    // 'pf' (CPF) ou 'pj' (CNPJ): não vai para o banco, sai do número do documento
+    personType: 'pf',
     name: '',
     document: '',
     rg: '',
@@ -235,6 +238,7 @@ export default function AdminCustomers() {
   function startEdit(customer) {
     setEditingId(customer.id)
     setForm({
+      personType: personTypeOf(customer.document),
       name: customer.name,
       document: customer.document,
       rg: customer.rg,
@@ -282,6 +286,8 @@ export default function AdminCustomers() {
   function formToCustomer() {
     return {
       ...form,
+      // Empresa não tem RG
+      rg: form.personType === 'pj' ? '' : form.rg,
       tradeIn: {
         model: form.tradeIn.model,
         year: form.tradeIn.year,
@@ -296,8 +302,19 @@ export default function AdminCustomers() {
     }
   }
 
+  // Pessoa física ou jurídica: o número digitado do outro tipo não serve, então sai
+  function changePersonType(next) {
+    if (next === form.personType) return
+    setForm((prev) => ({ ...prev, personType: next, document: '' }))
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
+    const documentProblem = customerDocumentError(form.personType, form.document)
+    if (documentProblem) {
+      setError(documentProblem)
+      return
+    }
     setSaving(true)
     setError('')
     try {
@@ -372,19 +389,54 @@ export default function AdminCustomers() {
 
       <form className="admin-form admin-form-section" onSubmit={handleSubmit}>
         <h2>{editingId ? 'Editar cliente' : 'Novo cliente'}</h2>
+        <div className="admin-segmented customer-person-type" role="radiogroup" aria-label="Tipo de cliente">
+          {PERSON_TYPES.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              role="radio"
+              aria-checked={form.personType === t.value}
+              className={form.personType === t.value ? 'is-active' : ''}
+              onClick={() => changePersonType(t.value)}
+            >
+              {t.label} ({t.value === 'pj' ? 'CNPJ' : 'CPF'})
+            </button>
+          ))}
+        </div>
         <div className="admin-form-grid">
-          <label>
-            Nome completo
-            <input required value={form.name} onChange={(e) => update('name', e.target.value)} />
-          </label>
-          <label>
-            CPF
-            <input value={form.document} onChange={(e) => update('document', maskKeepingCaret(e, maskCPF))} placeholder="000.000.000-00" />
-          </label>
-          <label>
-            RG
-            <input value={form.rg} onChange={(e) => update('rg', e.target.value)} />
-          </label>
+          {form.personType === 'pj' ? (
+            <>
+              <label>
+                Razão social (nome da empresa)
+                <input required value={form.name} onChange={(e) => update('name', e.target.value)} />
+              </label>
+              <label>
+                CNPJ
+                <input
+                  required
+                  inputMode="numeric"
+                  value={form.document}
+                  onChange={(e) => update('document', maskKeepingCaret(e, maskCNPJ))}
+                  placeholder="00.000.000/0000-00"
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label>
+                Nome completo
+                <input required value={form.name} onChange={(e) => update('name', e.target.value)} />
+              </label>
+              <label>
+                CPF
+                <input inputMode="numeric" value={form.document} onChange={(e) => update('document', maskKeepingCaret(e, maskCPF))} placeholder="000.000.000-00" />
+              </label>
+              <label>
+                RG
+                <input value={form.rg} onChange={(e) => update('rg', e.target.value)} />
+              </label>
+            </>
+          )}
           <label>
             Telefone
             <input value={form.phone} onChange={(e) => update('phone', maskKeepingCaret(e, maskPhoneBR))} placeholder="(00) 00000-0000" />
@@ -528,7 +580,7 @@ export default function AdminCustomers() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nome, CPF, telefone, e-mail, carro ou placa…"
+              placeholder="Buscar por nome, CPF/CNPJ, telefone, e-mail, carro ou placa…"
             />
           </label>
         </div>
@@ -545,7 +597,7 @@ export default function AdminCustomers() {
               <thead>
                 <tr>
                   <th>Nome</th>
-                  <th>CPF</th>
+                  <th>CPF/CNPJ</th>
                   <th>Contato</th>
                   <th>Carros comprados</th>
                   <th></th>
@@ -608,7 +660,7 @@ export default function AdminCustomers() {
                   <div className="admin-card-top">
                     <div className="admin-card-title">
                       <strong>{c.name}</strong>
-                      <span className="admin-table-sub">{c.document || 'CPF não informado'}</span>
+                      <span className="admin-table-sub">{c.document || 'CPF/CNPJ não informado'}</span>
                       <Badges customer={c} />
                     </div>
                   </div>

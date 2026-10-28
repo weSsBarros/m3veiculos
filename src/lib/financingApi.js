@@ -75,39 +75,42 @@ export async function fetchFinancing(id) {
   return fromRow(data)
 }
 
+function financingPayload(financing) {
+  return {
+    customer_id: financing.customerId || null,
+    car_id: financing.carId || null,
+    customer_name: financing.customerName,
+    vehicle_label: financing.vehicleLabel || '',
+    vehicle_plate: financing.vehiclePlate || '',
+    vehicle_price: financing.vehiclePrice || 0,
+    down_payment: financing.downPayment || 0,
+    financed_amount: financing.financedAmount,
+    installments_count: financing.installmentsCount,
+    installment_amount: financing.installmentAmount,
+    interest_rate: financing.interestRate ?? null,
+    first_due_date: financing.firstDueDate,
+    late_fee_percent: financing.lateFeePercent,
+    late_interest_percent: financing.lateInterestPercent,
+    notes: financing.notes || '',
+  }
+}
+
 // Cria o financiamento e as parcelas numa única operação no banco
 export async function createFinancing(financing) {
   requireSupabase()
-  const { data: id, error } = await supabase.rpc('create_customer_financing', {
-    p: {
-      customer_id: financing.customerId || null,
-      car_id: financing.carId || null,
-      customer_name: financing.customerName,
-      vehicle_label: financing.vehicleLabel || '',
-      vehicle_plate: financing.vehiclePlate || '',
-      vehicle_price: financing.vehiclePrice || 0,
-      down_payment: financing.downPayment || 0,
-      financed_amount: financing.financedAmount,
-      installments_count: financing.installmentsCount,
-      installment_amount: financing.installmentAmount,
-      interest_rate: financing.interestRate ?? null,
-      first_due_date: financing.firstDueDate,
-      late_fee_percent: financing.lateFeePercent,
-      late_interest_percent: financing.lateInterestPercent,
-      notes: financing.notes || '',
-    },
-  })
+  const { data: id, error } = await supabase.rpc('create_customer_financing', { p: financingPayload(financing) })
   if (error) throw error
   return fetchFinancing(id)
 }
 
-export async function updateFinancing(id, { notes, status, lateFeePercent, lateInterestPercent }) {
+// Edita tudo depois de criado (seção 97). Mudando o número de parcelas, o valor da
+// parcela ou o 1º vencimento, o banco refaz as parcelas em aberto; as pagas ficam.
+export async function editFinancing(id, financing) {
   requireSupabase()
-  const { error } = await supabase
-    .from('customer_financings')
-    .update({ notes: notes || '', status, late_fee_percent: lateFeePercent, late_interest_percent: lateInterestPercent })
-    .eq('id', id)
-    .eq('company_id', COMPANY_ID)
+  const { error } = await supabase.rpc('update_customer_financing', {
+    p_id: id,
+    p: { ...financingPayload(financing), status: financing.status },
+  })
   if (error) throw error
   return fetchFinancing(id)
 }

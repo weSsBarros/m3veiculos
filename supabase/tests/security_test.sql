@@ -2932,6 +2932,221 @@ delete from public.plate_credit_ledger where order_id in (select id from public.
 delete from public.plate_credit_orders where note like 'PIX conferido pela WB.Dev%' or note = 'teste 94';
 delete from public.pix_intents;
 
+-- ======================== senha dos logins guardada para o admin ver (96)
+select test.login(null);
+-- Como test.try, mas com a mensagem do erro (vai no detalhe do teste)
+create or replace function test.try_msg(p_sql text) returns text language plpgsql as $$
+declare n bigint;
+begin
+  execute p_sql;
+  get diagnostics n = row_count;
+  return 'ok:' || n;
+exception when others then return 'error:' || sqlstate || ' ' || sqlerrm;
+end $$;
+grant execute on function test.try_msg(text) to anon, authenticated;
+update auth.users set encrypted_password = extensions.crypt('senha-vendedor-a', extensions.gen_salt('bf'))
+where id = 'aaaaaaaa-0000-0000-0000-000000000004';
+select test.check('senha guardada: confere a senha com o hash do login (bcrypt); login sem hash não confere',
+  public.login_password_matches('aaaaaaaa-0000-0000-0000-000000000004', 'senha-vendedor-a')
+  and not public.login_password_matches('aaaaaaaa-0000-0000-0000-000000000004', 'outra-senha')
+  and not public.login_password_matches('aaaaaaaa-0000-0000-0000-000000000005', 'qualquer'));
+select test.check('senha guardada: a função guarda a senha do login de uma loja só',
+  public.login_password_save('aaaaaaaa-0000-0000-0000-000000000004', 'senha-vendedor-a', 'admin', 'aaaaaaaa-0000-0000-0000-000000000001'));
+select test.check('senha guardada: fica no Vault e volta pela função com quem guardou e se ainda é a senha do login',
+  public.login_password_read('aaaaaaaa-0000-0000-0000-000000000004') ->> 'password' = 'senha-vendedor-a'
+  and public.login_password_read('aaaaaaaa-0000-0000-0000-000000000004') ->> 'saved_by_email' = 'admin@loja-a'
+  and (public.login_password_read('aaaaaaaa-0000-0000-0000-000000000004') ->> 'still_valid')::boolean
+  and (select count(*) from vault.secrets where name = 'login-aaaaaaaa-0000-0000-0000-000000000004') = 1
+  and not exists (select 1 from public.login_passwords lp where to_jsonb(lp)::text like '%senha-vendedor-a%'),
+  coalesce(public.login_password_read('aaaaaaaa-0000-0000-0000-000000000004')::text, 'sem senha guardada')
+    || ' | segredos: ' || (select count(*) from vault.secrets where name = 'login-aaaaaaaa-0000-0000-0000-000000000004')
+    || ' | lojas do login: ' || (select count(distinct company_id) from public.user_company where user_id = 'aaaaaaaa-0000-0000-0000-000000000004'));
+select public.login_password_save('aaaaaaaa-0000-0000-0000-000000000004', 'senha-trocada', 'propria', 'aaaaaaaa-0000-0000-0000-000000000004');
+select test.check('senha guardada: trocar não cria outro segredo; a guardada que não é mais a do login vem como desatualizada',
+  (select count(*) from vault.secrets where name = 'login-aaaaaaaa-0000-0000-0000-000000000004') = 1
+  and public.login_password_read('aaaaaaaa-0000-0000-0000-000000000004') ->> 'origin' = 'propria'
+  and not (public.login_password_read('aaaaaaaa-0000-0000-0000-000000000004') ->> 'still_valid')::boolean);
+select test.check('senha guardada: não guarda login de duas lojas nem do dono da plataforma',
+  not public.login_password_save('aaaaaaaa-0000-0000-0000-000000000007', 'x123456', 'admin')
+  and not public.login_password_save('cccccccc-0000-0000-0000-000000000001', 'x123456', 'propria'));
+select test.check('senha guardada: nada ficou guardado deles; senha vazia e origem desconhecida são recusadas',
+  public.login_password_read('aaaaaaaa-0000-0000-0000-000000000007') is null
+  and public.login_password_read('cccccccc-0000-0000-0000-000000000001') is null
+  and test.denied($$select public.login_password_save('aaaaaaaa-0000-0000-0000-000000000005', '', 'admin')$$)
+  and test.denied($$select public.login_password_save('aaaaaaaa-0000-0000-0000-000000000005', 'x123456', 'outra')$$));
+select public.login_password_save('aaaaaaaa-0000-0000-0000-000000000005', 'senha-a2', 'cadastro');
+insert into public.user_company (user_id, company_id, role)
+values ('aaaaaaaa-0000-0000-0000-000000000005', 'bbbbbbbb-0000-0000-0000-00000000000b', 'seller');
+select test.check('senha guardada: o login que ganha acesso a outra loja perde a senha guardada e o segredo do Vault',
+  public.login_password_read('aaaaaaaa-0000-0000-0000-000000000005') is null
+  and (select count(*) from vault.secrets where name = 'login-aaaaaaaa-0000-0000-0000-000000000005') = 0);
+delete from public.user_company
+where user_id = 'aaaaaaaa-0000-0000-0000-000000000005' and company_id = 'bbbbbbbb-0000-0000-0000-00000000000b';
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: não lê nem grava a senha guardada pelo banco (só a Edge Function, que registra no histórico)',
+  test.count('select * from login_passwords') <= 0
+  and test.count('select * from vault.decrypted_secrets') <= 0
+  and test.denied($$select login_password_read('aaaaaaaa-0000-0000-0000-000000000004')$$)
+  and test.denied($$select login_password_save('aaaaaaaa-0000-0000-0000-000000000004', 'x123456', 'admin')$$)
+  and test.denied($$select login_password_matches('aaaaaaaa-0000-0000-0000-000000000004', 'senha-trocada')$$)
+  and test.denied($$select login_password_delete('aaaaaaaa-0000-0000-0000-000000000004')$$)
+  and test.denied($$delete from login_passwords$$));
+reset role;
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor A: não lê a própria senha guardada pelo banco',
+  test.count('select * from login_passwords') <= 0
+  and test.denied($$select login_password_read(auth.uid())$$));
+reset role;
+select test.login(null);
+set role anon;
+select test.check('anon: não lê a senha guardada',
+  test.count('select * from login_passwords') <= 0
+  and test.denied($$select login_password_read('aaaaaaaa-0000-0000-0000-000000000004')$$));
+reset role;
+
+select test.login(null);
+select public.login_password_delete('aaaaaaaa-0000-0000-0000-000000000004');
+insert into auth.users (id, email) values ('aaaaaaaa-0000-0000-0000-0000000000f6', 'temporario@loja-a');
+insert into public.user_company (user_id, company_id, role) values ('aaaaaaaa-0000-0000-0000-0000000000f6', test.company_a(), 'seller');
+select public.login_password_save('aaaaaaaa-0000-0000-0000-0000000000f6', 'senha-temporaria', 'cadastro');
+delete from auth.users where id = 'aaaaaaaa-0000-0000-0000-0000000000f6';
+select test.check('senha guardada: apagar a senha ou o login apaga também o segredo do Vault',
+  public.login_password_read('aaaaaaaa-0000-0000-0000-000000000004') is null
+  and (select count(*) from vault.secrets where name like 'login-%') = 0
+  and (select count(*) from public.login_passwords) = 0);
+update auth.users set encrypted_password = null where id = 'aaaaaaaa-0000-0000-0000-000000000004';
+
+-- ======================== categorias de fornecedor e editar o financiamento (97)
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: cadastra fornecedor nas categorias novas; categoria desconhecida é recusada',
+  r like 'ok:%' and r <> 'ok:0'
+  and test.denied($$insert into suppliers (company_id, name, category) select current_company_id(), 'Fornecedor X 97', 'padaria'$$), r)
+from (select test.try_msg($$insert into suppliers (company_id, name, category)
+  select current_company_id(), n, c from (values ('Lava Jato Teste 97', 'lava_jato'), ('Oficina Teste 97', 'oficina')) v(n, c)$$) as r) s;
+select test.check('admin A: cria um financiamento de 3 parcelas e paga a 1ª',
+  test.allowed($$select create_customer_financing(jsonb_build_object('customer_name', 'Cliente 97', 'financed_amount', 3000,
+    'installments_count', 3, 'installment_amount', 1000, 'first_due_date', '2030-01-31', 'notes', 'teste 97'))$$)
+  and test.allowed($$update financing_installments set paid_on = '2030-01-30', paid_amount = 1000
+    where number = 1 and financing_id = (select id from customer_financings where notes = 'teste 97')$$));
+reset role;
+-- Os ids ficam guardados fora do papel (com a RLS, a loja B não acharia o financiamento da A)
+select test.login(null);
+select set_config('test.fin97', (select id::text from public.customer_financings where notes = 'teste 97'), false),
+       set_config('test.cliente_b', (select id::text from public.customers where company_id = 'bbbbbbbb-0000-0000-0000-00000000000b' limit 1), false);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: edita o 1º vencimento, o número e o valor das parcelas', r = 'ok:1', r)
+from (select test.try_msg($$select update_customer_financing(current_setting('test.fin97')::uuid,
+    jsonb_build_object('customer_name', 'Cliente 97 Editado', 'financed_amount', 4600, 'installments_count', 5,
+      'installment_amount', 900, 'first_due_date', '2030-02-10', 'notes', 'teste 97', 'status', 'ativo'))$$) as r) s;
+select test.check('admin A: as em aberto foram refeitas e a paga ficou como estava',
+  (select installments_count from customer_financings where notes = 'teste 97') = 5
+  and (select customer_name from customer_financings where notes = 'teste 97') = 'Cliente 97 Editado'
+  and test.count($$select * from financing_installments where financing_id = current_setting('test.fin97')::uuid$$) = 5
+  and test.count($$select * from financing_installments where financing_id = current_setting('test.fin97')::uuid
+    and number = 1 and paid_on = '2030-01-30' and amount = 1000 and due_date = '2030-01-31'$$) = 1
+  and test.count($$select * from financing_installments where financing_id = current_setting('test.fin97')::uuid
+    and number = 2 and due_date = '2030-03-10' and amount = 900 and paid_on is null$$) = 1
+  and test.count($$select * from financing_installments where financing_id = current_setting('test.fin97')::uuid
+    and number = 5 and due_date = '2030-06-10'$$) = 1,
+  'parcelas: ' || coalesce((select string_agg(number || '=' || due_date || '/' || amount || coalesce('/pago ' || paid_on, ''), ', ' order by number)
+    from financing_installments where financing_id = current_setting('test.fin97')::uuid), 'nenhuma'));
+select test.check('admin A: ajusta uma parcela e edita só a multa do financiamento',
+  test.allowed($$update financing_installments set due_date = '2030-04-20'
+    where number = 3 and financing_id = current_setting('test.fin97')::uuid$$)
+  and test.try_msg($$select update_customer_financing(current_setting('test.fin97')::uuid,
+    jsonb_build_object('customer_name', 'Cliente 97 Editado', 'financed_amount', 4600, 'installments_count', 5,
+      'installment_amount', 900, 'first_due_date', '2030-02-10', 'notes', 'teste 97', 'late_fee_percent', 1))$$) = 'ok:1');
+select test.check('admin A: ajuste feito numa parcela fica quando a edição não mexe nas parcelas',
+  test.count($$select * from financing_installments where financing_id = current_setting('test.fin97')::uuid
+    and number = 3 and due_date = '2030-04-20'$$) = 1
+  and (select late_fee_percent from customer_financings where notes = 'teste 97') = 1);
+select test.check('admin A: não deixa menos parcelas que a última paga; cliente de outra loja é recusado',
+  test.allowed($$update financing_installments set paid_on = '2030-05-01', paid_amount = 900
+    where number = 4 and financing_id = current_setting('test.fin97')::uuid$$)
+  and test.denied($$select update_customer_financing(current_setting('test.fin97')::uuid,
+    jsonb_build_object('customer_name', 'x', 'financed_amount', 2700, 'installments_count', 3,
+      'installment_amount', 900, 'first_due_date', '2030-02-10', 'notes', 'teste 97'))$$)
+  and test.denied($$select update_customer_financing(current_setting('test.fin97')::uuid,
+    jsonb_build_object('customer_id', current_setting('test.cliente_b'),
+      'customer_name', 'x', 'financed_amount', 4600, 'installments_count', 5,
+      'installment_amount', 900, 'first_due_date', '2030-02-10', 'notes', 'teste 97'))$$)
+  and (select installments_count from customer_financings where notes = 'teste 97') = 5);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente V (vê valores): edita e as parcelas em aberto que sobram saem',
+  test.allowed($$select update_customer_financing(current_setting('test.fin97')::uuid,
+    jsonb_build_object('customer_name', 'Cliente 97 Editado', 'financed_amount', 3700, 'installments_count', 4,
+      'installment_amount', 900, 'first_due_date', '2030-02-10', 'notes', 'teste 97'))$$)
+  and test.count($$select * from financing_installments where financing_id = current_setting('test.fin97')::uuid$$) = 4);
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000003');
+set role authenticated;
+select test.check('gerente C (só quantidades): não edita o financiamento',
+  test.denied($$select update_customer_financing(current_setting('test.fin97')::uuid, '{"installments_count": 2}')$$));
+reset role;
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: não edita o financiamento',
+  test.denied($$select update_customer_financing(current_setting('test.fin97')::uuid, '{"installments_count": 2}')$$));
+reset role;
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não edita o financiamento da loja A',
+  test.denied($$select update_customer_financing(current_setting('test.fin97')::uuid, jsonb_build_object('customer_name', 'x',
+    'financed_amount', 900, 'installments_count', 4, 'installment_amount', 900, 'first_due_date', '2030-02-10'))$$));
+reset role;
+select test.login(null);
+set role anon;
+select test.check('anon: não edita financiamento',
+  test.denied($$select update_customer_financing(current_setting('test.fin97')::uuid, '{}')$$));
+reset role;
+select test.login(null);
+select test.check('financiamento (97): depois das recusas, continua com 4 parcelas e o nome editado',
+  (select installments_count from public.customer_financings where notes = 'teste 97') = 4
+  and (select customer_name from public.customer_financings where notes = 'teste 97') = 'Cliente 97 Editado');
+delete from public.customer_financings where notes = 'teste 97';
+delete from public.suppliers where name like '% Teste 97';
+
+-- Retorno e plus do financiamento bancário (97)
+insert into public.cars (id, company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, category, price, status, hidden, purchase_price, plate, chassis, renavam)
+values ('ca000000-0000-0000-0000-0000000000a7', test.company_a(), 'teste-97', 'Marca', 'Modelo', 'V', 2022, '2022/2022', 1000, 'Manual', 'Flex', 'Preto', 'hatch', 60000, 'disponivel', false, 50000, 'TST9A97', 'CHASSITST9A97', 'RENAVAMTST9A97');
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: registra a venda financiada, mas o retorno e o plus do banco ficam em branco',
+  test.allowed($$insert into sales (company_id, car_id, seller_id, sale_price, store_return, return_percent, store_plus, plus_percent, plus_received_on, rate_table)
+    select current_company_id(), 'ca000000-0000-0000-0000-0000000000a7', current_seller_id(), 60000, 999, 2, 300, null, '2030-01-10', 'R4'$$));
+select test.check('vendedor: não informa o plus no financiamento externo',
+  test.denied($$update external_financings set store_plus = 100$$)
+  and test.denied($$update external_financings set plus_received_on = '2030-01-10'$$));
+reset role;
+select test.login(null);
+select test.check('venda do vendedor: sem retorno nem plus; a tabela fica',
+  (select store_return is null and return_percent is null and store_plus is null and plus_received_on is null and rate_table = 'R4'
+   from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a7'));
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: informa retorno (em %) e plus na venda e no financiamento externo; valor negativo e % acima de 100 são recusados',
+  test.allowed($$update sales set store_return = 1200, return_percent = 2, store_plus = 300, plus_received_on = '2030-01-10'
+    where car_id = 'ca000000-0000-0000-0000-0000000000a7'$$)
+  and test.allowed($$update external_financings set store_plus = 250, plus_percent = null, rate_table = 'R3'
+    where customer_name = 'Cliente A2'$$)
+  and test.denied($$update sales set store_plus = -1 where car_id = 'ca000000-0000-0000-0000-0000000000a7'$$)
+  and test.denied($$update sales set return_percent = 101 where car_id = 'ca000000-0000-0000-0000-0000000000a7'$$)
+  and test.count($$select * from sales where car_id = 'ca000000-0000-0000-0000-0000000000a7' and store_return = 1200 and store_plus = 300$$) = 1);
+reset role;
+select test.login(null);
+delete from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a7';
+delete from public.cars where id = 'ca000000-0000-0000-0000-0000000000a7';
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;

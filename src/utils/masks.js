@@ -6,6 +6,22 @@ export function maskCPF(raw) {
     .replace(/(\d{3})(\d{1,2})$/, '$1-$2')
 }
 
+// CNPJ: 00.000.000/0000-00
+export function maskCNPJ(raw) {
+  const digits = String(raw).replace(/\D/g, '').slice(0, 14)
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2')
+}
+
+// CPF ou CNPJ no mesmo campo: até 11 números é CPF; do 12º em diante, CNPJ
+export function maskCpfCnpj(raw) {
+  const digits = String(raw).replace(/\D/g, '')
+  return digits.length > 11 ? maskCNPJ(digits) : maskCPF(digits)
+}
+
 export function maskPhoneBR(raw) {
   const digits = String(raw).replace(/\D/g, '').slice(0, 11)
   if (digits.length <= 10) {

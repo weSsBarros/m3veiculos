@@ -34,12 +34,32 @@ function fromRow(row) {
     tradeInCarId: row.trade_in_car_id || null,
     tradeInValue: row.trade_in_value != null ? Number(row.trade_in_value) : null,
     commissionPaidOn: row.commission_paid_on || null,
+    // Retorno e plus do financiamento bancário (seção 97): R$ (o que vale nas
+    // contas) e o % quando foi informado assim; plus em branco na data = a receber
+    storeReturn: row.store_return != null ? Number(row.store_return) : null,
+    returnPercent: row.return_percent != null ? Number(row.return_percent) : null,
+    rateTable: row.rate_table || '',
+    storePlus: row.store_plus != null ? Number(row.store_plus) : null,
+    plusPercent: row.plus_percent != null ? Number(row.plus_percent) : null,
+    plusReceivedOn: row.plus_received_on || null,
     // Nota fiscal de serviço (seção 88): emitida no Emissor Nacional e guardada aqui
     nfseStatus: row.nfse_status || 'pendente',
     nfseNumber: row.nfse_number || '',
     nfseIssuedOn: row.nfse_issued_on || null,
     nfseFile: row.nfse_file || null,
     createdAt: row.created_at,
+  }
+}
+
+// Retorno e plus do banco (utils/bankIncome.js) → colunas da venda e do externo
+export function bankIncomeRow(b) {
+  return {
+    store_return: b?.storeReturn ?? null,
+    return_percent: b?.returnPercent ?? null,
+    rate_table: b?.rateTable || '',
+    store_plus: b?.storePlus ?? null,
+    plus_percent: b?.plusPercent ?? null,
+    plus_received_on: b?.plusReceivedOn || null,
   }
 }
 
@@ -73,7 +93,7 @@ export async function fetchSaleByCar(carId) {
 // e o banco só deixa ele inserir venda no nome dele.
 // discount: desconto em reais (salePrice já vem com ele descontado); sem ele, o
 // desconto gravado continua como está.
-export async function saveSaleForCar(carId, { sellerId, salePrice, saleDate, checklist, payment, tradeIn, discount, insertOnly = false }) {
+export async function saveSaleForCar(carId, { sellerId, salePrice, saleDate, checklist, payment, tradeIn, discount, bankIncome, insertOnly = false }) {
   requireSupabase()
   const row = {
     car_id: carId,
@@ -96,6 +116,8 @@ export async function saveSaleForCar(carId, { sellerId, salePrice, saleDate, che
     row.trade_in_car_id = tradeIn?.carId || null
     row.trade_in_value = tradeIn?.value ?? null
   }
+  // Retorno e plus do banco (seção 97; só admin e gerente, o banco confere)
+  if (bankIncome !== undefined) Object.assign(row, bankIncomeRow(bankIncome))
   const query = insertOnly ? supabase.from('sales').insert(row) : supabase.from('sales').upsert(row, { onConflict: 'car_id' })
   const { data, error } = await query.select().single()
   if (error) throw error

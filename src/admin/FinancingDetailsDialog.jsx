@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { X, FolderOpen, Pencil, Trash2, Receipt, Undo2, MessageCircle, BadgeCheck, CalendarClock, BellRing } from 'lucide-react'
-import { payInstallment, undoInstallmentPayment, updateInstallment, updateFinancing, deleteFinancing } from '../lib/financingApi.js'
+import { payInstallment, undoInstallmentPayment, updateInstallment, deleteFinancing } from '../lib/financingApi.js'
 import { formatCurrencyCents, formatDateBR, todayISO } from '../utils/carFormat.js'
 import {
   FINANCING_STATUS_LABELS,
@@ -12,7 +12,6 @@ import {
   isDueSoon,
   lateCharges,
   parseMoneyBR,
-  parsePercentBR,
   round2,
   summarizeFinancing,
 } from '../utils/financing.js'
@@ -163,62 +162,6 @@ function AdjustDialog({ financing, installment, onConfirm, onClose, saving }) {
   )
 }
 
-// Observações, taxas de atraso e cancelamento do financiamento
-function EditDialog({ financing, onConfirm, onClose, saving }) {
-  const [notes, setNotes] = useState(financing.notes)
-  const [status, setStatus] = useState(financing.status)
-  const [lateFee, setLateFee] = useState(String(financing.lateFeePercent).replace('.', ','))
-  const [lateInterest, setLateInterest] = useState(String(financing.lateInterestPercent).replace('.', ','))
-  const [error, setError] = useState('')
-
-  function handleSubmit(e) {
-    e.preventDefault()
-    const fee = parsePercentBR(lateFee) ?? 0
-    const interest = parsePercentBR(lateInterest) ?? 0
-    if (fee < 0 || fee > 100 || interest < 0 || interest > 100) return setError('Multa e juros devem ficar entre 0 e 100%.')
-    onConfirm({ notes, status, lateFeePercent: fee, lateInterestPercent: interest })
-  }
-
-  return (
-    <div className="confirm-dialog-overlay" onClick={saving ? undefined : onClose}>
-      <form className="confirm-dialog admin-form sale-dialog" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-        <button type="button" className="confirm-dialog-close" onClick={onClose} aria-label="Fechar" disabled={saving}>
-          <X size={18} />
-        </button>
-        <h2>Editar financiamento</h2>
-        <label>
-          Situação
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="ativo">Ativo</option>
-            <option value="cancelado">Cancelado (venda desfeita, carro devolvido etc.)</option>
-          </select>
-        </label>
-        <label>
-          Multa por atraso (%)
-          <input inputMode="decimal" value={lateFee} onChange={(e) => setLateFee(e.target.value)} />
-        </label>
-        <label>
-          Juros por atraso (% ao mês)
-          <input inputMode="decimal" value={lateInterest} onChange={(e) => setLateInterest(e.target.value)} />
-        </label>
-        <label>
-          Observações
-          <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </label>
-        {error && <p className="admin-error">{error}</p>}
-        <div className="confirm-dialog-actions">
-          <button type="submit" className="btn btn-primary btn-block" disabled={saving}>
-            {saving ? 'Salvando…' : 'Salvar'}
-          </button>
-          <button type="button" className="btn btn-outline btn-block" onClick={onClose} disabled={saving}>
-            Cancelar
-          </button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
 function whatsappMessage({ financing, installment, customer, companyName }) {
   const charges = lateCharges(installment, financing)
   const firstName = (customer?.name || financing.customerName).split(' ')[0]
@@ -277,12 +220,12 @@ function InstallmentSituation({ row }) {
 }
 
 // Detalhes de um financiamento: resumo, parcelas, baixa de pagamento, recibo,
-// cobrança pelo WhatsApp e ajustes. Excluir só o admin.
-export default function FinancingDetailsDialog({ financing, customer, companyName, isAdmin, onChanged, onDeleted, onClose }) {
+// cobrança pelo WhatsApp e ajustes. "Editar" abre o formulário completo (onEdit,
+// seção 97). Excluir só o admin.
+export default function FinancingDetailsDialog({ financing, customer, companyName, isAdmin, onChanged, onEdit, onDeleted, onClose }) {
   const { confirm, confirmDialog } = useConfirm()
   const [paying, setPaying] = useState(null)
   const [adjusting, setAdjusting] = useState(null)
-  const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const today = todayISO()
   const summary = summarizeFinancing(financing, today)
@@ -403,18 +346,6 @@ export default function FinancingDetailsDialog({ financing, customer, companyNam
     }
   }
 
-  async function handleEdit(values) {
-    setSaving(true)
-    try {
-      onChanged(await updateFinancing(financing.id, values))
-      setEditing(false)
-    } catch (err) {
-      alert('Não foi possível salvar: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
   async function handleDelete() {
     if (!(await confirm(`Excluir o financiamento de ${financing.customerName}, com todas as parcelas e pagamentos registrados? Essa ação não pode ser desfeita.`, { title: 'Excluir financiamento', confirmLabel: 'Excluir' }))) return
     try {
@@ -446,7 +377,7 @@ export default function FinancingDetailsDialog({ financing, customer, companyNam
                 <FolderOpen size={15} /> Ficha do cliente
               </Link>
             )}
-            <button type="button" className="btn btn-outline" onClick={() => setEditing(true)}>
+            <button type="button" className="btn btn-outline" onClick={onEdit}>
               <Pencil size={15} /> Editar
             </button>
             {isAdmin && (
@@ -554,7 +485,6 @@ export default function FinancingDetailsDialog({ financing, customer, companyNam
 
       {paying && <PaymentDialog financing={financing} installment={paying} onConfirm={handlePay} onClose={() => setPaying(null)} saving={saving} />}
       {adjusting && <AdjustDialog financing={financing} installment={adjusting} onConfirm={handleAdjust} onClose={() => setAdjusting(null)} saving={saving} />}
-      {editing && <EditDialog financing={financing} onConfirm={handleEdit} onClose={() => setEditing(false)} saving={saving} />}
       {confirmDialog}
     </>
   )

@@ -9,6 +9,7 @@ import { expenseCategoryLabel, formatCurrency, carStatusLabel, daysInStock, isSt
 import { fetchStockAlertDefault, DEFAULT_STOCK_ALERT_DAYS } from '../lib/companyApi.js'
 import { downloadCsv } from '../utils/exportCsv.js'
 import { fetchCompanyExpenses, generateCompanyExpenses } from '../lib/companyExpensesApi.js'
+import { fetchExternalFinancings } from '../lib/externalFinancingApi.js'
 import { withoutPrivate, privateNote } from '../utils/privateValues.js'
 import { periodRange, inRange } from '../utils/period.js'
 import PeriodFilter from './PeriodFilter.jsx'
@@ -24,6 +25,8 @@ export default function AdminFinance() {
   const [suppliers, setSuppliers] = useState([])
   const [sales, setSales] = useState([])
   const [companyExpenses, setCompanyExpenses] = useState([])
+  // Financiamentos externos: retorno, plus e comissão no lucro do mês (seção 97)
+  const [externalFinancings, setExternalFinancings] = useState([])
   const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -38,13 +41,14 @@ export default function AdminFinance() {
     setLoading(true)
     setError('')
     try {
-      const [carsData, expensesData, suppliersData, salesData, companyExpensesData] = await Promise.all([
+      const [carsData, expensesData, suppliersData, salesData, companyExpensesData, externalData] = await Promise.all([
         fetchAllCarsAdmin(),
         fetchAllExpensesAdmin(),
         fetchAllSuppliers(),
         fetchSales(),
         // Despesas da empresa (aluguel, contas...) para o lucro do mês
         generateCompanyExpenses().catch(() => {}).then(fetchCompanyExpenses).catch(() => []),
+        fetchExternalFinancings().catch(() => []),
       ])
       fetchStockAlertDefault().then(setAlertDefault)
       setCars(carsData)
@@ -52,6 +56,7 @@ export default function AdminFinance() {
       setSuppliers(suppliersData)
       setSales(salesData)
       setCompanyExpenses(companyExpensesData)
+      setExternalFinancings(externalData)
     } catch (err) {
       setError(err.message || 'Erro ao carregar o painel.')
     } finally {
@@ -227,7 +232,7 @@ export default function AdminFinance() {
         </p>
       )}
 
-      <StoreResultCard data={{ cars, sales, carExpenses: expenses, companyExpenses }} />
+      <StoreResultCard data={{ cars, sales, carExpenses: expenses, companyExpenses, externalFinancings }} />
 
       <div className="admin-page-head">
         <h2 className="admin-section-title">Gasto em manutenção</h2>

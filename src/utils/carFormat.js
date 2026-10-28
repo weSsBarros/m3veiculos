@@ -71,9 +71,23 @@ export function expenseCategoryLabel(slug) {
   return EXPENSE_CATEGORIES.find((c) => c.slug === slug)?.label || slug
 }
 
+// A lista também está na regra do banco (suppliers_category_check, seção 97):
+// categoria nova entra nos dois (o teste confere)
 export const SUPPLIER_CATEGORIES = [
   { slug: 'servico', label: 'Prestação de serviço' },
   { slug: 'pecas', label: 'Compra de peças' },
+  { slug: 'oficina', label: 'Oficina mecânica' },
+  { slug: 'eletrica', label: 'Auto elétrica' },
+  { slug: 'funilaria', label: 'Funilaria e pintura' },
+  { slug: 'lava_jato', label: 'Lava jato' },
+  { slug: 'estetica', label: 'Higienização e estética' },
+  { slug: 'pneus', label: 'Borracharia e pneus' },
+  { slug: 'vidros', label: 'Vidros e película' },
+  { slug: 'som', label: 'Som e acessórios' },
+  { slug: 'ar_condicionado', label: 'Ar-condicionado' },
+  { slug: 'guincho', label: 'Guincho e reboque' },
+  { slug: 'despachante', label: 'Despachante' },
+  { slug: 'vistoria', label: 'Vistoria' },
   { slug: 'outros', label: 'Outros' },
 ]
 

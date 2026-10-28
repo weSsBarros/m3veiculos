@@ -9,6 +9,8 @@ import CustomerDocuments from './CustomerDocuments.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import BankSelect from './BankSelect.jsx'
 import { MoneyInput } from '../components/NumberInputs.jsx'
+import { bankIncomeForm, bankIncomeFromForm, resolveBankAmount } from '../utils/bankIncome.js'
+import BankIncomeFields from './BankIncomeFields.jsx'
 import '../components/ConfirmDialog.css'
 
 function money(value) {
@@ -17,7 +19,7 @@ function money(value) {
 
 // Cadastro e edição de financiamento externo. Admin e gerente preenchem
 // tudo; o vendedor cadastra no nome dele e não marca como pago nem informa o
-// retorno da loja (regra também no banco).
+// retorno e o plus do banco (seção 97; regra também no banco).
 export default function ExternalFinancingDialog({
   initial,
   customers,
@@ -48,10 +50,12 @@ export default function ExternalFinancingDialog({
     sellerId: lockedSeller?.id || initial?.sellerId || '',
     status: initial?.status || 'em_analise',
     submittedOn: initial?.submittedOn || todayISO(),
-    storeReturn: money(initial?.storeReturn),
     notes: initial?.notes || '',
   }))
   const [error, setError] = useState('')
+  // Retorno e plus do banco (seção 97): em R$ ou em % do financiado
+  const [bankIncome, setBankIncome] = useState(() => bankIncomeForm(initial))
+  const canSetBankIncome = isStaff && showValues
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -62,9 +66,11 @@ export default function ExternalFinancingDialog({
   // Regra da época (financiamento já gravado) ou a atual do vendedor
   const commissionType = initial && initial.sellerId === form.sellerId ? initial.commissionType : seller?.extCommissionType
   const commissionValue = initial && initial.sellerId === form.sellerId ? initial.commissionValue : seller?.extCommissionValue
-  const commissionPreview = seller
-    ? computeExternalCommission(commissionType, commissionValue, parseMoneyBR(form.financedAmount), parseMoneyBR(form.storeReturn))
-    : null
+  const financedValue = parseMoneyBR(form.financedAmount) || 0
+  const returnNow = canSetBankIncome
+    ? resolveBankAmount(bankIncome.returnMode, bankIncome.returnInput, financedValue).amount
+    : initial?.storeReturn ?? null
+  const commissionPreview = seller ? computeExternalCommission(commissionType, commissionValue, financedValue, returnNow) : null
 
   function handleSubmit(e) {
     e.preventDefault()
@@ -75,6 +81,20 @@ export default function ExternalFinancingDialog({
     if (!financed || financed <= 0) return setError('Informe o valor financiado.')
     const count = form.installmentsCount ? Number.parseInt(form.installmentsCount, 10) : null
     if (count !== null && (!Number.isFinite(count) || count < 1 || count > 240)) return setError('Número de parcelas inválido (de 1 a 240).')
+    // Quem não informa o retorno e o plus manda o que já estava gravado
+    let income = {
+      storeReturn: initial?.storeReturn ?? null,
+      returnPercent: initial?.returnPercent ?? null,
+      rateTable: initial?.rateTable || '',
+      storePlus: initial?.storePlus ?? null,
+      plusPercent: initial?.plusPercent ?? null,
+      plusReceivedOn: initial?.plusReceivedOn || null,
+    }
+    if (canSetBankIncome) {
+      const resolved = bankIncomeFromForm(bankIncome, financed)
+      if (resolved.error) return setError(resolved.error)
+      income = resolved.value
+    }
     onConfirm({
       customerId: customer.id,
       customerName: customer.name,
@@ -95,8 +115,7 @@ export default function ExternalFinancingDialog({
       approvedOn: initial?.approvedOn || null,
       paidOn: initial?.paidOn || null,
       closedOn: initial?.closedOn || null,
-      // O vendedor não altera o retorno da loja: manda o que já estava gravado
-      storeReturn: isStaff ? parseMoneyBR(form.storeReturn) : initial?.storeReturn ?? null,
+      ...income,
       notes: form.notes.trim(),
     })
   }
@@ -190,13 +209,13 @@ export default function ExternalFinancingDialog({
               ))}
             </select>
           </label>
-          {isStaff && showValues && (
-            <label>
-              Retorno da loja
-              <MoneyInput cents value={form.storeReturn} onChange={(v) => update('storeReturn', v)} placeholder="Quanto o banco paga à loja" />
-            </label>
-          )}
         </div>
+
+        {canSetBankIncome && (
+          <div className="sale-dialog-section">
+            <BankIncomeFields value={bankIncome} onChange={setBankIncome} financed={financedValue} disabled={saving} />
+          </div>
+        )}
 
         {seller && showValues && (
           <div className="sale-dialog-commission">

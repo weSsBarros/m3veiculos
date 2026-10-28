@@ -3,8 +3,9 @@ import { describePayment } from '../utils/payment.js'
 import { Link } from 'react-router-dom'
 import { X, Handshake, FolderOpen, FileDown } from 'lucide-react'
 import { updateSaleTransfer, updateSaleChecklist } from '../lib/salesApi.js'
-import { formatCurrency, formatDateBR, todayISO } from '../utils/carFormat.js'
+import { formatCurrency, formatCurrencyCents, formatDateBR, todayISO } from '../utils/carFormat.js'
 import { buildChecklist } from '../utils/saleChecklist.js'
+import { documentLabel } from '../utils/customerDocument.js'
 import { discountPercent, percentText, priceBeforeDiscount } from '../utils/saleDiscount.js'
 import { TRANSFER_STATUSES, TRANSFER_RESPONSIBLES, TRANSFER_DEFAULT_DAYS, transferDueDate } from '../utils/transfer.js'
 import { downloadDeliveryTerm } from '../utils/deliveryTerm.js'
@@ -181,6 +182,22 @@ export default function SaleDetailsDialog({
               <strong>{describePayment(sale)}</strong>
             </div>
           )}
+          {/* Retorno e plus do banco (seção 97): o que o banco paga à loja */}
+          {canSeeSaleValues && (sale?.storeReturn > 0 || sale?.storePlus > 0) && (
+            <div>
+              <span>Retorno e plus do banco</span>
+              <strong>
+                {[
+                  sale.storeReturn > 0 &&
+                    `Retorno ${formatCurrencyCents(sale.storeReturn)}${sale.returnPercent != null ? ` (${String(sale.returnPercent).replace('.', ',')}%)` : ''}${sale.rateTable ? ` · tabela ${sale.rateTable}` : ''}`,
+                  sale.storePlus > 0 &&
+                    `Plus ${formatCurrencyCents(sale.storePlus)} ${sale.plusReceivedOn ? `recebido em ${formatDateBR(sale.plusReceivedOn)}` : 'a receber'}`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </strong>
+            </div>
+          )}
           {sale?.tradeInCarId && (
             <div>
               <span>Carro na troca</span>
@@ -216,7 +233,7 @@ export default function SaleDetailsDialog({
                 <strong>{customer.name}</strong>
               </div>
               <div>
-                <span>CPF</span>
+                <span>{customer.document ? documentLabel(customer.document) : 'CPF/CNPJ'}</span>
                 <strong>{customer.document || '—'}</strong>
               </div>
               <div>

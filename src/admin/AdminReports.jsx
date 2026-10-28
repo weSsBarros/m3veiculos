@@ -136,21 +136,23 @@ export default function AdminReports() {
     {
       id: 'resultado',
       title: 'Resultado (lucro líquido)',
-      description: 'Vendas do período menos o custo dos carros vendidos, as comissões pagas no período e as despesas da empresa (aluguel, contas, salários).',
+      description: 'Vendas do período menos o custo dos carros vendidos, mais o retorno e o plus dos bancos, menos as comissões pagas no período e as despesas da empresa (aluguel, contas, salários).',
       usesPeriod: true,
       show: isAdmin,
       build: async () => {
-        const [sales, cars, carExpenses, companyExpenses, sellers] = await Promise.all([
+        const [sales, cars, carExpenses, companyExpenses, sellers, externalFinancings] = await Promise.all([
           fetchSales(),
           fetchAllCarsAdmin(),
           fetchAllExpensesAdmin(),
           generateCompanyExpenses().catch(() => {}).then(fetchCompanyExpenses),
           fetchSellers().catch(() => []),
+          fetchExternalFinancings().catch(() => []),
         ])
         return buildResultReport({
           soldEntries: soldEntriesFrom(cars, sales),
           carExpenses,
           companyExpenses,
+          externalFinancings,
           sellers,
           range,
           categoryLabel: companyExpenseCategoryLabel,

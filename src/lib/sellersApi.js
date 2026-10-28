@@ -164,6 +164,33 @@ export async function resetSellerPassword(sellerId, password) {
   await invokeManageSellers({ action: 'reset_password', sellerId, password })
 }
 
+// Troca o e-mail do login (vale na hora); devolve o e-mail gravado
+export async function updateSellerEmail(sellerId, email) {
+  requireSupabase()
+  const data = await invokeManageSellers({ action: 'update_email', sellerId, email: email.trim().toLowerCase() })
+  return data.email
+}
+
+// Senha guardada do login (seção 96): { password, origin, savedAt, savedByEmail,
+// stillValid } ou null. A função registra no histórico que o admin viu.
+export async function viewSellerPassword(sellerId) {
+  requireSupabase()
+  const data = await invokeManageSellers({ action: 'view_password', sellerId })
+  return data.saved || null
+}
+
+// Minha conta: a própria pessoa troca o e-mail e/ou a senha, com a senha atual
+export async function updateMyAccount({ currentPassword, email, password }) {
+  requireSupabase()
+  const data = await invokeManageSellers({
+    action: 'my_account',
+    currentPassword,
+    email: (email || '').trim().toLowerCase(),
+    password: password || '',
+  })
+  return { email: data.email }
+}
+
 // Apaga o login e tira da equipe; devolve o cadastro já marcado como excluído
 export async function deleteSeller(sellerId) {
   requireSupabase()

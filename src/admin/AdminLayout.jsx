@@ -320,7 +320,7 @@ export default function AdminLayout() {
       )}
 
       <main className="admin-main">
-        <PanelTopBar name={whoName} role={whoRole} email={user?.email} theme={theme} onToggleTheme={toggleTheme}>
+        <PanelTopBar name={whoName} role={whoRole} email={user?.email} theme={theme} onToggleTheme={toggleTheme} passwordNote={!isPlatformAdmin}>
           <ViewAsBar part="toggle" />
         </PanelTopBar>
         <ViewAsBar part="banner" />

@@ -62,13 +62,17 @@ test('lucro líquido: sem vendas e sem despesas fica zero; intervalo do mês', (
 test('relatório do resultado: resumo com os sinais, vendidos, comissões pagas e despesas', () => {
   const sellers = [{ id: 's1', name: 'Ana Lima' }]
   const report = buildResultReport({ soldEntries, carExpenses, companyExpenses, sellers, range, categoryLabel: (c) => c.toUpperCase() })
-  const [summary, sold, commissions, bills] = report.sections
+  const [summary, sold, bank, commissions, bills] = report.sections
   assert.equal(report.subtitle, 'Período: 01/10/2026 a 31/10/2026')
   assert.equal(summary.rows.at(-1).item, 'Lucro líquido')
   assert.equal(summary.rows.at(-1).value, 25210.1)
   assert.equal(summary.rows[1].value, -182000)
-  assert.equal(summary.rows[3].item, 'Comissões pagas no período (2 comissões)')
-  assert.equal(summary.rows[3].value, -2000)
+  // Sem financiamento bancário com retorno ou plus (seção 97): a linha fica zerada
+  assert.equal(summary.rows[3].item, 'Retorno e plus dos bancos')
+  assert.equal(summary.rows[3].value, 0)
+  assert.equal(bank.rows.length, 0)
+  assert.equal(summary.rows[4].item, 'Comissões pagas no período (2 comissões)')
+  assert.equal(summary.rows[4].value, -2000)
   assert.equal(sold.rows.length, 3)
   assert.equal(sold.rows[0].plate, 'ABC1D23')
   assert.equal(sold.columns.some((c) => c.key === 'commission'), false)

@@ -16,6 +16,8 @@ import useConfirm from '../components/useConfirm.jsx'
 import { MoneyInput } from '../components/NumberInputs.jsx'
 import { parseAnoModelo } from '../utils/anoModelo.js'
 import { salePayment } from '../utils/salePayments.js'
+import { bankIncomeForm, bankIncomeFromForm, saleBankFinanced } from '../utils/bankIncome.js'
+import BankIncomeFields from './BankIncomeFields.jsx'
 import '../components/ConfirmDialog.css'
 
 const thousands = (value) => String(value ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
@@ -67,6 +69,9 @@ export default function SaleDialog({
     return todayISO()
   })
   const [checklist, setChecklist] = useState(() => deliveryChecklistFromIntake(checklistItems, car.intakeItems, initialSale?.checklist || []))
+  // Retorno e plus do banco (seção 97): na parte "Financiamento bancário", só para quem
+  // vê os valores da venda (o vendedor não informa; o banco também confere)
+  const [bankIncome, setBankIncome] = useState(() => bankIncomeForm(initialSale))
   const [generateTerm, setGenerateTerm] = useState(false)
   const [error, setError] = useState('')
   // Faixas de comissão: prévia de quem recebe "Pela faixa do carro" (seção 78) ou
@@ -81,6 +86,10 @@ export default function SaleDialog({
   }, [showCommission])
 
   const seller = activeSellers.find((s) => s.id === sellerId)
+  const paymentNow = salePayment(payment)
+  const hasBankFinancing = paymentNow.parts.some((p) => p.method === 'financiamento')
+  const bankFinanced = saleBankFinanced({ payments: paymentNow.parts })
+  const canSetBankIncome = showCommission && !lockedSeller
   const listValue = parseIntBR(price)
   const discountValue = discountOpen ? parseIntBR(discount) || 0 : 0
   // Valor final (com o desconto): comissão, pagamentos e o que fica gravado
@@ -142,6 +151,20 @@ export default function SaleDialog({
       )
       if (!ok) return
     }
+    // Sem parte financiada no banco, o retorno e o plus saem da venda
+    let bankIncomeData
+    if (canSetBankIncome) {
+      if (hasBankFinancing) {
+        const resolved = bankIncomeFromForm(bankIncome, bankFinanced)
+        if (resolved.error) {
+          setError(resolved.error)
+          return
+        }
+        bankIncomeData = resolved.value
+      } else {
+        bankIncomeData = { storeReturn: null, returnPercent: null, rateTable: '', storePlus: null, plusPercent: null, plusReceivedOn: null }
+      }
+    }
     onConfirm({
       sellerId: sellerId || null,
       customerId: customerId || null,
@@ -150,8 +173,9 @@ export default function SaleDialog({
       saleDate: date,
       checklist,
       generateTerm,
-      payment: salePayment(payment),
+      payment: paymentNow,
       tradeIn: tradeInData,
+      ...(bankIncomeData !== undefined ? { bankIncome: bankIncomeData } : {}),
     })
   }
 
@@ -273,6 +297,12 @@ export default function SaleDialog({
               }}
             />
           </div>
+
+          {canSetBankIncome && hasBankFinancing && (
+            <div className="sale-dialog-section">
+              <BankIncomeFields value={bankIncome} onChange={setBankIncome} financed={bankFinanced} disabled={saving} />
+            </div>
+          )}
 
           {/* Troca: na venda nova e também ao editar uma venda sem troca (o lojista
               esqueceu de lançar o carro que entrou como parte do pagamento) */}

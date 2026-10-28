@@ -11,6 +11,7 @@ import GeneratedContractsList from './GeneratedContractsList.jsx'
 import CustomerInterests from './CustomerInterests.jsx'
 import CustomerContacts from './CustomerContacts.jsx'
 import { paymentIntentLabel } from '../utils/customerInterests.js'
+import { documentLabel } from '../utils/customerDocument.js'
 import '../components/ConfirmDialog.css'
 
 function carLabel(car) {
@@ -96,7 +97,7 @@ export default function CustomerFileDialog({
         <div>
           <h2>{customer.name}</h2>
           <p className="admin-table-sub">
-            {[customer.document && `CPF ${customer.document}`, customer.phone, customer.email].filter(Boolean).join(' · ') || 'Sem documento ou contato cadastrado'}
+            {[customer.document && `${documentLabel(customer.document)} ${customer.document}`, customer.phone, customer.email].filter(Boolean).join(' · ') || 'Sem documento ou contato cadastrado'}
           </p>
           {customer.address && <p className="admin-table-sub">{customer.address}</p>}
         </div>
