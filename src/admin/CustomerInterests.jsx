@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, Trash2, Pause, Play, Sparkles, MessageCircle, X, AlertTriangle } from 'lucide-react'
 import { fetchInterests, createInterest, updateInterest, deleteInterest, fetchMatches, setMatchStatus, MATCH_STATUS_LABELS } from '../lib/customerCrmApi.js'
-import { CATEGORIES, CAR_STATUSES, formatCurrency, formatDateBR, parseIntBR } from '../utils/carFormat.js'
+import { CAR_CATEGORIES, CAR_STATUSES, formatCurrency, formatDateBR, parseIntBR } from '../utils/carFormat.js'
 import { describeInterest, matchingStockCars, likedCarGone, hasCriteria, EMPTY_SEARCH } from '../utils/customerInterests.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import useConfirm from '../components/useConfirm.jsx'
 import InterestSearchFields from './InterestSearchFields.jsx'
 
-const categoryLabel = (slug) => CATEGORIES.find((c) => c.slug === slug)?.label || slug
+const categoryLabel = (slug) => CAR_CATEGORIES.find((c) => c.slug === slug)?.label || slug
 const statusLabel = (value) => CAR_STATUSES.find((s) => s.value === value)?.label || value
 const carName = (car) => (car ? `${car.brand} ${car.model} ${car.version} · ${car.modelYear}` : 'Carro removido')
 

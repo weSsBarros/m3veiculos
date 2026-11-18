@@ -1,4 +1,5 @@
 import { supabase, COMPANY_ID } from './supabaseClient.js'
+import { portalsSyncSoon } from './carsApi.js'
 import { scopeCustomerFinance } from './viewScope.js'
 import { todayISO } from '../utils/carFormat.js'
 
@@ -53,11 +54,12 @@ function requireSupabase() {
   if (!supabase) throw new Error('Supabase não configurado.')
 }
 
-// customerId opcional: só os financiamentos daquele cliente
-export async function fetchFinancings({ customerId } = {}) {
+// customerId / carId opcionais: só os financiamentos daquele cliente ou daquele carro
+export async function fetchFinancings({ customerId, carId } = {}) {
   requireSupabase()
   let query = supabase.from('customer_financings').select('*, financing_installments(*)').eq('company_id', COMPANY_ID)
   if (customerId) query = query.eq('customer_id', customerId)
+  if (carId) query = query.eq('car_id', carId)
   const { data, error } = await query.order('created_at', { ascending: false })
   if (error) throw error
   return scopeCustomerFinance(data.map(fromRow))
@@ -100,6 +102,31 @@ export async function createFinancing(financing) {
   requireSupabase()
   const { data: id, error } = await supabase.rpc('create_customer_financing', { p: financingPayload(financing) })
   if (error) throw error
+  return fetchFinancing(id)
+}
+
+// Venda parcelada de um carro que ainda está no estoque (seção 99): registra a venda
+// (entrada + financiamento da loja), marca o carro como vendido para o cliente (a
+// reserva ativa vira venda) e gera as parcelas, tudo numa operação só no banco.
+// sale: { carId, sellerId, saleDate, salePrice, payment } (payment: utils/storeFinancing.js)
+export async function sellCarWithFinancing(sale, financing) {
+  requireSupabase()
+  const { data: id, error } = await supabase.rpc('sell_car_with_store_financing', {
+    p_sale: {
+      car_id: sale.carId,
+      seller_id: sale.sellerId || null,
+      sale_date: sale.saleDate,
+      sale_price: Math.round(Number(sale.salePrice) || 0),
+      payments: sale.payment.parts,
+      payment_method: sale.payment.method || '',
+      bank: sale.payment.bank || '',
+      down_payment: sale.payment.downPayment ?? null,
+      financed_amount: sale.payment.financedAmount ?? null,
+    },
+    p_financing: financingPayload(financing),
+  })
+  if (error) throw error
+  portalsSyncSoon()
   return fetchFinancing(id)
 }
 

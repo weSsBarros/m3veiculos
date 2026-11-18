@@ -34,6 +34,8 @@ function fromRow(row) {
     templateFilePath: row.template_file_path || null,
     // Texto do contrato padrão editado antes de emitir (seção 79): lista de parágrafos
     customText: Array.isArray(row.custom_text) ? row.custom_text : null,
+    // Financiamento da loja no contrato (seção 99): retrato das condições e das parcelas
+    financing: row.financing && typeof row.financing === 'object' ? row.financing : null,
     createdBy: row.created_by || null,
     createdAt: row.created_at,
   }
@@ -66,6 +68,7 @@ function toRow(contract) {
     template_id: contract.templateId || null,
     template_file_path: contract.templateFilePath || null,
     custom_text: Array.isArray(contract.customText) && contract.customText.length ? contract.customText : null,
+    financing: contract.financing || null,
   }
 }
 

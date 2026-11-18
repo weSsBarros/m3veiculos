@@ -409,7 +409,7 @@ export async function updateCarHidden(id, hidden) {
 }
 
 // Depois de mudar um carro: concilia com a OLX e a Webmotors (cada uma só com a conta conectada)
-function portalsSyncSoon() {
+export function portalsSyncSoon() {
   olxSyncSoon()
   webmotorsSyncSoon()
 }

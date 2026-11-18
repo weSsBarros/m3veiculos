@@ -1,4 +1,5 @@
 import { formatCurrency } from './carFormat.js'
+import { financingClauseText } from './financingContract.js'
 
 // Minuta padrão de contrato particular de compra e venda de veículo usado.
 // Aviso: é um modelo genérico de referência, não substitui análise jurídica —
@@ -137,11 +138,15 @@ function buildContractParagraphsV2({ company, buyer, vehicle, sale }) {
 
   clause('DO OBJETO', `O presente contrato tem por objeto a compra e venda do veículo abaixo descrito, com a quilometragem conferida pelo COMPRADOR na entrega: ${vehicleText(vehicle)}.`)
 
+  // Venda parcelada pela loja (17/11/2026): as parcelas do Financeiro dos clientes
+  // entram aqui, com a tabela; sem elas, a entrega espera o pagamento integral
   clause(
     'DO PREÇO E DA FORMA DE PAGAMENTO',
     `O veículo é vendido pelo valor de ${formatCurrency(sale.price)}, pago da seguinte forma: ${sale.paymentMethod || 'a combinar entre as partes'}.` +
       `${sale.paymentDetails ? ` ${sale.paymentDetails}` : ''}` +
-      ' A entrega do veículo e dos documentos de transferência fica condicionada à compensação integral dos valores.'
+      (sale.financing
+        ? financingClauseText(sale.financing)
+        : ' A entrega do veículo e dos documentos de transferência fica condicionada à compensação integral dos valores.')
   )
 
   clause(

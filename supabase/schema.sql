@@ -11154,6 +11154,89 @@ begin
 end;
 $$;
 
+-- 99) Venda parcelada pela loja (pedido de 17/11/2026) ---------------------------
+-- A loja vende parcelado direto (carnê) e quer fazer tudo pelo Financeiro dos clientes:
+-- * Novo financiamento com um carro que ainda está no estoque: a venda é registrada
+--   (entrada + financiamento próprio), o carro fica vendido para o cliente, a reserva
+--   ativa dele vira venda e as parcelas são geradas, tudo numa operação só (se uma parte
+--   falhar, nada fica gravado). Quem pode: quem cuida do financeiro dos clientes (admin e
+--   gerente com "Vê valores das vendas"), como na criação do financiamento. Roda como
+--   dona das tabelas (o gerente muda o status do carro pela staff_cars); as permissões
+--   são conferidas aqui, e os gatilhos da venda (comissão, desconto, nota, retorno do
+--   banco, lojas) e do carro valem normalmente.
+-- * A venda registrada na tela de vendas com "Financiamento próprio da loja" gera as
+--   parcelas pelo create_customer_financing de sempre (o painel chama logo depois de
+--   salvar a venda).
+-- * contracts.financing: retrato das condições e das parcelas usadas no contrato do
+--   financiamento (o "Baixar" do histórico sai igual, mesmo depois de pagar ou mudar).
+create or replace function public.sell_car_with_store_financing(p_sale jsonb, p_financing jsonb)
+returns uuid
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_car public.cars;
+  v_customer uuid := nullif(p_financing->>'customer_id', '')::uuid;
+  v_seller uuid := nullif(p_sale->>'seller_id', '')::uuid;
+  v_date date := coalesce(nullif(p_sale->>'sale_date', '')::date, (now() at time zone 'America/Fortaleza')::date);
+  v_price integer := round(coalesce(nullif(p_sale->>'sale_price', '')::numeric, 0));
+  v_payments jsonb := coalesce(p_sale->'payments', '[]'::jsonb);
+begin
+  if v_company is null or not public.can_manage_customer_finance() then
+    raise exception 'Sem permissão' using errcode = '42501';
+  end if;
+  select * into v_car from public.cars
+  where id = nullif(p_sale->>'car_id', '')::uuid and company_id = v_company
+  for update;
+  if not found then
+    raise exception 'Carro não encontrado nesta loja' using errcode = 'P0002';
+  end if;
+  if v_car.status = 'vendido' or exists (select 1 from public.sales where car_id = v_car.id) then
+    raise exception 'Este carro já está vendido: escolha-o entre os vendidos para criar o financiamento' using errcode = '23505';
+  end if;
+  if v_customer is null or not exists (select 1 from public.customers where id = v_customer and company_id = v_company) then
+    raise exception 'Escolha o cliente do financiamento' using errcode = '22023';
+  end if;
+  if v_seller is not null and not exists (select 1 from public.sellers where id = v_seller and company_id = v_company) then
+    raise exception 'Vendedor não encontrado nesta loja' using errcode = '23503';
+  end if;
+  if v_price <= 0 then
+    raise exception 'Informe o valor do veículo' using errcode = '22023';
+  end if;
+  if jsonb_typeof(v_payments) <> 'array' then
+    raise exception 'Pagamento inválido' using errcode = '22023';
+  end if;
+
+  insert into public.sales (company_id, car_id, seller_id, sale_price, sale_date, payments, payment_method, bank, down_payment, financed_amount)
+  values (
+    v_company, v_car.id, v_seller, v_price, v_date, v_payments,
+    coalesce(p_sale->>'payment_method', ''),
+    coalesce(p_sale->>'bank', ''),
+    nullif(p_sale->>'down_payment', '')::numeric,
+    nullif(p_sale->>'financed_amount', '')::numeric
+  );
+
+  update public.cars
+  set status = 'vendido', sold_at = (v_date + time '12:00') at time zone 'America/Fortaleza', customer_id = v_customer
+  where id = v_car.id;
+
+  update public.car_reservations
+  set status = 'convertida', closed_on = (now() at time zone 'America/Fortaleza')::date
+  where car_id = v_car.id and company_id = v_company and status = 'ativa';
+
+  return public.create_customer_financing(
+    p_financing || jsonb_build_object('car_id', v_car.id, 'customer_id', v_customer)
+  );
+end;
+$$;
+revoke execute on function public.sell_car_with_store_financing(jsonb, jsonb) from anon, public;
+grant execute on function public.sell_car_with_store_financing(jsonb, jsonb) to authenticated;
+
+alter table public.contracts add column if not exists financing jsonb;
+alter table public.contracts drop constraint if exists contracts_financing_check;
+alter table public.contracts add constraint contracts_financing_check
+  check (financing is null or (jsonb_typeof(financing) = 'object' and pg_column_size(financing) <= 65536));
+
 -- 98) Conferência (fica por último para aparecer no SQL Editor) -------------
 -- Logins ligados a mais de uma loja. Normalmente cada login é de UMA loja: se
 -- aparecer alguém aqui, confira os acessos. Um vínculo "(admin)" com a Dom

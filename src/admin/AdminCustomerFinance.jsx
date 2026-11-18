@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { RefreshCcw, Search, PlusCircle, Percent, Eye, FileText, FileSpreadsheet } from 'lucide-react'
+import { RefreshCcw, Search, PlusCircle, Percent, Eye, FileText, FileSpreadsheet, AlertTriangle } from 'lucide-react'
 import { fetchFinancings } from '../lib/financingApi.js'
+import { fetchSellers } from '../lib/sellersApi.js'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchAllCarsAdmin } from '../lib/carsApi.js'
 import { fetchSales } from '../lib/salesApi.js'
 import { fetchCompanySettings } from '../lib/companyApi.js'
 import { formatCurrencyCents, formatDateBR, normalizePlate, todayISO } from '../utils/carFormat.js'
 import { FINANCING_STATUS_LABELS, summarizeFinancing, financingInPeriod } from '../utils/financing.js'
+import { salesMissingFinancing, storeFinancingPart } from '../utils/storeFinancing.js'
 import { DUE_PERIODS, duePeriodRange } from '../utils/period.js'
 import { buildInstallmentsReport } from '../utils/reports/build.js'
 import { exportReportPdf, exportReportExcel } from '../utils/reports/export.js'
@@ -38,12 +40,16 @@ export default function AdminCustomerFinance() {
   const [customers, setCustomers] = useState([])
   const [cars, setCars] = useState([])
   const [sales, setSales] = useState([])
+  const [sellers, setSellers] = useState([])
   const [settings, setSettings] = useState({ name: '', lateFeePercent: 2, lateInterestPercent: 1 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState(() => (FILTERS.some((f) => f.value === searchParams.get('filtro')) ? searchParams.get('filtro') : 'todos'))
   const [formOpen, setFormOpen] = useState(false)
+  // Carro já escolhido no Novo financiamento ("Gerar parcelas" de uma venda sem parcelas)
+  const [formCarId, setFormCarId] = useState('')
+  const [pendingOpen, setPendingOpen] = useState(false)
   // Financiamento aberto no formulário de edição (seção 97)
   const [editingFinancing, setEditingFinancing] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -69,6 +75,8 @@ export default function AdminCustomerFinance() {
       setCars(carsData)
       setSales(salesData)
       setSettings(settingsData)
+      // Vendedor da venda registrada pelo Novo financiamento (seção 99)
+      fetchSellers().then(setSellers).catch(() => setSellers([]))
     } catch (err) {
       setError(err.message || 'Erro ao carregar o financeiro dos clientes.')
     } finally {
@@ -88,6 +96,24 @@ export default function AdminCustomerFinance() {
     () => cars.filter((c) => c.status === 'vendido').sort((a, b) => (b.soldAt || '').localeCompare(a.soldAt || '')),
     [cars]
   )
+  // Carros ainda no estoque: o Novo financiamento registra a venda junto (seção 99)
+  const stockCars = useMemo(
+    () => cars.filter((c) => c.status !== 'vendido').sort((a, b) => `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`)),
+    [cars]
+  )
+  // Vendas com "Financiamento próprio da loja" cujo carro ainda não tem financiamento aqui
+  const pendingSales = useMemo(() => salesMissingFinancing(sales, soldCars, financings), [sales, soldCars, financings])
+
+  function openNewFinancing(carId = '') {
+    setFormCarId(carId)
+    setFormOpen(true)
+  }
+
+  // Depois da venda registrada pelo Novo financiamento: carro vendido e venda nova
+  function refreshCarsAndSales() {
+    fetchAllCarsAdmin().then(setCars).catch(() => {})
+    fetchSales().then(setSales).catch(() => {})
+  }
 
   const range = useMemo(() => duePeriodRange(period, customStart, customEnd, today), [period, customStart, customEnd, today])
   const hasPeriod = period !== 'tudo'
@@ -210,7 +236,7 @@ export default function AdminCustomerFinance() {
           <p>Clientes que financiaram direto com a loja: parcelas, pagamentos, atrasos e saldo devedor</p>
         </div>
         <div className="admin-row-actions">
-          <button type="button" className="btn btn-primary" onClick={() => setFormOpen(true)}>
+          <button type="button" className="btn btn-primary" onClick={() => openNewFinancing()}>
             <PlusCircle size={15} /> Novo financiamento
           </button>
           <button type="button" className="btn btn-outline" onClick={() => setSettingsOpen(true)}>
@@ -223,6 +249,43 @@ export default function AdminCustomerFinance() {
       </div>
 
       {error && <p className="admin-error">{error}</p>}
+
+      {pendingSales.length > 0 && (
+        <div className="financing-pending" role="status">
+          <div className="financing-pending-head">
+            <span>
+              <AlertTriangle size={15} style={{ verticalAlign: -2, marginRight: 6 }} aria-hidden="true" />
+              {pendingSales.length === 1
+                ? '1 venda com financiamento da loja ainda não tem as parcelas aqui.'
+                : `${pendingSales.length} vendas com financiamento da loja ainda não têm as parcelas aqui.`}
+            </span>
+            <button type="button" className="admin-link-btn" onClick={() => setPendingOpen((v) => !v)} aria-expanded={pendingOpen}>
+              {pendingOpen ? 'Esconder' : 'Ver e gerar as parcelas'}
+            </button>
+          </div>
+          {pendingOpen && (
+            <ul className="financing-pending-list">
+              {pendingSales.map(({ sale, car }) => {
+                const part = storeFinancingPart(sale.payments)
+                const customer = car.customerId ? customersById.get(car.customerId) : null
+                return (
+                  <li key={sale.id}>
+                    <span>
+                      <strong>{car.brand} {car.model}</strong>
+                      {car.plate ? ` · ${car.plate.toUpperCase()}` : ''} · {customer?.name || 'sem cliente'} · vendido em {formatDateBR(sale.saleDate)}
+                      {part?.amount ? ` · ${formatCurrencyCents(part.amount)} pela loja` : ''}
+                      {part?.installments ? ` em ${part.installments}x` : ''}
+                    </span>
+                    <button type="button" className="btn btn-outline" onClick={() => openNewFinancing(car.id)}>
+                      <PlusCircle size={14} /> Gerar parcelas
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
 
       {financings.length > 0 && (
         <div className="customer-finance-toolbar">
@@ -308,7 +371,7 @@ export default function AdminCustomerFinance() {
       {financings.length === 0 ? (
         <div className="admin-empty">
           <p>Nenhum financiamento cadastrado. Quando um cliente comprar parcelado direto com a loja, cadastre aqui para acompanhar as parcelas.</p>
-          <button type="button" className="btn btn-primary" onClick={() => setFormOpen(true)}>
+          <button type="button" className="btn btn-primary" onClick={() => openNewFinancing()}>
             <PlusCircle size={15} /> Novo financiamento
           </button>
         </div>
@@ -421,14 +484,18 @@ export default function AdminCustomerFinance() {
       {formOpen && (
         <FinancingFormDialog
           soldCars={soldCars}
+          stockCars={stockCars}
+          sellers={sellers}
           salesByCar={salesByCar}
           financedCarIds={financedCarIds}
           customers={customers}
           onCustomerCreated={(created) => setCustomers((prev) => [...prev, created].sort((x, y) => x.name.localeCompare(y.name)))}
           defaults={settings}
-          onSaved={(created) => {
+          initialCarId={formCarId}
+          onSaved={(created, { soldCar } = {}) => {
             setFinancings((prev) => [created, ...prev])
             setFormOpen(false)
+            if (soldCar) refreshCarsAndSales()
             openDetail(created)
           }}
           onClose={() => setFormOpen(false)}

@@ -1,5 +1,6 @@
 import { formatCurrency } from './carFormat.js'
 import { paymentTags } from './salePayments.js'
+import { financingTags } from './financingContract.js'
 
 function formatDateExtended(isoDate) {
   if (!isoDate) return ''
@@ -46,6 +47,21 @@ export const CONTRACT_TEMPLATE_TAGS = [
   { tag: 'pagamento_cartao', label: 'Pago no cartão de crédito' },
   { tag: 'veiculo_troca', label: 'Veículo recebido na troca' },
   { tag: 'valor_troca', label: 'Valor do veículo na troca' },
+  // Venda parcelada pela loja (17/11/2026): o financiamento do Financeiro dos clientes
+  { tag: 'financiamento_entrada', label: 'Financiamento da loja: entrada' },
+  { tag: 'financiamento_valor', label: 'Financiamento da loja: valor financiado' },
+  { tag: 'financiamento_parcelas', label: 'Financiamento da loja: número de parcelas' },
+  { tag: 'financiamento_parcela_valor', label: 'Financiamento da loja: valor de cada parcela' },
+  { tag: 'financiamento_juros_mes', label: 'Financiamento da loja: juros ao mês (%)' },
+  { tag: 'financiamento_juros_ano', label: 'Financiamento da loja: juros ao ano (%)' },
+  { tag: 'financiamento_primeiro_vencimento', label: 'Financiamento da loja: 1º vencimento' },
+  { tag: 'financiamento_ultimo_vencimento', label: 'Financiamento da loja: último vencimento' },
+  { tag: 'financiamento_dia_vencimento', label: 'Financiamento da loja: dia do vencimento' },
+  { tag: 'financiamento_soma_parcelas', label: 'Financiamento da loja: soma das parcelas' },
+  { tag: 'financiamento_total', label: 'Financiamento da loja: total a prazo (entrada + parcelas)' },
+  { tag: 'financiamento_multa', label: 'Financiamento da loja: multa por atraso (%)' },
+  { tag: 'financiamento_juros_atraso', label: 'Financiamento da loja: juros por atraso (% ao mês)' },
+  { tag: 'financiamento_tabela', label: 'Financiamento da loja: tabela das parcelas (uma por linha)' },
   { tag: 'data_venda', label: 'Data da venda (por extenso)' },
   { tag: 'cidade', label: 'Cidade/UF do contrato' },
   { tag: 'observacoes', label: 'Observações adicionais' },
@@ -99,6 +115,20 @@ export const CONTRACT_SAMPLE_DATA = {
   pagamento_cartao: '',
   veiculo_troca: 'VW Gol 1.0 2015, placa XYZ9A87',
   valor_troca: 'R$ 15.000,00',
+  financiamento_entrada: 'R$ 20.000,00',
+  financiamento_valor: 'R$ 78.900,00',
+  financiamento_parcelas: '3',
+  financiamento_parcela_valor: 'R$ 26.300,00',
+  financiamento_juros_mes: '0',
+  financiamento_juros_ano: '0',
+  financiamento_primeiro_vencimento: '05/11/2026',
+  financiamento_ultimo_vencimento: '05/01/2027',
+  financiamento_dia_vencimento: '5',
+  financiamento_soma_parcelas: 'R$ 78.900,00',
+  financiamento_total: 'R$ 98.900,00',
+  financiamento_multa: '2',
+  financiamento_juros_atraso: '1',
+  financiamento_tabela: '1ª parcela: R$ 26.300,00, vence em 05/11/2026\n2ª parcela: R$ 26.300,00, vence em 05/12/2026\n3ª parcela: R$ 26.300,00, vence em 05/01/2027',
   data_venda: '5 de outubro de 2026',
   cidade: 'São Luís/MA',
   observacoes: 'Exemplo de observação.',
@@ -146,6 +176,8 @@ export function buildContractTemplateData({ company, buyer, vehicle, sale }) {
     detalhes_pagamento: sale.paymentDetails || '',
     // Valor de cada forma de pagamento (sale.paymentParts: utils/salePayments.js)
     ...paymentTags(sale.paymentParts || []),
+    // Financiamento da loja (sale.financing: utils/financingContract.js financingSnapshot)
+    ...financingTags(sale.financing || null),
     data_venda: formatDateExtended(sale.date),
     cidade: sale.city || '',
     observacoes: sale.notes || '',

@@ -1,4 +1,4 @@
-import { CATEGORIES, formatCurrency } from '../utils/carFormat.js'
+import { CATEGORIES, MORE_CAR_CATEGORIES, formatCurrency } from '../utils/carFormat.js'
 import { EXTRA_VEHICLE_CATEGORIES } from '../utils/vehicleTypes.js'
 
 // Partes que os três modelos de site usam (contas sobre o estoque, sem tela)
@@ -17,6 +17,9 @@ const PLURAL = {
   sedan: 'Sedãs',
   suv: 'SUVs',
   picape: 'Picapes',
+  utilitario: 'Utilitários',
+  furgao: 'Furgões',
+  van: 'Vans',
   moto: 'Motos',
   caminhao: 'Caminhões',
   jetski: 'Jet skis',
@@ -24,7 +27,7 @@ const PLURAL = {
   utv: 'UTVs',
 }
 
-const CATEGORY_ORDER = ['hatch', 'sedan', 'suv', 'picape', ...EXTRA_VEHICLE_CATEGORIES.map((e) => e.slug)]
+const CATEGORY_ORDER = ['hatch', 'sedan', 'suv', 'picape', ...MORE_CAR_CATEGORIES.map((e) => e.slug), ...EXTRA_VEHICLE_CATEGORIES.map((e) => e.slug)]
 
 export const SORTS = [
   { value: 'recentes', label: 'Mais recentes' },

@@ -3147,6 +3147,117 @@ select test.login(null);
 delete from public.sales where car_id = 'ca000000-0000-0000-0000-0000000000a7';
 delete from public.cars where id = 'ca000000-0000-0000-0000-0000000000a7';
 
+-- ======================== venda parcelada pela loja (99)
+select test.login(null);
+insert into public.cars (id, company_id, slug, brand, model, version, year, model_year, km, transmission, fuel, color, category, price, status, hidden, purchase_price, plate, chassis, renavam)
+select id, test.company_a(), slug, 'Iveco', 'Daily', '35-150', 2020, '2020/2021', 90000, 'Manual', 'Diesel', 'Branco', 'caminhao', 140000, st, false, 110000, placa, 'CHASSI' || placa, 'RENAVAM' || placa
+from (values
+  ('ca000000-0000-0000-0000-00000000099a'::uuid, 'teste-99-disponivel', 'disponivel', 'TST9A99'),
+  ('ca000000-0000-0000-0000-00000000099b'::uuid, 'teste-99-reservado', 'reservado', 'TST9AAA')
+) v(id, slug, st, placa);
+insert into public.car_reservations (company_id, car_id, customer_id, customer_name, seller_id, status)
+values (test.company_a(), 'ca000000-0000-0000-0000-00000000099b', 'c0000000-0000-0000-0000-0000000000a2', 'Cliente A2', '5e000000-0000-0000-0000-000000000004', 'ativa');
+select set_config('test.venda99', jsonb_build_object(
+  'car_id', 'ca000000-0000-0000-0000-00000000099a', 'seller_id', '5e000000-0000-0000-0000-000000000004',
+  'sale_price', 140000, 'sale_date', '2030-01-05', 'payment_method', 'misto', 'down_payment', 20000,
+  'payments', jsonb_build_array(
+    jsonb_build_object('method', 'a_vista', 'amount', 20000, 'bank', '', 'installments', null, 'note', ''),
+    jsonb_build_object('method', 'financiamento_proprio', 'amount', 120000, 'bank', '', 'installments', 10, 'note', '')))::text, false),
+  set_config('test.fin99', jsonb_build_object(
+  'customer_id', 'c0000000-0000-0000-0000-0000000000a2', 'customer_name', 'Cliente A2', 'vehicle_label', 'Iveco Daily 35-150',
+  'vehicle_plate', 'TST9A99', 'vehicle_price', 140000, 'down_payment', 20000, 'financed_amount', 120000,
+  'installments_count', 10, 'installment_amount', 12000, 'first_due_date', '2030-02-10', 'notes', 'teste 99')::text, false);
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000004');
+set role authenticated;
+select test.check('vendedor: não registra venda parcelada pelo financeiro dos clientes',
+  test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb, current_setting('test.fin99')::jsonb)$$));
+reset role;
+select test.login('aaaaaaaa-0000-0000-0000-000000000003');
+set role authenticated;
+select test.check('gerente C (só quantidades): não registra venda parcelada',
+  test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb, current_setting('test.fin99')::jsonb)$$));
+reset role;
+select test.login('bbbbbbbb-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin B: não vende parcelado o carro da loja A',
+  test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb,
+    current_setting('test.fin99')::jsonb - 'customer_id' || jsonb_build_object('customer_id', (select id from customers limit 1)))$$));
+reset role;
+select test.login(null);
+set role anon;
+select test.check('anon: não registra venda parcelada',
+  test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb, current_setting('test.fin99')::jsonb)$$));
+reset role;
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: parcelas inválidas, cliente ou vendedor de outra loja recusam tudo',
+  test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb,
+    current_setting('test.fin99')::jsonb || '{"installments_count": 0}')$$)
+  and test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb,
+    current_setting('test.fin99')::jsonb || jsonb_build_object('customer_id', current_setting('test.cliente_b')))$$)
+  and test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb
+    || '{"seller_id": "5e000000-0000-0000-0000-0000000000b2"}', current_setting('test.fin99')::jsonb)$$)
+  and test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb, current_setting('test.fin99')::jsonb - 'customer_id')$$));
+reset role;
+select test.login(null);
+select test.check('venda parcelada recusada: nada ficou gravado (carro disponível, sem venda nem financiamento)',
+  (select status from public.cars where id = 'ca000000-0000-0000-0000-00000000099a') = 'disponivel'
+  and not exists (select 1 from public.sales where car_id = 'ca000000-0000-0000-0000-00000000099a')
+  and not exists (select 1 from public.customer_financings where notes = 'teste 99'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: vende parcelado um carro do estoque pelo financeiro dos clientes', r = 'ok:1', r)
+from (select test.try_msg($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb, current_setting('test.fin99')::jsonb)$$) as r) s;
+select test.check('admin A: o mesmo carro não é vendido de novo',
+  test.denied($$select sell_car_with_store_financing(current_setting('test.venda99')::jsonb, current_setting('test.fin99')::jsonb)$$));
+reset role;
+select test.login(null);
+select test.check('venda parcelada: venda com entrada + financiamento da loja e comissão, carro vendido para o cliente',
+  exists (select 1 from public.sales s where s.car_id = 'ca000000-0000-0000-0000-00000000099a'
+    and s.sale_price = 140000 and s.sale_date = '2030-01-05' and s.seller_id = '5e000000-0000-0000-0000-000000000004'
+    and jsonb_array_length(s.payments) = 2 and s.payments->1->>'method' = 'financiamento_proprio'
+    and s.payment_method = 'misto' and s.down_payment = 20000 and s.commission_type is not null)
+  and exists (select 1 from public.cars c where c.id = 'ca000000-0000-0000-0000-00000000099a' and c.status = 'vendido'
+    and c.customer_id = 'c0000000-0000-0000-0000-0000000000a2' and (c.sold_at at time zone 'America/Fortaleza')::date = '2030-01-05'),
+  (select row_to_json(s)::text from public.sales s where car_id = 'ca000000-0000-0000-0000-00000000099a'));
+select test.check('venda parcelada: financiamento ligado ao carro e ao cliente, com as 10 parcelas mensais',
+  exists (select 1 from public.customer_financings f where f.notes = 'teste 99' and f.car_id = 'ca000000-0000-0000-0000-00000000099a'
+    and f.customer_id = 'c0000000-0000-0000-0000-0000000000a2' and f.installments_count = 10 and f.financed_amount = 120000)
+  and (select count(*) from public.financing_installments i join public.customer_financings f on f.id = i.financing_id where f.notes = 'teste 99') = 10
+  and (select max(i.due_date) from public.financing_installments i join public.customer_financings f on f.id = i.financing_id where f.notes = 'teste 99') = '2030-11-10');
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000002');
+set role authenticated;
+select test.check('gerente V (vê valores): vende parcelado o carro reservado; a reserva vira venda', r = 'ok:1', r)
+from (select test.try_msg($$select sell_car_with_store_financing(
+  current_setting('test.venda99')::jsonb || '{"car_id": "ca000000-0000-0000-0000-00000000099b", "seller_id": null}',
+  current_setting('test.fin99')::jsonb || '{"notes": "teste 99 reservado"}')$$) as r) s;
+reset role;
+select test.login(null);
+select test.check('venda parcelada do reservado: carro vendido, reserva convertida, venda sem vendedor',
+  (select status from public.cars where id = 'ca000000-0000-0000-0000-00000000099b') = 'vendido'
+  and (select status from public.car_reservations where car_id = 'ca000000-0000-0000-0000-00000000099b') = 'convertida'
+  and exists (select 1 from public.sales where car_id = 'ca000000-0000-0000-0000-00000000099b' and seller_id is null)
+  and exists (select 1 from public.customer_financings where notes = 'teste 99 reservado'));
+
+select test.login('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select test.check('admin A: contrato guarda o retrato do financiamento; formato inválido é recusado',
+  test.allowed($$insert into contracts (company_id, company_name, company_document, buyer_name, buyer_document, sale_price, financing)
+    select current_company_id(), 'Loja A', '1', 'Cliente A2', '222', 140000, '{"installmentsCount": 10, "installments": []}'$$)
+  and test.denied($$insert into contracts (company_id, company_name, company_document, buyer_name, buyer_document, sale_price, financing)
+    select current_company_id(), 'Loja A', '1', 'Cliente A2', '222', 140000, '[1, 2]'$$));
+reset role;
+select test.login(null);
+delete from public.contracts where financing is not null;
+delete from public.customer_financings where notes like 'teste 99%';
+delete from public.car_reservations where car_id in ('ca000000-0000-0000-0000-00000000099a', 'ca000000-0000-0000-0000-00000000099b');
+delete from public.sales where car_id in ('ca000000-0000-0000-0000-00000000099a', 'ca000000-0000-0000-0000-00000000099b');
+delete from public.cars where id in ('ca000000-0000-0000-0000-00000000099a', 'ca000000-0000-0000-0000-00000000099b');
+
 -- ================================================================ resultado
 select case when ok then 'PASS' else 'FAIL' end as resultado, name as teste, coalesce(detail, '') as detalhe
 from test.results order by id;

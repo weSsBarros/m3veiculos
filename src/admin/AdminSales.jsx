@@ -81,7 +81,7 @@ function ChecklistCount({ sale }) {
 // O vendedor vê só as vendas e reservas dele, sem editar.
 export default function AdminSales() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, isStaff, isSeller, canSeeSaleValues, canSeeCosts } = useAuth()
+  const { isAdmin, isStaff, isSeller, canSeeSaleValues, canSeeCosts, canManageCustomerFinance } = useAuth()
   // O vendedor vê os valores das vendas dele
   const showValues = canSeeSaleValues || isSeller
   const [searchParams, setSearchParams] = useSearchParams()
@@ -268,6 +268,9 @@ export default function AdminSales() {
       if (reservation) setReservations((prev) => prev.filter((r) => r.id !== reservation.id))
       setSaleDialogCar(null)
       if (result.tradeInCarId) fetchAllCarsAdmin().then(setCars).catch(() => {})
+      if (result.financingError) {
+        alert(`A venda foi salva, mas as parcelas do financiamento da loja não foram geradas: ${result.financingError}\n\nGere em Financeiro dos clientes (a venda aparece lá como "ainda sem parcelas").`)
+      }
     } catch (err) {
       alert('Não foi possível salvar a venda: ' + err.message)
       return
@@ -570,6 +573,7 @@ export default function AdminSales() {
           customers={customers}
           onCustomerCreated={(created) => setCustomers((prev) => [...prev, created].sort((x, y) => x.name.localeCompare(y.name)))}
           showCommission={canSeeSaleValues}
+          canManageFinancing={canManageCustomerFinance}
           initialSale={sales.find((s) => s.carId === saleDialogCar.id)}
           checklistItems={checklistItems}
           banks={banks}

@@ -16,6 +16,8 @@ function savedParts(contract) {
     date: contract.saleDate,
     city: contract.saleCity,
     notes: contract.notes,
+    // Financiamento da loja usado no contrato (seção 99)
+    financing: contract.financing || null,
   }
   return { company: contract.company, buyer: contract.buyer, vehicle: contract.vehicle, sale }
 }

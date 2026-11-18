@@ -3851,6 +3851,77 @@ span.car-plate {
   color: var(--color-primary-dark);
 }
 
+/* Novo financiamento com carro do estoque (seção 99): a venda é registrada junto */
+.financing-sale-box {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid #f0d9a8;
+  background: #fdf6e7;
+  font-size: 13.5px;
+}
+
+.financing-sale-box > strong {
+  color: #6b4508;
+}
+
+.financing-sale-box > p {
+  margin: 0;
+  color: #6b4508;
+}
+
+/* Financeiro dos clientes: vendas com financiamento da loja ainda sem parcelas */
+.financing-pending {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid #f0d9a8;
+  background: #fdf6e7;
+  color: #6b4508;
+  font-size: 13.5px;
+}
+
+.financing-pending-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.financing-pending-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.financing-pending-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--color-text);
+}
+
+/* Janela da venda: parcelas do financiamento da loja (seção 99) */
+.sale-store-financing {
+  display: grid;
+  gap: 10px;
+}
+
+.sale-store-financing .admin-checkbox {
+  font-weight: 600;
+}
+
 /* Editar o financiamento (seção 97): as parcelas em aberto serão refeitas */
 .financing-redo-note {
   padding: 10px 12px;

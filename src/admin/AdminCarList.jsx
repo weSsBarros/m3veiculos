@@ -462,7 +462,7 @@ function CarGroup({ title, rows, busyId, view, alertDefault, canDelete, canSeeCo
 
 export default function AdminCarList() {
   const { confirm, confirmDialog } = useConfirm()
-  const { isAdmin, isStaff, isSeller, seller, canSeeCosts, canSeeSaleValues } = useAuth()
+  const { isAdmin, isStaff, isSeller, seller, canSeeCosts, canSeeSaleValues, canManageCustomerFinance } = useAuth()
   // Vendas e reservas: admin e gerente editam e desfazem; o vendedor só registra no nome dele
   const canEditSales = isStaff
   const [alertDefault, setAlertDefault] = useState(DEFAULT_STOCK_ALERT_DAYS)
@@ -695,6 +695,9 @@ export default function AdminCarList() {
     }
     // O carro da troca aparece no estoque
     if (result.tradeInCarId) fetchAllCarsAdmin().then(setCars).catch(() => {})
+    if (result.financingError) {
+      alert(`A venda foi registrada, mas as parcelas do financiamento da loja não foram geradas: ${result.financingError}\n\nGere em Financeiro dos clientes (a venda aparece lá como "ainda sem parcelas").`)
+    }
     const { customerId, checklist, generateTerm } = data
     const soldCar = result.car
     const saved = result.sale
@@ -1130,6 +1133,7 @@ export default function AdminCarList() {
           customers={customers}
           onCustomerCreated={(created) => setCustomers((prev) => [...prev, created].sort((x, y) => x.name.localeCompare(y.name)))}
           showCommission={canSeeSaleValues}
+          canManageFinancing={canManageCustomerFinance}
           initialSale={salesByCar[saleDialog.car.id]}
           checklistItems={checklistItems}
           banks={banks}

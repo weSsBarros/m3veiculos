@@ -9,17 +9,29 @@ export const CATEGORIES = [
   { slug: 'picape', label: 'Picape', image: '/categorias/picape.webp' },
 ]
 
+// Utilitário, furgão e van (17/11/2026): contam como carro (portas, tabela FIPE
+// de carros, Webmotors e OLX), mas, como a moto e o caminhão, no site só
+// aparecem quando a loja tem um no estoque.
+export const MORE_CAR_CATEGORIES = [
+  { slug: 'utilitario', label: 'Utilitário', image: '' },
+  { slug: 'furgao', label: 'Furgão', image: '' },
+  { slug: 'van', label: 'Van', image: '' },
+]
+
+// Todos os tipos de carro (interesse do cliente)
+export const CAR_CATEGORIES = [...CATEGORIES, ...MORE_CAR_CATEGORIES]
+
 // Moto, caminhão, jet ski, quadriciclo e UTV (utils/vehicleTypes.js): aparecem
 // no painel sempre; no site, só os que a loja tem no estoque (siteCategories).
 export const MOTO_CATEGORY = EXTRA_VEHICLE_CATEGORIES[0]
-export const VEHICLE_CATEGORIES = [...CATEGORIES, ...EXTRA_VEHICLE_CATEGORIES]
+export const VEHICLE_CATEGORIES = [...CAR_CATEGORIES, ...EXTRA_VEHICLE_CATEGORIES]
 
 export function vehicleCategoryLabel(slug) {
   return VEHICLE_CATEGORIES.find((c) => c.slug === slug)?.label || slug
 }
 
 export function siteCategories(cars) {
-  const extra = EXTRA_VEHICLE_CATEGORIES.filter((e) => (cars || []).some((c) => c.category === e.slug))
+  const extra = [...MORE_CAR_CATEGORIES, ...EXTRA_VEHICLE_CATEGORIES].filter((e) => (cars || []).some((c) => c.category === e.slug))
   return [...CATEGORIES, ...extra]
 }
 

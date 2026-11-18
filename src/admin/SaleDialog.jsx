@@ -18,6 +18,10 @@ import { parseAnoModelo } from '../utils/anoModelo.js'
 import { salePayment } from '../utils/salePayments.js'
 import { bankIncomeForm, bankIncomeFromForm, saleBankFinanced } from '../utils/bankIncome.js'
 import BankIncomeFields from './BankIncomeFields.jsx'
+import SaleStoreFinancing from './SaleStoreFinancing.jsx'
+import { storeFinancingDefaults, storeFinancingPart, storeFinancingProblem, storeFinancingValues } from '../utils/storeFinancing.js'
+import { fetchFinancings } from '../lib/financingApi.js'
+import { fetchCompanySettings } from '../lib/companyApi.js'
 import '../components/ConfirmDialog.css'
 
 const thousands = (value) => String(value ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
@@ -32,6 +36,9 @@ const thousands = (value) => String(value ?? '').replace(/\B(?=(\d{3})+(?!\d))/g
 // checklistItems: itens do checklist da loja (companies.sale_checklist).
 // banks: lista de bancos da loja. lockedSeller: o vendedor registrando a
 // própria venda (o campo vendedor fica fixo nele).
+// canManageFinancing: quem cuida do financeiro dos clientes (admin e gerente que vê
+// valores). Com a forma "Financiamento próprio da loja", as parcelas são geradas no
+// Financeiro dos clientes ao salvar (17/11/2026; quem salva é o registerSaleFromDialog).
 export default function SaleDialog({
   car,
   sellers,
@@ -42,6 +49,7 @@ export default function SaleDialog({
   banks = [],
   lockedSeller = null,
   showCommission = true,
+  canManageFinancing = false,
   onConfirm,
   onClose,
   saving,
@@ -73,6 +81,12 @@ export default function SaleDialog({
   // vê os valores da venda (o vendedor não informa; o banco também confere)
   const [bankIncome, setBankIncome] = useState(() => bankIncomeForm(initialSale))
   const [generateTerm, setGenerateTerm] = useState(false)
+  // Financiamento da loja: as parcelas geradas junto com a venda; existing = o
+  // financiamento ativo que este carro já tem (aí as parcelas não são geradas de novo)
+  const [storeFin, setStoreFin] = useState(() => storeFinancingDefaults())
+  const [existingFinancing, setExistingFinancing] = useState(null)
+  const [financingChecked, setFinancingChecked] = useState(false)
+  const [financeSettings, setFinanceSettings] = useState({ lateFeePercent: 2, lateInterestPercent: 1 })
   const [error, setError] = useState('')
   // Faixas de comissão: prévia de quem recebe "Pela faixa do carro" (seção 78) ou
   // "Pela faixa de valor" (seção 82; o banco calcula de novo ao salvar)
@@ -85,8 +99,21 @@ export default function SaleDialog({
     fetchCommissionBands().then(setBands).catch(() => {})
   }, [showCommission])
 
+  useEffect(() => {
+    if (!canManageFinancing) return
+    fetchFinancings({ carId: car.id })
+      .then((list) => {
+        setExistingFinancing(list.find((f) => f.status === 'ativo') || null)
+        setFinancingChecked(true)
+      })
+      .catch(() => setFinancingChecked(true))
+    fetchCompanySettings().then(setFinanceSettings).catch(() => {})
+  }, [canManageFinancing, car.id])
+
   const seller = activeSellers.find((s) => s.id === sellerId)
   const paymentNow = salePayment(payment)
+  const storePart = storeFinancingPart(paymentNow.parts)
+  const generatesInstallments = canManageFinancing && Boolean(storePart) && !existingFinancing && storeFin.enabled
   const hasBankFinancing = paymentNow.parts.some((p) => p.method === 'financiamento')
   const bankFinanced = saleBankFinanced({ payments: paymentNow.parts })
   const canSetBankIncome = showCommission && !lockedSeller
@@ -142,6 +169,16 @@ export default function SaleDialog({
         date,
       }
     }
+    // Financiamento da loja: confere antes de salvar a venda (as parcelas vêm logo depois)
+    if (canManageFinancing && storePart && storeFin.enabled && !financingChecked) {
+      setError('Aguarde um instante: conferindo se este carro já tem financiamento da loja.')
+      return
+    }
+    const storeProblem = generatesInstallments ? storeFinancingProblem(storeFin, storePart, customerId) : ''
+    if (storeProblem) {
+      setError(storeProblem)
+      return
+    }
     // Checklist opcional: incompleto só pede confirmação
     const { pending } = checklistSummary(checklist)
     if (pending > 0) {
@@ -165,6 +202,27 @@ export default function SaleDialog({
         bankIncomeData = { storeReturn: null, returnPercent: null, rateTable: '', storePlus: null, plusPercent: null, plusReceivedOn: null }
       }
     }
+    let storeFinancing = null
+    if (generatesInstallments) {
+      const v = storeFinancingValues(storeFin, storePart)
+      const customer = customers.find((c) => c.id === customerId)
+      storeFinancing = {
+        customerId,
+        customerName: customer?.name || '',
+        vehicleLabel: `${car.brand} ${car.model} ${car.version || ''}`.trim(),
+        vehiclePlate: car.plate ? car.plate.toUpperCase() : '',
+        vehiclePrice: priceValue,
+        downPayment: Math.max(0, Math.round((priceValue - v.financed) * 100) / 100),
+        financedAmount: v.financed,
+        installmentsCount: v.count,
+        installmentAmount: v.installment,
+        interestRate: v.rate,
+        firstDueDate: storeFin.firstDue,
+        lateFeePercent: financeSettings.lateFeePercent ?? 2,
+        lateInterestPercent: financeSettings.lateInterestPercent ?? 1,
+        notes: '',
+      }
+    }
     onConfirm({
       sellerId: sellerId || null,
       customerId: customerId || null,
@@ -176,6 +234,7 @@ export default function SaleDialog({
       payment: paymentNow,
       tradeIn: tradeInData,
       ...(bankIncomeData !== undefined ? { bankIncome: bankIncomeData } : {}),
+      ...(storeFinancing ? { storeFinancing } : {}),
     })
   }
 
@@ -297,6 +356,20 @@ export default function SaleDialog({
               }}
             />
           </div>
+
+          {storePart && (
+            <div className="sale-dialog-section">
+              <span className="admin-field-label">Parcelas do financiamento da loja</span>
+              <SaleStoreFinancing
+                form={storeFin}
+                onChange={setStoreFin}
+                part={storePart}
+                existing={existingFinancing}
+                canManage={canManageFinancing}
+                disabled={saving}
+              />
+            </div>
+          )}
 
           {canSetBankIncome && hasBankFinancing && (
             <div className="sale-dialog-section">

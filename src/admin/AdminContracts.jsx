@@ -5,6 +5,8 @@ import PaymentFields from './PaymentFields.jsx'
 import { EMPTY_PART, partsFromSale, normalizeParts, paymentsText } from '../utils/salePayments.js'
 import { parseMoneyBR } from '../utils/financing.js'
 import { fetchSaleByCar } from '../lib/salesApi.js'
+import { fetchFinancing, fetchFinancings } from '../lib/financingApi.js'
+import { financingSnapshot } from '../utils/financingContract.js'
 import { Link, useSearchParams } from 'react-router-dom'
 import { RefreshCcw, FileDown, FileText, Settings, PenLine, PencilLine, RotateCcw, Plus, Check } from 'lucide-react'
 import { fetchAllCarsAdmin, fetchSellerCars } from '../lib/carsApi.js'
@@ -12,7 +14,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { fetchAllCustomers } from '../lib/customersApi.js'
 import { fetchContractsAdmin, createContract } from '../lib/contractsApi.js'
 import { fetchAllContractTemplates, downloadContractTemplateFile, uploadContractTemplate, uploadEditedContractFile } from '../lib/contractTemplatesApi.js'
-import { formatCurrency, carStatusLabel, parseIntBR, formatDateBR as formatDate, slugify } from '../utils/carFormat.js'
+import { formatCurrency, formatCurrencyCents, carStatusLabel, parseIntBR, formatDateBR as formatDate, slugify } from '../utils/carFormat.js'
 import { buildContractTitle, buildContractParagraphs, buildContractSignatures } from '../utils/contractTemplate.js'
 import { buildReceiptTitle, buildReceiptParagraphs, buildReceiptSignatures } from '../utils/receiptTemplate.js'
 import { buildContractTemplateData } from '../utils/contractTemplateTags.js'
@@ -41,11 +43,27 @@ const EMPTY_BUYER = { name: '', document: '', rg: '', address: '', phone: '', em
 const EMPTY_VEHICLE = { brand: '', model: '', version: '', year: '', modelYear: '', color: '', km: '', plate: '', chassis: '', renavam: '' }
 const CONTRACT_PAYMENT = [{ ...EMPTY_PART, method: 'a_vista' }]
 const EMPTY_SALE = { price: '', paymentDetails: '', date: new Date().toISOString().slice(0, 10), city: '', notes: '' }
+const moneyInput = (value) => (value != null && value !== '' ? String(value).replace('.', ',') : '')
+
+// Formas de pagamento a partir do financiamento da loja (carro sem venda registrada)
+function partsFromFinancing(financing) {
+  const parts = []
+  if (financing.downPayment > 0) parts.push({ ...EMPTY_PART, method: 'a_vista', amount: moneyInput(financing.downPayment) })
+  parts.push({ ...EMPTY_PART, method: 'financiamento_proprio', amount: moneyInput(financing.financedAmount), installments: String(financing.installmentsCount || '') })
+  return parts
+}
 
 export default function AdminContracts() {
-  const { isAdmin, isStaff } = useAuth()
+  const { isAdmin, isStaff, canManageCustomerFinance } = useAuth()
   const [searchParams] = useSearchParams()
   const preselectCarId = searchParams.get('carro')
+  // Vindo do Financeiro dos clientes ("Gerar contrato"): carro, cliente e o financiamento
+  const preselectFinancingId = searchParams.get('financiamento')
+  const financingPreselected = useRef(false)
+  // Financiamento da loja do carro escolhido (17/11/2026): as parcelas entram no contrato
+  const [carFinancings, setCarFinancings] = useState([])
+  const [financingId, setFinancingId] = useState('')
+  const [includeFinancing, setIncludeFinancing] = useState(true)
   const [cars, setCars] = useState([])
   const [contracts, setContracts] = useState([])
   const [customers, setCustomers] = useState([])
@@ -171,8 +189,11 @@ export default function AdminContracts() {
     setSale((prev) => ({ ...prev, [field]: value }))
   }
 
-  function handleSelectCar(carId) {
+  // preferFinancing: o financiamento que veio no link (fica escolhido, mesmo cancelado)
+  function handleSelectCar(carId, { preferFinancing = null } = {}) {
     setSelectedCarId(carId)
+    setCarFinancings(preferFinancing ? [preferFinancing] : [])
+    setFinancingId(preferFinancing?.id || '')
     const car = cars.find((c) => c.id === carId)
     if (!car) return
     setVehicle({
@@ -190,10 +211,24 @@ export default function AdminContracts() {
     setSale((prev) => ({ ...prev, price: car.price ?? '' }))
     setPayParts(CONTRACT_PAYMENT)
     if (car.customerId) handleSelectCustomer(car.customerId)
-    // Carro já vendido: valor, data, formas de pagamento e o carro da troca vêm da venda
-    fetchSaleByCar(car.id)
-      .then((found) => {
-        if (!found) return
+    // Carro já vendido: valor, data, formas de pagamento e o carro da troca vêm da venda;
+    // com financiamento da loja, as parcelas dele (quem cuida do financeiro dos clientes)
+    Promise.all([
+      fetchSaleByCar(car.id),
+      canManageCustomerFinance ? fetchFinancings({ carId: car.id }).catch(() => []) : Promise.resolve([]),
+    ])
+      .then(([found, financingList]) => {
+        const list = financingList.filter((f) => f.status === 'ativo' || f.id === preferFinancing?.id)
+        const chosen = list.find((f) => f.id === preferFinancing?.id) || list[0] || null
+        setCarFinancings(list)
+        setFinancingId(chosen?.id || '')
+        if (!found) {
+          if (chosen) {
+            setPayParts(partsFromFinancing(chosen))
+            if (chosen.vehiclePrice) setSale((prev) => ({ ...prev, price: Math.round(chosen.vehiclePrice) }))
+          }
+          return
+        }
         const fromSale = partsFromSale(found)
         const parts = fromSale.length === 1 && !fromSale[0].amount && !found.paymentMethod ? [] : fromSale
         if (found.tradeInCarId || found.tradeInValue) {
@@ -206,6 +241,31 @@ export default function AdminContracts() {
       })
       .catch(() => {})
   }
+
+  // Link do Financeiro dos clientes: escolhe o carro (ou preenche o veículo descrito no
+  // financiamento, quando ele não tem carro do estoque) e o cliente
+  useEffect(() => {
+    if (!preselectFinancingId || !canManageCustomerFinance || financingPreselected.current || loading) return
+    financingPreselected.current = true
+    fetchFinancing(preselectFinancingId)
+      .then((fin) => {
+        if (fin.carId && cars.some((c) => c.id === fin.carId)) {
+          handleSelectCar(fin.carId, { preferFinancing: fin })
+        } else {
+          setSelectedCarId('')
+          setCarFinancings([fin])
+          setFinancingId(fin.id)
+          setVehicle({ ...EMPTY_VEHICLE, model: fin.vehicleLabel || '', plate: fin.vehiclePlate || '' })
+          setPayParts(partsFromFinancing(fin))
+          setSale((prev) => ({ ...prev, price: fin.vehiclePrice ? Math.round(fin.vehiclePrice) : prev.price }))
+        }
+        if (fin.customerId) handleSelectCustomer(fin.customerId)
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectFinancingId, canManageCustomerFinance, loading, cars])
+
+  const selectedFinancing = carFinancings.find((f) => f.id === financingId) || null
 
   function handleSelectCustomer(customerId) {
     setSelectedCustomerId(customerId)
@@ -226,9 +286,15 @@ export default function AdminContracts() {
       company,
       buyer,
       vehicle,
-      sale: { ...sale, paymentMethod: paymentText, paymentParts, price: parseIntBR(sale.price) || 0 },
+      sale: {
+        ...sale,
+        paymentMethod: paymentText,
+        paymentParts,
+        price: parseIntBR(sale.price) || 0,
+        financing: includeFinancing && selectedFinancing && documentType !== 'recibo' ? financingSnapshot(selectedFinancing) : null,
+      },
     }),
-    [company, buyer, vehicle, sale, paymentText, paymentParts]
+    [company, buyer, vehicle, sale, paymentText, paymentParts, includeFinancing, selectedFinancing, documentType]
   )
 
   const isReceipt = documentType === 'recibo'
@@ -309,6 +375,7 @@ export default function AdminContracts() {
       saleDate: sale.date,
       saleCity: sale.city,
       notes: sale.notes,
+      financing: contractData.sale.financing,
     })
     setContracts((prev) => [saved, ...prev])
     return saved
@@ -614,6 +681,33 @@ export default function AdminContracts() {
             <span className="admin-field-label">Pagamento</span>
             <PaymentFields value={payParts} onChange={setPayParts} banks={banks} salePrice={parseIntBR(sale.price)} allowTradeIn />
           </div>
+          {carFinancings.length > 0 && !isReceipt && (
+            <div className="sale-dialog-section contract-financing">
+              <span className="admin-field-label">Financiamento da loja</span>
+              <label className="admin-checkbox">
+                <input type="checkbox" checked={includeFinancing} onChange={(e) => setIncludeFinancing(e.target.checked)} />
+                Incluir as condições e a tabela das parcelas no contrato
+              </label>
+              {carFinancings.length > 1 && (
+                <select value={financingId} onChange={(e) => setFinancingId(e.target.value)} aria-label="Financiamento">
+                  {carFinancings.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.customerName} · {f.installmentsCount}x de {formatCurrencyCents(f.installmentAmount)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {selectedFinancing && (
+                <span className="sale-dialog-note">
+                  {selectedFinancing.installmentsCount}x de {formatCurrencyCents(selectedFinancing.installmentAmount)}, 1º vencimento em{' '}
+                  {formatDate(selectedFinancing.firstDueDate)}
+                  {includeFinancing
+                    ? '. No modelo próprio, use os marcadores do grupo “Financiamento da loja” (ex.: {financiamento_tabela}).'
+                    : '.'}
+                </span>
+              )}
+            </div>
+          )}
           <label>
             Detalhes do pagamento (opcional)
             <textarea rows={2} value={sale.paymentDetails} onChange={(e) => updateSale('paymentDetails', e.target.value)} placeholder="Ex: Entrada de R$ 10.000 + 12x de R$ 3.000 no cartão" />

@@ -1403,6 +1403,30 @@ html[data-admin-theme='escuro'] .financing-preview strong {
   color: var(--admin-primary-text);
 }
 
+html[data-admin-theme='escuro'] .financing-sale-box {
+  border: 1px solid #745e2f;
+  background: #41351b;
+}
+
+html[data-admin-theme='escuro'] .financing-sale-box > strong {
+  color: #f1c57e;
+}
+
+html[data-admin-theme='escuro'] .financing-sale-box > p {
+  color: #f1c57e;
+}
+
+html[data-admin-theme='escuro'] .financing-pending {
+  border: 1px solid #745e2f;
+  background: #41351b;
+  color: #f1c57e;
+}
+
+html[data-admin-theme='escuro'] .financing-pending-list li {
+  background: var(--admin-surface);
+  color: var(--color-text);
+}
+
 html[data-admin-theme='escuro'] .financing-redo-note {
   border: 1px solid #745e2f;
   background: #41351b;

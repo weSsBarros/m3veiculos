@@ -1,16 +1,13 @@
 import { useMemo, useState } from 'react'
 import { X } from 'lucide-react'
-import { createFinancing, editFinancing } from '../lib/financingApi.js'
-import { addDaysISO, formatCurrencyCents, formatDateBR, todayISO } from '../utils/carFormat.js'
+import { createFinancing, editFinancing, sellCarWithFinancing } from '../lib/financingApi.js'
+import { addDaysISO, carStatusLabel, formatCurrencyCents, formatDateBR, todayISO } from '../utils/carFormat.js'
 import { formatMoneyInput, parseMoneyBR, parsePercentBR, priceInstallment, round2 } from '../utils/financing.js'
+import { financingDraftFromCar, storeFinancingSalePayment } from '../utils/storeFinancing.js'
 import DateInputBR from '../components/DateInputBR.jsx'
 import CustomerPicker from './CustomerPicker.jsx'
 import { MoneyInput } from '../components/NumberInputs.jsx'
 import '../components/ConfirmDialog.css'
-
-function carLabel(car) {
-  return `${car.brand} ${car.model} ${car.version}`.trim()
-}
 
 const percentText = (value) => (value === null || value === undefined ? '' : String(value).replace('.', ','))
 
@@ -18,19 +15,44 @@ const percentText = (value) => (value === null || value === undefined ? '' : Str
 // que já existe (seção 97: muda tudo depois de criado). O valor financiado e o valor
 // da parcela são calculados sozinhos (Tabela Price, se tiver juros) até a pessoa
 // digitar um valor diferente; na edição começam com os valores gravados.
-// soldCars: carros vendidos; salesByCar: valor negociado de cada venda.
-// financedCarIds: carros que já têm financiamento ativo (aviso na lista).
-export default function FinancingFormDialog({ financing, soldCars, salesByCar, financedCarIds, customers, onCustomerCreated, defaults, onSaved, onClose }) {
+// soldCars: carros vendidos; salesByCar: venda de cada carro (valor negociado e formas
+// de pagamento). financedCarIds: carros que já têm financiamento ativo (aviso na lista).
+// stockCars (só no novo, seção 99): carros ainda no estoque; escolhendo um, a venda é
+// registrada junto (vendedor e data da venda aqui; o resto depois, em Vendas).
+// sellers: equipe, para o vendedor dessa venda. initialCarId: já começa com o carro
+// (o "Gerar parcelas" de uma venda com financiamento da loja sem parcelas).
+// onSaved(financiamento, { soldCar }): soldCar = a venda foi registrada agora.
+export default function FinancingFormDialog({
+  financing,
+  soldCars,
+  stockCars = [],
+  sellers = [],
+  salesByCar,
+  financedCarIds,
+  customers,
+  onCustomerCreated,
+  defaults,
+  initialCarId = '',
+  onSaved,
+  onClose,
+}) {
   const editing = Boolean(financing)
-  const [carId, setCarId] = useState(financing?.carId || '')
-  const [vehicleLabel, setVehicleLabel] = useState(financing?.vehicleLabel || '')
-  const [vehiclePlate, setVehiclePlate] = useState(financing?.vehiclePlate || '')
-  const [customerId, setCustomerId] = useState(financing?.customerId || '')
-  const [vehiclePrice, setVehiclePrice] = useState(() => formatMoneyInput(financing?.vehiclePrice || ''))
-  const [downPayment, setDownPayment] = useState(() => formatMoneyInput(financing?.downPayment || ''))
+  const carOptions = editing ? soldCars : [...stockCars, ...soldCars]
+  // Carro escolhido de saída: os campos começam com o que vem dele (e da venda)
+  const [draft] = useState(() => {
+    if (editing || !initialCarId) return null
+    const car = carOptions.find((c) => c.id === initialCarId)
+    return car ? financingDraftFromCar(car, salesByCar[car.id]) : null
+  })
+  const [carId, setCarId] = useState(financing?.carId || draft?.carId || '')
+  const [vehicleLabel, setVehicleLabel] = useState(financing?.vehicleLabel || draft?.vehicleLabel || '')
+  const [vehiclePlate, setVehiclePlate] = useState(financing?.vehiclePlate || draft?.vehiclePlate || '')
+  const [customerId, setCustomerId] = useState(financing?.customerId || draft?.customerId || '')
+  const [vehiclePrice, setVehiclePrice] = useState(() => formatMoneyInput(financing?.vehiclePrice || draft?.vehiclePrice || ''))
+  const [downPayment, setDownPayment] = useState(() => formatMoneyInput(financing?.downPayment || draft?.downPayment || ''))
   const [financedInput, setFinancedInput] = useState(() => formatMoneyInput(financing?.financedAmount ?? ''))
   const [financedTouched, setFinancedTouched] = useState(editing)
-  const [count, setCount] = useState(String(financing?.installmentsCount ?? 12))
+  const [count, setCount] = useState(String(financing?.installmentsCount ?? draft?.installmentsCount ?? 12))
   const [rate, setRate] = useState(percentText(financing?.interestRate))
   const [installmentInput, setInstallmentInput] = useState(() => formatMoneyInput(financing?.installmentAmount ?? ''))
   const [installmentTouched, setInstallmentTouched] = useState(editing)
@@ -39,6 +61,9 @@ export default function FinancingFormDialog({ financing, soldCars, salesByCar, f
   const [lateInterest, setLateInterest] = useState(percentText(editing ? financing.lateInterestPercent : defaults.lateInterestPercent))
   const [notes, setNotes] = useState(financing?.notes || '')
   const [status, setStatus] = useState(financing?.status || 'ativo')
+  // Venda registrada junto, quando o carro ainda está no estoque (seção 99)
+  const [saleSellerId, setSaleSellerId] = useState('')
+  const [saleDate, setSaleDate] = useState(todayISO())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -64,15 +89,22 @@ export default function FinancingFormDialog({ financing, soldCars, salesByCar, f
     return { totalInstallments, total: round2(downValue + totalInstallments), interest: round2(totalInstallments - financed) }
   }, [financed, countValue, installment, downValue])
 
+  const selectedCar = carOptions.find((c) => c.id === carId) || null
+  // Carro ainda no estoque: ao criar, a venda é registrada junto (seção 99)
+  const sellsNow = !editing && Boolean(selectedCar) && selectedCar.status !== 'vendido'
+  const activeSellers = sellers.filter((s) => s.active && !s.deletedAt)
+
   function selectCar(id) {
     setCarId(id)
-    const car = soldCars.find((c) => c.id === id)
+    const car = carOptions.find((c) => c.id === id)
     if (!car) return
-    setVehicleLabel(carLabel(car))
-    setVehiclePlate(car.plate ? car.plate.toUpperCase() : '')
-    const salePrice = salesByCar[car.id]?.salePrice ?? car.price
-    if (salePrice) setVehiclePrice(formatMoneyInput(salePrice))
-    if (car.customerId) setCustomerId(car.customerId)
+    const next = financingDraftFromCar(car, salesByCar[car.id])
+    setVehicleLabel(next.vehicleLabel)
+    setVehiclePlate(next.vehiclePlate)
+    if (next.vehiclePrice) setVehiclePrice(formatMoneyInput(next.vehiclePrice))
+    if (next.customerId) setCustomerId(next.customerId)
+    if (next.downPayment != null) setDownPayment(formatMoneyInput(next.downPayment || ''))
+    if (next.installmentsCount) setCount(String(next.installmentsCount))
   }
 
   async function handleSubmit(e) {
@@ -92,6 +124,10 @@ export default function FinancingFormDialog({ financing, soldCars, salesByCar, f
     const lateInterestValue = parsePercentBR(lateInterest) ?? 0
     if (lateFeeValue < 0 || lateFeeValue > 100 || lateInterestValue < 0 || lateInterestValue > 100) {
       return setError('Multa e juros por atraso devem ficar entre 0 e 100%.')
+    }
+    if (sellsNow) {
+      if (!priceValue || Math.round(priceValue) <= 0) return setError('Informe o valor do veículo (é o valor da venda).')
+      if (!saleDate) return setError('Informe a data da venda (dd/mm/aaaa).')
     }
     setSaving(true)
     setError('')
@@ -114,7 +150,17 @@ export default function FinancingFormDialog({ financing, soldCars, salesByCar, f
       status,
     }
     try {
-      onSaved(editing ? await editFinancing(financing.id, data) : await createFinancing(data))
+      if (editing) onSaved(await editFinancing(financing.id, data), { soldCar: false })
+      else if (sellsNow) {
+        const sale = {
+          carId,
+          sellerId: saleSellerId || null,
+          saleDate,
+          salePrice: priceValue,
+          payment: storeFinancingSalePayment({ downPayment: downValue, financedAmount: financed, installments: countValue }),
+        }
+        onSaved(await sellCarWithFinancing(sale, data), { soldCar: true })
+      } else onSaved(await createFinancing(data), { soldCar: false })
     } catch (err) {
       setError(`Não foi possível ${editing ? 'salvar' : 'criar o financiamento'}: ${err.message}`)
       setSaving(false)
@@ -148,15 +194,28 @@ export default function FinancingFormDialog({ financing, soldCars, salesByCar, f
 
         <div className="admin-form-grid">
           <label>
-            Carro vendido (opcional)
+            {editing ? 'Carro vendido (opcional)' : 'Carro (opcional)'}
             <select value={carId} onChange={(e) => selectCar(e.target.value)}>
               <option value="">— Escolher —</option>
-              {soldCars.map((car) => (
-                <option key={car.id} value={car.id}>
-                  {car.brand} {car.model}{car.plate ? ` · ${car.plate.toUpperCase()}` : ''}
-                  {financedCarIds.has(car.id) && car.id !== financing?.carId ? ' (já tem financiamento)' : ''}
-                </option>
-              ))}
+              {!editing && stockCars.length > 0 && (
+                <optgroup label="No estoque (a venda é registrada junto)">
+                  {stockCars.map((car) => (
+                    <option key={car.id} value={car.id}>
+                      {car.brand} {car.model}{car.plate ? ` · ${car.plate.toUpperCase()}` : ''}
+                      {car.status !== 'disponivel' ? ` (${carStatusLabel(car.status).toLowerCase()})` : ''}
+                      {financedCarIds.has(car.id) ? ' (já tem financiamento)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="Vendidos">
+                {soldCars.map((car) => (
+                  <option key={car.id} value={car.id}>
+                    {car.brand} {car.model}{car.plate ? ` · ${car.plate.toUpperCase()}` : ''}
+                    {financedCarIds.has(car.id) && car.id !== financing?.carId ? ' (já tem financiamento)' : ''}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </label>
           <label>
@@ -171,6 +230,32 @@ export default function FinancingFormDialog({ financing, soldCars, salesByCar, f
 
         {carId && carId !== financing?.carId && financedCarIds.has(carId) && (
           <p className="admin-error">Este carro já tem um financiamento ativo. Confira em Financeiro dos clientes antes de criar outro.</p>
+        )}
+
+        {sellsNow && (
+          <div className="financing-sale-box">
+            <strong>Este carro ainda está no estoque</strong>
+            <p>
+              Ao criar o financiamento, a venda também é registrada (entrada + financiamento da loja) e o carro passa para Vendido
+              {selectedCar.status === 'reservado' ? ', com a reserva dele virando venda' : ''}. Checklist, troca e transferência você completa
+              depois em Vendas.
+            </p>
+            <div className="admin-form-grid">
+              <label>
+                Vendedor
+                <select value={saleSellerId} onChange={(e) => setSaleSellerId(e.target.value)} disabled={saving}>
+                  <option value="">Sem vendedor (venda direta da loja)</option>
+                  {activeSellers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}{s.role === 'manager' ? ' (gerente)' : ''}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Data da venda
+                <DateInputBR value={saleDate} onChange={setSaleDate} required />
+              </label>
+            </div>
+          </div>
         )}
 
         <CustomerPicker
@@ -291,7 +376,7 @@ export default function FinancingFormDialog({ financing, soldCars, salesByCar, f
             Cancelar
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? (editing ? 'Salvando…' : 'Criando…') : editing ? 'Salvar alterações' : 'Criar financiamento'}
+            {saving ? (editing ? 'Salvando…' : 'Criando…') : editing ? 'Salvar alterações' : sellsNow ? 'Registrar a venda e criar o financiamento' : 'Criar financiamento'}
           </button>
         </div>
       </form>

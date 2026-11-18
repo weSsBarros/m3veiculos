@@ -1,4 +1,4 @@
-import { CATEGORIES, BRANDS, TRANSMISSIONS } from '../utils/carFormat.js'
+import { CAR_CATEGORIES, BRANDS, TRANSMISSIONS } from '../utils/carFormat.js'
 import { MoneyInput, KmInput } from '../components/NumberInputs.jsx'
 
 // Campos do "carro que ele procura": marca, modelo, tipo, ano mínimo, preço e km
@@ -25,7 +25,7 @@ export default function InterestSearchFields({ form, onChange, idPrefix = 'crm' 
         Categoria
         <select value={form.category} onChange={(e) => onChange('category', e.target.value)}>
           <option value="">Qualquer</option>
-          {CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
+          {CAR_CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
         </select>
       </label>
       <label>

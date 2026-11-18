@@ -22,7 +22,8 @@ export const TAG_GROUPS = [
   { label: 'Loja', tags: CONTRACT_TEMPLATE_TAGS.filter((t) => t.tag.startsWith('loja_')) },
   { label: 'Cliente', tags: CONTRACT_TEMPLATE_TAGS.filter((t) => t.tag.startsWith('cliente_')) },
   { label: 'Carro', tags: CONTRACT_TEMPLATE_TAGS.filter((t) => t.tag.startsWith('carro_')) },
-  { label: 'Venda', tags: CONTRACT_TEMPLATE_TAGS.filter((t) => !/^(loja|cliente|carro)_/.test(t.tag) && !ENTRY_TAG.test(t.tag)) },
+  { label: 'Venda', tags: CONTRACT_TEMPLATE_TAGS.filter((t) => !/^(loja|cliente|carro|financiamento)_/.test(t.tag) && !ENTRY_TAG.test(t.tag)) },
+  { label: 'Financiamento da loja', tags: CONTRACT_TEMPLATE_TAGS.filter((t) => t.tag.startsWith('financiamento_')) },
   { label: 'Entrada', tags: CONTRACT_TEMPLATE_TAGS.filter((t) => ENTRY_TAG.test(t.tag)) },
 ]
 

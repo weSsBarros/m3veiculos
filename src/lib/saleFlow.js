@@ -1,17 +1,21 @@
 import { registerTradeIn, updateCarStatus, updateCarCustomer } from './carsApi.js'
 import { saveSaleForCar } from './salesApi.js'
 import { closeReservation } from './reservationsApi.js'
+import { createFinancing } from './financingApi.js'
 
 // Registra (ou edita) a venda de um carro a partir da janela de venda:
 // 1. carro recebido na troca entra no estoque (a venda guarda qual foi);
 // 2. grava a venda — antes do status, para o carro não ficar "vendido" sem
 //    venda se ela for recusada (ex.: vendedor registrando no nome de outro);
 // 3. marca o carro como vendido (ou só troca o comprador);
-// 4. reserva ativa daquele carro vira venda.
+// 4. reserva ativa daquele carro vira venda;
+// 5. com o financiamento da loja (data.storeFinancing, 17/11/2026), gera as parcelas
+//    no Financeiro dos clientes. Se só isso falhar, a venda continua salva e o erro
+//    volta em financingError (a venda aparece lá em "ainda sem parcelas").
 // insertOnly: o vendedor só registra venda nova.
-// Devolve { sale, car, tradeInCarId }.
+// Devolve { sale, car, tradeInCarId, financing, financingError }.
 export async function registerSaleFromDialog(car, data, { reservation = null, insertOnly = false } = {}) {
-  const { sellerId, customerId, salePrice, discount, saleDate, checklist, payment, tradeIn, bankIncome } = data
+  const { sellerId, customerId, salePrice, discount, saleDate, checklist, payment, tradeIn, bankIncome, storeFinancing } = data
   let tradeInCarId = null
   if (tradeIn) tradeInCarId = await registerTradeIn(tradeIn)
 
@@ -41,5 +45,15 @@ export async function registerSaleFromDialog(car, data, { reservation = null, in
     soldCar = await updateCarCustomer(car.id, customerId)
   }
   if (reservation) await closeReservation(reservation.id, 'convertida').catch(() => {})
-  return { sale, car: soldCar, tradeInCarId }
+
+  let financing = null
+  let financingError = ''
+  if (storeFinancing) {
+    try {
+      financing = await createFinancing({ ...storeFinancing, carId: car.id, customerId: storeFinancing.customerId || customerId })
+    } catch (err) {
+      financingError = err.message || String(err)
+    }
+  }
+  return { sale, car: soldCar, tradeInCarId, financing, financingError }
 }

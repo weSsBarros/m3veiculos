@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { X, FolderOpen, Pencil, Trash2, Receipt, Undo2, MessageCircle, BadgeCheck, CalendarClock, BellRing } from 'lucide-react'
+import { X, FolderOpen, Pencil, Trash2, Receipt, Undo2, MessageCircle, BadgeCheck, CalendarClock, BellRing, FileSignature } from 'lucide-react'
 import { payInstallment, undoInstallmentPayment, updateInstallment, deleteFinancing } from '../lib/financingApi.js'
 import { formatCurrencyCents, formatDateBR, todayISO } from '../utils/carFormat.js'
 import {
@@ -377,6 +377,11 @@ export default function FinancingDetailsDialog({ financing, customer, companyNam
                 <FolderOpen size={15} /> Ficha do cliente
               </Link>
             )}
+            {/* Contrato com as condições e a tabela das parcelas (17/11/2026): abre a tela
+                Contratos com o carro, o cliente e este financiamento */}
+            <Link to={`/admin/contratos?financiamento=${financing.id}`} className="btn btn-outline">
+              <FileSignature size={15} /> Gerar contrato
+            </Link>
             <button type="button" className="btn btn-outline" onClick={onEdit}>
               <Pencil size={15} /> Editar
             </button>
